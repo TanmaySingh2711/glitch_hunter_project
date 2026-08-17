@@ -1,0 +1,9 @@
+# Using latest versions because old gym and nes-py 8.2.1 fail to build without C++ compiler on Python 3.14
+gymnasium
+gym-super-mario-bros
+nes-py
+stable-baselines3
+flask
+flask-socketio
+opencv-python
+eventlet

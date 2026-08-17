@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Glitch Hunter</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Left: Control Panel -->
+        <aside class="panel control-panel">
+            <h1>The Glitch Hunter</h1>
+            <div class="control-group">
+                <label for="env-select">Select Environment</label>
+                <select id="env-select">
+                    <option value="mario">Super Mario Bros</option>
+                </select>
+            </div>
+            <div class="button-group">
+                <button id="start-btn" class="btn-primary">Start Autonomous Test</button>
+                <button id="stop-btn" class="btn-secondary" disabled>Stop Testing</button>
+                <button id="reset-btn" class="btn-secondary" disabled>Reset Dashboard</button>
+            </div>
+        </aside>
+
+        <!-- Center: Video Feed -->
+        <main class="panel video-panel">
+            <div class="monitor">
+                <img id="video-feed" alt="Live Feed" />
+            </div>
+        </main>
+
+        <!-- Right: Log Terminal -->
+        <aside class="panel log-panel">
+            <div id="log-terminal"></div>
+        </aside>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
