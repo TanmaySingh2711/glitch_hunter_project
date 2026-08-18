@@ -14,11 +14,12 @@
             <div class="control-group">
                 <label for="env-select">Select Environment</label>
                 <select id="env-select">
-                    <option value="mario">Super Mario Bros</option>
+                    <option value="mario">Super Mario Bros (NES Emulator)</option>
+                    <option value="mario_python">Super Mario Bros (Python Clone)</option>
                 </select>
             </div>
             <div class="button-group">
-                <button id="start-btn" class="btn-primary">Start Autonomous Test</button>
+                <button id="start-btn" class="btn-primary">START TESTING</button>
                 <button id="stop-btn" class="btn-secondary" disabled>Stop Testing</button>
                 <button id="reset-btn" class="btn-secondary" disabled>Reset Dashboard</button>
             </div>
@@ -31,9 +32,20 @@
             </div>
         </main>
 
+        <!-- Middle-Right: Bug Tracker -->
+        <aside class="panel bug-panel">
+            <h3 style="color: #ff4444; margin-top: 0; margin-bottom: 10px; text-align: center;">BUG TRACKER</h3>
+            <div id="bug-terminal">
+                <ul id="bug-list" style="list-style: none; padding-left: 0; margin: 0;">
+                    <li id="bug-placeholder" style="color: #666; font-style: italic;">start testing...</li>
+                </ul>
+            </div>
+        </aside>
+
         <!-- Right: Log Terminal -->
         <aside class="panel log-panel">
-            <div id="log-terminal"></div>
+            <h3 style="color: var(--accent-secondary); margin-top: 0; margin-bottom: 10px; text-align: center;">LOG TERMINAL</h3>
+            <div id="log-terminal"><p id="log-placeholder" style="color: #666; font-style: italic;">start testing...</p></div>
         </aside>
     </div>
 
