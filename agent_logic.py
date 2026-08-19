@@ -18,6 +18,10 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.last_x_pos = None
         self.x_history = deque(maxlen=30)
         self.total_steps = 0
+        
+        self.last_score = 0
+        self.last_coins = 0
+        self.last_status = 'small'
 
     def reset(self, **kwargs):
         # Clear state variables back to init state
@@ -25,6 +29,10 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.stuck_counter = 0
         self.last_x_pos = None
         self.x_history.clear()
+        
+        self.last_score = 0
+        self.last_coins = 0
+        self.last_status = 'small'
         return self.env.reset(**kwargs)
 
     def step(self, action):
@@ -60,10 +68,33 @@ class GlitchHunterWrapper(gym.Wrapper):
         if self.stuck_counter > 30:
             reward -= 1.0
 
+        # --- CURIOSITY AND POWERUP REWARDS ---
+        score = info.get('score', 0)
+        coins = info.get('coins', 0)
+        status = info.get('status', 'small')
+
+        if score > self.last_score:
+            reward += (score - self.last_score) * 0.05
+        if coins > self.last_coins:
+            reward += (coins - self.last_coins) * 2.0
+            
+        # Powerup bonus
+        if status != self.last_status:
+            if status in ['tall', 'fireball'] and self.last_status == 'small':
+                reward += 20.0
+            elif status == 'fireball' and self.last_status == 'tall':
+                reward += 10.0
+            elif status == 'small' and self.last_status in ['tall', 'fireball']:
+                reward -= 20.0  # Penalty for taking damage
+                
+        self.last_score = score
+        self.last_coins = coins
+        self.last_status = status
+        # -------------------------------------
 
         self.last_x_pos = x_pos
         
-        return obs, float(reward), done, info
+        return obs, float(reward), done, False, info
 
 class SpeedScalerWrapper(gym.Wrapper):
     """
@@ -109,7 +140,7 @@ class SpeedScalerWrapper(gym.Wrapper):
         reward_sum = 0.0
         
         if updates_to_run == 0:
-            return self.last_obs, 0.0, self.last_done, self.last_info
+            return self.last_obs, 0.0, self.last_done, False, self.last_info
 
         for _ in range(updates_to_run):
             if self.last_done:
@@ -126,7 +157,9 @@ class SpeedScalerWrapper(gym.Wrapper):
             self.last_info = info
             self.last_done = done
 
-        return self.last_obs, float(reward_sum), self.last_done, self.last_info
+        return self.last_obs, float(reward_sum), self.last_done, False, self.last_info
+
+from gymnasium.wrappers import FrameStackObservation, GrayscaleObservation, ResizeObservation
 
 _global_env = None
 _global_model = None
@@ -141,6 +174,9 @@ def run_mario_agent(env_type="mario"):
         if env_type == "mario_python":
             _global_env = CustomMarioEnv()
             _global_env = GlitchHunterWrapper(_global_env)
+            _global_env = GrayscaleObservation(_global_env, keep_dim=False)
+            _global_env = ResizeObservation(_global_env, (84, 84))
+            _global_env = FrameStackObservation(_global_env, 4)
         else:
             # Setup environment on first run (takes ~4.5s)
             try:
@@ -154,6 +190,9 @@ def run_mario_agent(env_type="mario"):
             _global_env = JoypadSpace(_global_env, SIMPLE_MOVEMENT)
             _global_env = GlitchHunterWrapper(_global_env)
             _global_env = SpeedScalerWrapper(_global_env, 0.50)
+            _global_env = GrayscaleObservation(_global_env, keep_dim=False)
+            _global_env = ResizeObservation(_global_env, (84, 84))
+            _global_env = FrameStackObservation(_global_env, 4)
         
         # Initialize model
         _global_model = PPO('CnnPolicy', _global_env, verbose=0)
