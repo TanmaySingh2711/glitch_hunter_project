@@ -23,6 +23,10 @@
                 <button id="stop-btn" class="btn-secondary" disabled>Stop Testing</button>
                 <button id="reset-btn" class="btn-secondary" disabled>Reset Dashboard</button>
             </div>
+            
+            <div style="margin-top: auto; display: flex; justify-content: center; padding-top: 15px;">
+                <button id="info-btn" class="info-button" aria-label="Controls Info">i</button>
+            </div>
         </aside>
 
         <!-- Center: Video Feed -->
@@ -49,6 +53,22 @@
         </aside>
     </div>
 
+    <!-- Info Modal -->
+    <div id="info-modal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h2 style="color: var(--accent-primary); margin-top: 0; margin-bottom: 20px;">Agent Actions (SIMPLE_MOVEMENT)</h2>
+            <ul class="action-list">
+                <li><span class="action-num">0:</span> <span class="action-desc">Stand Still</span></li>
+                <li><span class="action-num">1:</span> <span class="action-desc">Walk Right</span></li>
+                <li><span class="action-num">2:</span> <span class="action-desc">Walk Right + Jump</span></li>
+                <li><span class="action-num">3:</span> <span class="action-desc">Run Right</span></li>
+                <li><span class="action-num">4:</span> <span class="action-desc">Run Right + Jump</span></li>
+                <li><span class="action-num">5:</span> <span class="action-desc">Jump</span></li>
+                <li><span class="action-num">6:</span> <span class="action-desc">Walk Left</span></li>
+            </ul>
+        </div>
+    </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>

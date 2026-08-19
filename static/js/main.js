@@ -102,4 +102,26 @@ document.addEventListener('DOMContentLoaded', () => {
         // Auto-scroll
         logTerminal.scrollTop = logTerminal.scrollHeight;
     });
+
+    // Info Modal Logic
+    const infoBtn = document.getElementById('info-btn');
+    const infoModal = document.getElementById('info-modal');
+    const closeModal = document.querySelector('.close-modal');
+
+    if (infoBtn && infoModal && closeModal) {
+        infoBtn.addEventListener('click', () => {
+            infoModal.classList.remove('hidden');
+        });
+
+        closeModal.addEventListener('click', () => {
+            infoModal.classList.add('hidden');
+        });
+
+        // Close when clicking outside
+        infoModal.addEventListener('click', (e) => {
+            if (e.target === infoModal) {
+                infoModal.classList.add('hidden');
+            }
+        });
+    }
 });

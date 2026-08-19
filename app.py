@@ -52,6 +52,29 @@ def background_agent_task(epoch, env_type="mario"):
         if task_epoch == epoch:
             test_running = False
 
+def stop_all_music():
+    try:
+        import pygame as pg
+        if pg.mixer.get_init():
+            pg.mixer.music.stop()
+            pg.mixer.stop()
+    except Exception:
+        pass
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    global test_running, task_epoch
+    test_running = False
+    task_epoch += 1
+    stop_all_music()
+
+@socketio.on('connect')
+def handle_connect():
+    global agent_gen, test_running, task_epoch
+    test_running = False
+    task_epoch += 1
+    agent_gen = None
+
 @socketio.on('start_testing')
 def handle_start_testing(data=None):
     global test_running, task_epoch
@@ -65,6 +88,7 @@ def handle_stop_testing():
     global test_running, task_epoch
     test_running = False
     task_epoch += 1
+    stop_all_music()
 
 @socketio.on('reset_game')
 def handle_reset_game():
@@ -72,6 +96,7 @@ def handle_reset_game():
     test_running = False
     task_epoch += 1
     agent_gen = None  # Force a fresh generator on the next start
+    stop_all_music()
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)

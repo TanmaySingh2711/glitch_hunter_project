@@ -65,8 +65,6 @@ class GlitchHunterWrapper(gym.Wrapper):
         
         return obs, float(reward), done, info
 
-import time
-
 class SpeedScalerWrapper(gym.Wrapper):
     """
     Decouples the fixed 60Hz server loop from the physics update rate using delta time.
@@ -202,11 +200,22 @@ def run_mario_agent(env_type="mario"):
         else:
             b64_string = ""
             
+        ACTION_NAMES = {
+            0: "Stand Still",
+            1: "Walk Right",
+            2: "Walk Right + Jump",
+            3: "Run Right",
+            4: "Run Right + Jump",
+            5: "Jump",
+            6: "Walk Left"
+        }
+
         log_message = None
         if info.get('glitch_alert'):
             log_message = '🚨 BUG FOUND: ' + info['glitch_alert']
         else:
-            log_message = f"Step {step_count}: Action {action_val} | Reward: {float(reward):.2f}"
+            action_name = ACTION_NAMES.get(int(action_val), "Unknown")
+            log_message = f"Step {step_count}: Action: {action_name} ({action_val}) | Reward: {float(reward):.2f}"
             
         yield {
             'frame': b64_string,

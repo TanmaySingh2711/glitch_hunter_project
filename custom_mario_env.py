@@ -44,6 +44,7 @@ class CustomMarioEnv(gym.Env):
         finally:
             os.chdir(orig_cwd)
             sys.path.pop(0)
+            self.action_space = spaces.Discrete(7)
             
     def step(self, action):
         pg.event.pump()
