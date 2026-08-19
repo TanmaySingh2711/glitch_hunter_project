@@ -1,5 +1,6 @@
 import eventlet
 eventlet.monkey_patch()
+import traceback
 
 from flask import Flask, render_template
 from flask_socketio import SocketIO
@@ -48,6 +49,7 @@ def background_agent_task(epoch, env_type="mario"):
             last_t = time.time()
     except Exception as e:
         print(f"Error in background task: {e}")
+        traceback.print_exc()
     finally:
         if task_epoch == epoch:
             test_running = False
@@ -79,6 +81,7 @@ def handle_connect():
 def handle_start_testing(data=None):
     global test_running, task_epoch
     env_type = data.get('env', 'mario') if data else 'mario'
+    print(f">>> START_TESTING received! env_type={env_type}")
     test_running = True
     task_epoch += 1
     socketio.start_background_task(background_agent_task, task_epoch, env_type)

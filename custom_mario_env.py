@@ -27,18 +27,16 @@ class CustomMarioEnv(gym.Env):
         
         try:
             from data import setup, tools, constants as c
-            from data.states import main_menu, load_screen, level1
+            from data.states import level1
             
             self.tools_module = tools
             self.setup_module = setup
             self.c_module = c
             
             self.game = tools.Control(setup.ORIGINAL_CAPTION)
-            state_dict = {c.MAIN_MENU: main_menu.Menu(),
-                          c.LOAD_SCREEN: load_screen.LoadScreen(),
-                          c.TIME_OUT: load_screen.TimeOut(),
-                          c.GAME_OVER: load_screen.GameOver(),
-                          c.LEVEL1: level1.Level1()}
+            state_dict = {
+                          c.LEVEL1: level1.Level1()
+            }
             self.game.setup_states(state_dict, c.LEVEL1)  # Skip straight to level 1!
             self.fake_time = 0.0
         finally:
@@ -128,15 +126,11 @@ class CustomMarioEnv(gym.Env):
         orig_cwd = os.getcwd()
         os.chdir(os.path.join(orig_cwd, 'mario_clone'))
         try:
-            from data.states import main_menu, load_screen, level1
+            from data.states import level1
             
             # Completely destroy and recreate the game instance to guarantee no frozen state carries over
             self.game = self.tools_module.Control(self.setup_module.ORIGINAL_CAPTION)
             state_dict = {
-                self.c_module.MAIN_MENU: main_menu.Menu(),
-                self.c_module.LOAD_SCREEN: load_screen.LoadScreen(),
-                self.c_module.TIME_OUT: load_screen.TimeOut(),
-                self.c_module.GAME_OVER: load_screen.GameOver(),
                 self.c_module.LEVEL1: level1.Level1()
             }
             self.game.setup_states(state_dict, self.c_module.LEVEL1)
