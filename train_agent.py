@@ -1,7 +1,33 @@
 import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback, CallbackList
+import numpy as np
+
+class WatchdogCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super(WatchdogCallback, self).__init__(verbose)
+        self.step_counter = 0
+
+    def _on_step(self) -> bool:
+        self.step_counter += 1
+        
+        # Check pixels every 1000 steps (per env)
+        if self.step_counter % 1000 == 0:
+            obs = self.locals.get("new_obs")
+            if obs is not None:
+                mean_pixel = np.mean(obs)
+                if mean_pixel == 0.0:
+                    print("CRITICAL: AI IS BLIND (Mean pixel = 0.0). Stopping training to prevent wasted time.")
+                    return False  # Stops training
+        
+        # Check for first zip file (global 400,000 steps = 50,000 n_calls)
+        if self.n_calls == 50000:
+            print("WATCHDOG: Reached 400,000 global steps. First checkpoint zip should be generated.")
+            print("WATCHDOG: Pausing training for manual review as requested by user.")
+            return False
+            
+        return True
 
 def make_env(rank):
     """Returns a function that creates a single wrapped env instance."""
@@ -66,6 +92,7 @@ if __name__ == "__main__":
             max_grad_norm=0.5,
             verbose=1,
             device="cuda",
+            tensorboard_log="./logs/"
         )
 
     # Auto-save callback
@@ -75,12 +102,15 @@ if __name__ == "__main__":
         name_prefix=CHECKPOINT_NAME,
     )
 
+    # Combine callbacks
+    callback_list = CallbackList([checkpoint_callback, WatchdogCallback()])
+
     try:
         # Train
         print("Starting training loop... You can stop this anytime with Ctrl+C and resume later.")
         model.learn(
             total_timesteps=TOTAL_TIMESTEPS,
-            callback=checkpoint_callback,
+            callback=callback_list,
             reset_num_timesteps=False,    # Critical for resume — keeps the step counter
         )
 
