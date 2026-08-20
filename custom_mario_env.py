@@ -5,8 +5,6 @@ from gymnasium import spaces
 import numpy as np
 import cv2
 
-# Force Pygame to run headlessly without popping up a window on the server
-os.environ["SDL_VIDEODRIVER"] = "dummy"
 import pygame as pg
 
 class CustomMarioEnv(gym.Env):
@@ -98,7 +96,6 @@ class CustomMarioEnv(gym.Env):
             info['x_pos'] = mario.rect.x
             info['y_pos'] = mario.rect.y
             
-            # Universal Keys to match NES Emulator
             info['score'] = self.game.state.game_info.get('score', 0) if hasattr(self.game.state, 'game_info') else 0
             info['coins'] = self.game.state.game_info.get('coin total', 0) if hasattr(self.game.state, 'game_info') else 0
             

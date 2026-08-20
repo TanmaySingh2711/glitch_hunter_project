@@ -1,26 +1,22 @@
 # Glitch Hunter Project
 
-This project is a web-based visualizer for a Super Mario Bros reinforcement learning agent. It uses Flask and WebSockets to stream the agent's gameplay frames and live logs to a browser interface in real-time.
+A web-based visualizer for a Super Mario Bros reinforcement learning agent. Uses Flask and WebSockets to stream the agent's gameplay frames and live logs to a browser interface in real-time.
 
-## Current Progress (Objective 1)
-- Set up a Flask backend with `Flask-SocketIO` for real-time bidirectional communication.
-- Implemented a Super Mario Bros reinforcement learning agent using `gym_super_mario_bros` and `stable_baselines3` (PPO).
-- Developed a web interface that connects to the backend and displays live video frames and agent logs.
-- The agent logic runs in a background eventlet task to allow asynchronous frame streaming.
-
-*Note: Objectives 2 and 3 are pending and will be documented here once completed.*
+The agent plays a Python/Pygame clone of Super Mario Bros 1-1, trained with PPO (Proximal Policy Optimization) via Stable Baselines3.
 
 ## Project Structure
-- `app.py`: The main Flask application and WebSocket event handlers.
-- `agent_logic.py`: Contains the logic for initializing the Mario environment, running the PPO agent, and yielding frames/logs.
-- `requirements.txt`: Python dependencies.
-- `static/` & `templates/`: Frontend assets and HTML templates for the web interface.
+- `app.py`: Flask backend with WebSocket event handlers for real-time streaming.
+- `agent_logic.py`: RL agent wrapper (GlitchHunterWrapper) with curiosity rewards, stuck detection, and powerup bonuses.
+- `custom_mario_env.py`: Gymnasium-compatible wrapper around the Pygame Mario clone.
+- `train_agent.py`: Training script using 8 parallel environments with PPO (CnnPolicy).
+- `mario_clone/`: The full Python/Pygame Super Mario Bros 1-1 clone (graphics, sounds, game logic).
+- `static/` & `templates/`: Frontend dashboard (HTML/CSS/JS).
 
 ## How to Run
 
-1. **Activate Virtual Environment** (if you are using one):
+1. **Activate Virtual Environment**:
    ```bash
-   venv\Scripts\activate
+   venv_gpu\Scripts\activate
    ```
 
 2. **Install Dependencies**:
@@ -28,10 +24,15 @@ This project is a web-based visualizer for a Super Mario Bros reinforcement lear
    pip install -r requirements.txt
    ```
 
-3. **Run the Application**:
+3. **Train the Agent** (optional — takes several hours):
+   ```bash
+   python train_agent.py
+   ```
+
+4. **Run the Dashboard**:
    ```bash
    python app.py
    ```
 
-4. **View in Browser**:
-   Open `http://127.0.0.1:5000` or `http://localhost:5000` in your web browser. Click "Start Testing" to begin streaming the agent.
+5. **View in Browser**:
+   Open `http://localhost:5000` and click "Start Testing" to watch the agent play.

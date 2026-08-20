@@ -12,8 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     startBtn.addEventListener('click', () => {
         isTesting = true;
-        const env = document.getElementById('env-select').value;
-        socket.emit('start_testing', { env: env });
+        socket.emit('start_testing');
         startBtn.disabled = true;
         stopBtn.disabled = false;
         resetBtn.disabled = false;

@@ -7,8 +7,6 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 def make_env(rank):
     """Returns a function that creates a single wrapped env instance."""
     def _init():
-        # Set headless Pygame before any import
-        os.environ["SDL_VIDEODRIVER"] = "dummy"
         from custom_mario_env import CustomMarioEnv
         from agent_logic import GlitchHunterWrapper
         from gymnasium.wrappers import (

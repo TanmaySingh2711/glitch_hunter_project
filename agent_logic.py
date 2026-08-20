@@ -1,4 +1,4 @@
-import time
+
 import cv2
 import gymnasium as gym
 
@@ -94,110 +94,30 @@ class GlitchHunterWrapper(gym.Wrapper):
         
         return obs, float(reward), done, False, info
 
-class SpeedScalerWrapper(gym.Wrapper):
-    """
-    Decouples the fixed 60Hz server loop from the physics update rate using delta time.
-    """
-    def __init__(self, env, target_speed_multiplier=1.0, base_fps=60.0):
-        super().__init__(env)
-        self.target_fps = base_fps * target_speed_multiplier
-        self.frame_accumulator = 0.0
-        self.last_time = time.time()
-        self.last_obs = None
-        self.last_reward = 0.0
-        self.last_done = False
-        self.last_info = {}
-
-    def reset(self, **kwargs):
-        self.frame_accumulator = 0.0
-        self.last_time = time.time()
-        obs = self.env.reset(**kwargs)
-        if isinstance(obs, tuple):
-            self.last_obs = obs[0]
-            self.last_info = obs[1]
-        else:
-            self.last_obs = obs
-            self.last_info = {}
-        self.last_reward = 0.0
-        self.last_done = False
-        return obs
-
-    def step(self, action):
-        now = time.time()
-        elapsed = now - self.last_time
-        self.last_time = now
-        
-        # Prevent spiral of death if inference hangs
-        if elapsed > 0.1:
-            elapsed = 0.1
-            
-        self.frame_accumulator += elapsed * self.target_fps
-        updates_to_run = int(self.frame_accumulator)
-        self.frame_accumulator -= updates_to_run
-
-        reward_sum = 0.0
-        
-        if updates_to_run == 0:
-            return self.last_obs, 0.0, self.last_done, False, self.last_info
-
-        for _ in range(updates_to_run):
-            if self.last_done:
-                break
-            step_result = self.env.step(action)
-            if len(step_result) == 4:
-                obs, reward, done, info = step_result
-            else:
-                obs, reward, terminated, truncated, info = step_result
-                done = terminated or truncated
-            
-            reward_sum += reward
-            self.last_obs = obs
-            self.last_info = info
-            self.last_done = done
-
-        return self.last_obs, float(reward_sum), self.last_done, False, self.last_info
-
-from gymnasium.wrappers import FrameStackObservation, GrayscaleObservation, ResizeObservation
+from gymnasium.wrappers import FrameStackObservation, GrayscaleObservation, ResizeObservation, MaxAndSkipObservation
 
 _global_env = None
 _global_model = None
-_current_env_type = None
 
-def run_mario_agent(env_type="mario"):
-    global _global_env, _global_model, _current_env_type
+def run_mario_agent():
+    global _global_env, _global_model
     
-    if _global_env is None or _current_env_type != env_type:
-        _current_env_type = env_type
+    if _global_env is None:
         
-        if env_type == "mario_python":
-            _global_env = CustomMarioEnv()
-            _global_env = GlitchHunterWrapper(_global_env)
-            _global_env = GrayscaleObservation(_global_env, keep_dim=False)
-            _global_env = ResizeObservation(_global_env, (84, 84))
-            _global_env = FrameStackObservation(_global_env, 4)
-        else:
-            import gym_super_mario_bros
-            from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
-            from nes_py.wrappers import JoypadSpace
-            
-            # Setup environment on first run (takes ~4.5s)
-            try:
-                _global_env = gym_super_mario_bros.make('SuperMarioBros-v0', render_mode="rgb_array", apply_api_compatibility=True)
-            except Exception:
-                try:
-                    _global_env = gym_super_mario_bros.make('SuperMarioBros-v0', render_mode="rgb_array")
-                except Exception:
-                    _global_env = gym_super_mario_bros.make('SuperMarioBros-v0')
-                
-            _global_env = JoypadSpace(_global_env, SIMPLE_MOVEMENT)
-            _global_env = GlitchHunterWrapper(_global_env)
-            _global_env = SpeedScalerWrapper(_global_env, 0.50)
-            _global_env = GrayscaleObservation(_global_env, keep_dim=False)
-            _global_env = ResizeObservation(_global_env, (84, 84))
-            _global_env = FrameStackObservation(_global_env, 4)
+        _global_env = CustomMarioEnv()
+        _global_env = GlitchHunterWrapper(_global_env)
+        _global_env = MaxAndSkipObservation(_global_env, skip=4)
+        _global_env = GrayscaleObservation(_global_env, keep_dim=False)
+        _global_env = ResizeObservation(_global_env, (84, 84))
+        _global_env = FrameStackObservation(_global_env, 4)
         
         # Initialize model
-        _global_model = PPO('CnnPolicy', _global_env, verbose=0)
+        import os
+        model_path = "mario_brain_checkpoint.zip"
+        if os.path.exists(model_path):
+            _global_model = PPO.load(model_path, env=_global_env, device="auto")
+        else:
+            _global_model = PPO('CnnPolicy', _global_env, verbose=0)
         
     env = _global_env
     model = _global_model

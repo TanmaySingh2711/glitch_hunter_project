@@ -14,18 +14,17 @@ agent_gen = None
 
 task_epoch = 0
 
-current_env_type = None
+
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-def background_agent_task(epoch, env_type="mario"):
-    global test_running, agent_gen, current_env_type
+def background_agent_task(epoch):
+    global test_running, agent_gen
     
-    if agent_gen is None or current_env_type != env_type:
-        agent_gen = run_mario_agent(env_type)
-        current_env_type = env_type
+    if agent_gen is None:
+        agent_gen = run_mario_agent()
         
     import time
     target_frame_time = 1.0 / 60.0
@@ -33,7 +32,7 @@ def background_agent_task(epoch, env_type="mario"):
     try:
         last_t = time.time()
         for item in agent_gen:
-            if not test_running or current_env_type != env_type or task_epoch != epoch:
+            if not test_running or task_epoch != epoch:
                 break
             socketio.emit('video_frame', {'frame': item['frame']})
             if item['log']:
@@ -80,11 +79,10 @@ def handle_connect():
 @socketio.on('start_testing')
 def handle_start_testing(data=None):
     global test_running, task_epoch
-    env_type = data.get('env', 'mario') if data else 'mario'
-    print(f">>> START_TESTING received! env_type={env_type}")
+    print(f">>> START_TESTING received!")
     test_running = True
     task_epoch += 1
-    socketio.start_background_task(background_agent_task, task_epoch, env_type)
+    socketio.start_background_task(background_agent_task, task_epoch)
 
 @socketio.on('stop_testing')
 def handle_stop_testing():
