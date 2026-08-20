@@ -21,9 +21,12 @@ class CustomMarioEnv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=255, shape=(240, 256, 3), dtype=np.uint8)
         
         # Load the Pygame clone safely
-        orig_cwd = os.getcwd()
-        os.chdir(os.path.join(orig_cwd, 'mario_clone'))
-        sys.path.insert(0, os.getcwd())
+        # Load the Pygame clone safely using absolute paths so SubprocVecEnv workers don't crash
+        self.orig_cwd = os.getcwd()
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        mario_clone_dir = os.path.join(project_root, 'mario_clone')
+        os.chdir(mario_clone_dir)
+        sys.path.insert(0, mario_clone_dir)
         
         try:
             from data import setup, tools, constants as c
@@ -40,7 +43,7 @@ class CustomMarioEnv(gym.Env):
             self.game.setup_states(state_dict, c.LEVEL1)  # Skip straight to level 1!
             self.fake_time = 0.0
         finally:
-            os.chdir(orig_cwd)
+            os.chdir(self.orig_cwd)
             sys.path.pop(0)
             self.action_space = spaces.Discrete(7)
             
@@ -75,7 +78,9 @@ class CustomMarioEnv(gym.Env):
         
         # Update state with fake keys
         orig_cwd = os.getcwd()
-        os.chdir(os.path.join(orig_cwd, 'mario_clone'))
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        mario_clone_dir = os.path.join(project_root, 'mario_clone')
+        os.chdir(mario_clone_dir)
         try:
             self.game.state.update(self.game.screen, self.game.keys, self.game.current_time)
         finally:
@@ -124,7 +129,9 @@ class CustomMarioEnv(gym.Env):
         super().reset(seed=seed)
         self.fake_time = 0.0
         orig_cwd = os.getcwd()
-        os.chdir(os.path.join(orig_cwd, 'mario_clone'))
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        mario_clone_dir = os.path.join(project_root, 'mario_clone')
+        os.chdir(mario_clone_dir)
         try:
             from data.states import level1
             

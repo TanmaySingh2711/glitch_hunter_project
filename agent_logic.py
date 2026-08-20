@@ -1,9 +1,7 @@
 import time
 import cv2
 import gymnasium as gym
-import gym_super_mario_bros
-from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
-from nes_py.wrappers import JoypadSpace
+
 from stable_baselines3 import PPO
 import numpy as np
 from collections import deque
@@ -178,6 +176,10 @@ def run_mario_agent(env_type="mario"):
             _global_env = ResizeObservation(_global_env, (84, 84))
             _global_env = FrameStackObservation(_global_env, 4)
         else:
+            import gym_super_mario_bros
+            from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+            from nes_py.wrappers import JoypadSpace
+            
             # Setup environment on first run (takes ~4.5s)
             try:
                 _global_env = gym_super_mario_bros.make('SuperMarioBros-v0', render_mode="rgb_array", apply_api_compatibility=True)
