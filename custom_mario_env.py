@@ -7,6 +7,14 @@ import cv2
 
 import pygame as pg
 
+class FakeKeys:
+    def __init__(self):
+        self.keys = {}
+    def __getitem__(self, key):
+        return self.keys.get(key, False)
+    def update(self, new_keys):
+        self.keys = new_keys
+
 class CustomMarioEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 60}
     
@@ -14,17 +22,19 @@ class CustomMarioEnv(gym.Env):
         super().__init__()
         self.render_mode = render_mode
         
-        # Actions: 0: NOOP, 1: Right, 2: Right+Jump, 3: Right+Sprint, 4: Right+Sprint+Jump, 5: Jump, 6: Left
-        self.action_space = spaces.Discrete(7)
+        # Actions: 0: NOOP, 1: Right, 2: Right+Jump, 3: Right+Sprint, 4: Right+Sprint+Jump, 5: Jump, 6: Left, 7: Crouch
+        self.action_space = spaces.Discrete(8)
         self.observation_space = spaces.Box(low=0, high=255, shape=(240, 256, 3), dtype=np.uint8)
         
-        # Load the Pygame clone safely
+        self.fake_keys = FakeKeys()
+        
         # Load the Pygame clone safely using absolute paths so SubprocVecEnv workers don't crash
-        self.orig_cwd = os.getcwd()
-        project_root = os.path.dirname(os.path.abspath(__file__))
-        mario_clone_dir = os.path.join(project_root, 'mario_clone')
-        os.chdir(mario_clone_dir)
-        sys.path.insert(0, mario_clone_dir)
+        self.project_root = os.path.dirname(os.path.abspath(__file__))
+        self.mario_clone_dir = os.path.join(self.project_root, 'mario_clone')
+        
+        orig_cwd = os.getcwd()
+        os.chdir(self.mario_clone_dir)
+        sys.path.insert(0, self.mario_clone_dir)
         
         try:
             from data import setup, tools, constants as c
@@ -41,9 +51,9 @@ class CustomMarioEnv(gym.Env):
             self.game.setup_states(state_dict, c.LEVEL1)  # Skip straight to level 1!
             self.fake_time = 0.0
         finally:
-            os.chdir(self.orig_cwd)
-            sys.path.pop(0)
-            self.action_space = spaces.Discrete(7)
+            os.chdir(orig_cwd)
+            if self.mario_clone_dir in sys.path:
+                sys.path.remove(self.mario_clone_dir)
             
     def step(self, action):
         pg.event.pump()
@@ -52,6 +62,7 @@ class CustomMarioEnv(gym.Env):
             pg.K_LEFT: False,
             pg.K_a: False, # Jump
             pg.K_s: False, # Sprint
+            pg.K_DOWN: False # Crouch
         }
         
         if action in [1, 2, 3, 4]:
@@ -62,13 +73,11 @@ class CustomMarioEnv(gym.Env):
             keys[pg.K_s] = True
         if action == 6:
             keys[pg.K_LEFT] = True
+        if action == 7:
+            keys[pg.K_DOWN] = True
             
-        # Overwrite pygame's get_pressed logic
-        class FakeKeys:
-            def __getitem__(self, key):
-                return keys.get(key, False)
-        
-        self.game.keys = FakeKeys()
+        self.fake_keys.update(keys)
+        self.game.keys = self.fake_keys
         
         # Advance game time by exactly 1 frame (60 FPS = 16.666 ms)
         self.fake_time += (1000.0 / 60.0)
@@ -76,9 +85,7 @@ class CustomMarioEnv(gym.Env):
         
         # Update state with fake keys
         orig_cwd = os.getcwd()
-        project_root = os.path.dirname(os.path.abspath(__file__))
-        mario_clone_dir = os.path.join(project_root, 'mario_clone')
-        os.chdir(mario_clone_dir)
+        os.chdir(self.mario_clone_dir)
         try:
             self.game.state.update(self.game.screen, self.game.keys, self.game.current_time)
         finally:
@@ -126,9 +133,7 @@ class CustomMarioEnv(gym.Env):
         super().reset(seed=seed)
         self.fake_time = 0.0
         orig_cwd = os.getcwd()
-        project_root = os.path.dirname(os.path.abspath(__file__))
-        mario_clone_dir = os.path.join(project_root, 'mario_clone')
-        os.chdir(mario_clone_dir)
+        os.chdir(self.mario_clone_dir)
         try:
             from data.states import level1
             

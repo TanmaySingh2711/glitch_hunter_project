@@ -1,5 +1,4 @@
 import os
-import sys
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -25,25 +24,25 @@ def make_env(rank):
 CHECKPOINT_DIR = "./checkpoints/"
 CHECKPOINT_NAME = "mario_brain_checkpoint"
 FINAL_MODEL_PATH = "./mario_brain_checkpoint"
-TOTAL_TIMESTEPS = 2_500_000          # ~7.5 hours with 8 envs + frame skip
+TOTAL_TIMESTEPS = 2_500_000          # 2.5 million steps (Time depends on clone FPS)
 CHECKPOINT_FREQ = 50_000              # Save every 50k steps (~every 9 min based on Python clone 93 FPS)
 NUM_ENVS = 8                          # Parallel environments
 
-# Look for the latest checkpoint
-latest_checkpoint = None
-if os.path.exists(f"{CHECKPOINT_NAME}.zip"):
-    latest_checkpoint = f"{CHECKPOINT_NAME}.zip"
-elif os.path.exists(CHECKPOINT_DIR):
-    checkpoints = [f for f in os.listdir(CHECKPOINT_DIR) if f.endswith(".zip")]
-    if checkpoints:
-        # Sort by step number embedded in filename if possible
-        try:
-            checkpoints.sort(key=lambda x: int(x.split("_")[-2]))
-            latest_checkpoint = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
-        except (ValueError, IndexError):
-            latest_checkpoint = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
-
 if __name__ == "__main__":
+    # Look for the latest checkpoint
+    latest_checkpoint = None
+    if os.path.exists(f"{CHECKPOINT_NAME}.zip"):
+        latest_checkpoint = f"{CHECKPOINT_NAME}.zip"
+    elif os.path.exists(CHECKPOINT_DIR):
+        checkpoints = [f for f in os.listdir(CHECKPOINT_DIR) if f.endswith(".zip")]
+        if checkpoints:
+            # Sort by step number embedded in filename if possible
+            try:
+                checkpoints.sort(key=lambda x: int(x.split("_")[-2]))
+                latest_checkpoint = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
+            except (ValueError, IndexError):
+                latest_checkpoint = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
+
     # Create 8 parallel environments
     vec_env = SubprocVecEnv([make_env(i) for i in range(NUM_ENVS)])
 

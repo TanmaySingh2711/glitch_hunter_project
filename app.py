@@ -1,7 +1,7 @@
 import eventlet
 eventlet.monkey_patch()
 import traceback
-
+import time
 from flask import Flask, render_template
 from flask_socketio import SocketIO
 from agent_logic import run_mario_agent
@@ -14,8 +14,6 @@ agent_gen = None
 
 task_epoch = 0
 
-
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -26,7 +24,6 @@ def background_agent_task(epoch):
     if agent_gen is None:
         agent_gen = run_mario_agent()
         
-    import time
     target_frame_time = 1.0 / 60.0
     
     try:

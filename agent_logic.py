@@ -1,4 +1,4 @@
-
+import os
 import cv2
 import gymnasium as gym
 
@@ -7,6 +7,17 @@ import numpy as np
 from collections import deque
 import base64
 from custom_mario_env import CustomMarioEnv
+
+ACTION_NAMES = {
+    0: "Stand Still",
+    1: "Walk Right",
+    2: "Walk Right + Jump",
+    3: "Run Right",
+    4: "Run Right + Jump",
+    5: "Jump",
+    6: "Walk Left",
+    7: "Crouch"
+}
 
 class GlitchHunterWrapper(gym.Wrapper):
     def __init__(self, env):
@@ -43,12 +54,7 @@ class GlitchHunterWrapper(gym.Wrapper):
         
         self.total_steps += 1
         
-        x_pos = info.get('x_pos', self.last_x_pos or 0)
-        y_pos = info.get('y_pos', 0)
-
-
-
-        # Curiosity bonus
+        x_pos = info.get('x_pos', self.last_x_pos or 0)        # Curiosity bonus
         if x_pos not in self.visited_x:
             self.visited_x.add(x_pos)
             reward += 1.0
@@ -112,7 +118,6 @@ def run_mario_agent():
         _global_env = FrameStackObservation(_global_env, 4)
         
         # Initialize model
-        import os
         model_path = "mario_brain_checkpoint.zip"
         if os.path.exists(model_path):
             _global_model = PPO.load(model_path, env=_global_env, device="auto")
@@ -161,15 +166,6 @@ def run_mario_agent():
         else:
             b64_string = ""
             
-        ACTION_NAMES = {
-            0: "Stand Still",
-            1: "Walk Right",
-            2: "Walk Right + Jump",
-            3: "Run Right",
-            4: "Run Right + Jump",
-            5: "Jump",
-            6: "Walk Left"
-        }
 
         log_message = None
         if info.get('glitch_alert'):
@@ -192,4 +188,4 @@ def run_mario_agent():
                 obs, _ = reset_result
             else:
                 obs = reset_result
-                obs = obs.copy()
+            obs = obs.copy()
