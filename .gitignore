@@ -21,3 +21,19 @@ __pycache__/
 .DS_Store
 Thumbs.db
 venv_gpu/
+
+# ═══════════════════════════════════════════════════════════════════════
+# ADDED — these were previously untracked-by-accident rather than by
+# design, which is how ~90MB of old checkpoint .zip files ended up
+# permanently baked into git history across the "Update5/6/7/8" commits.
+# None of this belongs in version control: checkpoints and videos are
+# large binary training artifacts that change constantly and are already
+# managed by the training scripts themselves, not by git.
+# ═══════════════════════════════════════════════════════════════════════
+checkpoints/
+mario_brain_*checkpoint*.zip
+videos/
+logs/
+scratch/
+.watchdog_reviewed_*.flag
+

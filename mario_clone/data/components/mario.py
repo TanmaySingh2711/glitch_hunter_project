@@ -44,6 +44,7 @@ class Mario(pg.sprite.Sprite):
         self.facing_right = True
         self.allow_jump = True
         self.dead = False
+        self.death_cause = None   # 'goomba' | 'koopa' | 'koopa_shell' | 'pit' | 'timeout' | None
         self.invincible = False
         self.big = False
         self.fire = False
@@ -448,15 +449,30 @@ class Mario(pg.sprite.Sprite):
         if keys[tools.keybinding['down']]:
             self.crouching = True
 
+        # ═══════════════════════════════════════════════════════════════════
+        # FIX: originally this was an if/elif/elif chain, which meant
+        # pressing Jump *together* with Left/Right on the very first frame
+        # from a standstill silently dropped the jump (direction always won
+        # the elif race). That made it impossible to run+jump in one clean
+        # input the instant Mario started moving from standing still, which
+        # is exactly what's needed to clear tall pipes/gaps that require a
+        # running start. Direction and jump are now handled independently
+        # so both apply on the same frame, matching authentic NES Mario
+        # controls.
+        # ═══════════════════════════════════════════════════════════════════
+        moved = False
         if keys[tools.keybinding['left']]:
             self.facing_right = False
             self.get_out_of_crouch()
             self.state = c.WALK
+            moved = True
         elif keys[tools.keybinding['right']]:
             self.facing_right = True
             self.get_out_of_crouch()
             self.state = c.WALK
-        elif keys[tools.keybinding['jump']]:
+            moved = True
+
+        if keys[tools.keybinding['jump']]:
             if self.allow_jump:
                 if self.big:
                     setup.SFX['big_jump'].play()
@@ -464,7 +480,7 @@ class Mario(pg.sprite.Sprite):
                     setup.SFX['small_jump'].play()
                 self.state = c.JUMP
                 self.y_vel = c.JUMP_VEL
-        else:
+        elif not moved:
             self.state = c.STAND
 
         if not keys[tools.keybinding['down']]:

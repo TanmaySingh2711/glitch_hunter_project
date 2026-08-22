@@ -556,6 +556,7 @@ class Level1(tools._State):
             elif self.mario.hurt_invincible:
                 pass
             else:
+                self.mario.death_cause = getattr(enemy, 'name', 'enemy')
                 self.mario.start_death_jump(self.game_info)
                 self.state = c.FROZEN
 
@@ -676,6 +677,7 @@ class Level1(tools._State):
                 shell.start_death_jump(c.RIGHT)
             else:
                 if not self.mario.hurt_invincible and not self.mario.invincible:
+                    self.mario.death_cause = 'koopa_shell'
                     self.state = c.FROZEN
                     self.mario.start_death_jump(self.game_info)
 
@@ -1317,6 +1319,7 @@ class Level1(tools._State):
     def check_for_mario_death(self):
         """Restarts the level if Mario is dead"""
         if self.mario.rect.y > c.SCREEN_HEIGHT and not self.mario.in_castle:
+            self.mario.death_cause = 'pit'
             self.mario.dead = True
             self.mario.x_vel = 0
             self.state = c.FROZEN
@@ -1361,6 +1364,7 @@ class Level1(tools._State):
         if self.overhead_info_display.time <= 0 \
                 and not self.mario.dead \
                 and not self.mario.in_castle:
+            self.mario.death_cause = 'timeout'
             self.state = c.FROZEN
             self.mario.start_death_jump(self.game_info)
 

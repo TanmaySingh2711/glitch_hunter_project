@@ -20,7 +20,6 @@ def index():
 
 def background_agent_task(epoch):
     global test_running, agent_gen
-    
     if agent_gen is None:
         agent_gen = run_mario_agent()
         
