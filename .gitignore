@@ -32,8 +32,14 @@ venv_gpu/
 # ═══════════════════════════════════════════════════════════════════════
 checkpoints/
 mario_brain_*checkpoint*.zip
-videos/
+# EXCEPTION: the master checkpoint IS tracked, so a clone gets a working
+# trained agent immediately instead of an untrained random policy. At 20MB
+# that's a reasonable one-off cost - just don't commit it after every retrain
+# (see the note above `mario_brain_*checkpoint*.zip`: committing a changed
+# binary repeatedly adds a near-full new copy to git history each time,
+# which is exactly how this repo got bloated before). Commit an updated
+# checkpoint deliberately, when there's an actual improvement worth sharing.
+!mario_brain_checkpoint.zip
 logs/
-scratch/
-.watchdog_reviewed_*.flag
+.milestone_saved_*.flag
 

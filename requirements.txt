@@ -1,7 +1,52 @@
-# Using venv_gpu with PyTorch CUDA
-gymnasium
-stable-baselines3
-flask
-flask-socketio
-opencv-python
-eventlet
+# ═══════════════════════════════════════════════════════════════════════
+# PYTHON VERSION: use 3.12, NOT whatever your system defaults to.
+#
+# torch's CUDA wheels do not exist yet for Python 3.14 (verified against
+# https://download.pytorch.org/whl/cu121/ : wheels are published for
+# cp310/cp311/cp312/cp313 only, no cp314). If your system's default
+# `python` is 3.14 (check with `py -0p` on Windows), create the venv
+# explicitly against 3.12 instead - see README "How to Run".
+# ═══════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════
+# INSTALL IN THIS EXACT ORDER - a plain `pip install -r requirements.txt`
+# will NOT work correctly, because of a real, verified version conflict:
+#
+#   stable-baselines3==2.9.0 declares `torch>=2.8`, but PyTorch's CUDA 12.1
+#   wheel index goes no higher than torch 2.5.1 (checked directly against
+#   https://download.pytorch.org/whl/cu121/ - there is no cu121 build of
+#   torch 2.8+). So "torch>=2.8" and "a CUDA 12.1 build of torch" are
+#   mutually impossible to satisfy at once. pip's normal resolver would
+#   either refuse to install, or silently replace your CUDA torch with a
+#   newer CPU-only build to satisfy stable-baselines3's constraint -
+#   training would then run on CPU with no error telling you why.
+#
+# STEP 1 - Install PyTorch matching your GPU (skip the --index-url line
+# entirely if you have no NVIDIA GPU; the dashboard/playback runs fine on
+# CPU regardless - see README):
+#   pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+#
+# STEP 2 - Install stable-baselines3 WITHOUT letting it touch torch:
+#   pip install stable-baselines3==2.9.0 --no-deps
+#
+# STEP 3 - Install everything else, including stable-baselines3's other
+# dependencies (cloudpickle, gymnasium, numpy - listed below so --no-deps
+# above doesn't leave them missing):
+#   pip install -r requirements.txt
+# ═══════════════════════════════════════════════════════════════════════
+
+# RL (stable-baselines3 itself is installed separately above, with
+# --no-deps, specifically to keep it from upgrading torch)
+gymnasium==1.3.0
+cloudpickle==3.1.2
+numpy==2.5.2
+
+# Game engine (mario_clone/ is built on pygame; no GPU/OpenGL used, pure
+# software rendering - runs fine on any machine, no GPU driver needed)
+pygame==2.6.1
+
+# Dashboard (Flask + WebSocket streaming to the browser)
+flask==3.1.3
+flask-socketio==5.6.1
+eventlet==0.41.2
+opencv-python==5.0.0.93

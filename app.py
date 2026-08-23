@@ -96,4 +96,7 @@ def handle_reset_game():
     stop_all_music()
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    # debug=False on purpose: the Werkzeug reloader spawns a SECOND python
+    # process that also imports agent_logic and loads the model onto the GPU,
+    # which wastes VRAM and leaves an orphan process behind on shutdown.
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)

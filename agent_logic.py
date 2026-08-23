@@ -29,7 +29,6 @@ ACTION_NAMES = {
 # instead of +1.0 per pixel (which caused reward explosion).
 # ═══════════════════════════════════════════════════════════════════════════
 TILE_SIZE = 40
-LEVEL_LENGTH_PX = 8800          # Approx. full length of world 1-1 in this clone
 MILESTONE_STEP_PX = 400         # Grant a milestone bonus every 400px of NEW max-x
 SPRINT_VEL_THRESHOLD = 4.5      # Matches the engine's own "fast jump" x_vel cutoff
 BACKWARD_WINDOW = 45            # ~0.75s at 60fps: net-displacement window for
@@ -64,8 +63,15 @@ POWERUP_PULL_SCALE_OPTIONAL = 0.015  # Shaping strength while already powered up
 # This is genuine PPO-compatible shaping (nothing here needs access to the
 # training loop or hyperparameters) and it decays automatically — if the
 # agent starts clearing the spot, the zone still expires on schedule rather
-# than lingering forever. See IMPLEMENTATION_3.md Part C for the full
-# reasoning and the other options that were considered.
+# than lingering forever.
+#
+# Why shaping rather than touching the training loop: the alternatives
+# considered were (a) raising PPO's ent_coef when the agent looks stuck and
+# (b) curriculum-style level restarts near the failure point. Both require
+# reaching into the optimizer or the training loop mid-run, which is fragile
+# and cannot be done from inside an environment wrapper. This approach is
+# pure reward shaping, so it needs nothing from PPO and works unchanged
+# whether the agent is training or just being played back in the dashboard.
 # ═══════════════════════════════════════════════════════════════════════════
 DEATH_STREAK_TRIGGER = 10        # consecutive same-cause deaths at the same spot
 DANGER_ZONE_BUCKET_PX = 200      # spatial resolution for "the same spot"
@@ -76,7 +82,8 @@ class GlitchHunterWrapper(gym.Wrapper):
     """
     Reward shaping for the Mario PPO agent.
 
-    Design goals (see IMPLEMENTATION.md for the full rationale):
+    Design goals (each numbered rule below is enforced by a correspondingly
+    labelled block in step(), which carries the reasoning for that rule):
       1. Reward THOROUGH exploration of the whole level, not just running
          right as fast as possible ("no speedrunning").
       2. Never let camping/idling near an obstacle be more attractive than
@@ -106,7 +113,6 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.jump_start_x = None        # x_pos when the current airborne phase began
         self.jump_start_had_momentum = False
         self.was_on_ground = True
-        self.total_steps = 0
 
         self.last_score = 0
         self.last_coins = 0
@@ -162,8 +168,6 @@ class GlitchHunterWrapper(gym.Wrapper):
         else:
             obs, reward, terminated, truncated, info = step_result
             done = terminated or truncated
-
-        self.total_steps += 1
 
         x_pos = info.get('x_pos', self.last_x_pos or 0)
         x_vel = info.get('x_vel', 0.0)
@@ -466,6 +470,10 @@ class GlitchHunterWrapper(gym.Wrapper):
 
 from gymnasium.wrappers import FrameStackObservation, GrayscaleObservation, ResizeObservation, MaxAndSkipObservation
 
+# Must match CHECKPOINT_NAME / FINAL_MODEL_PATH in train_agent.py — this is
+# the master checkpoint that training writes on finish and on Ctrl+C.
+CHECKPOINT_NAME = "mario_brain_checkpoint"
+
 _global_env = None
 _global_model = None
 
@@ -481,11 +489,14 @@ def run_mario_agent():
         _global_env = ResizeObservation(_global_env, (84, 84))
         _global_env = FrameStackObservation(_global_env, 4)
         
-        # Initialize model
-        model_path = "mario_brain_v2_checkpoint.zip"
+        # Initialize model. Falls back to an untrained policy so the
+        # dashboard still runs (badly) rather than crashing outright when no
+        # checkpoint is present.
+        model_path = f"{CHECKPOINT_NAME}.zip"
         if os.path.exists(model_path):
             _global_model = PPO.load(model_path, env=_global_env, device="auto")
         else:
+            print(f"[WARNING] {model_path} not found — running an UNTRAINED policy.")
             _global_model = PPO('CnnPolicy', _global_env, verbose=0)
         
     env = _global_env
@@ -515,12 +526,13 @@ def run_mario_agent():
         obs = obs.copy()
         step_count += 1
         
-        # Render frame
-        try:
-            frame = env.render(mode="rgb_array")
-        except TypeError:
-            frame = env.render()
-            
+        # Render frame. CustomMarioEnv.render() takes no arguments (the mode
+        # is fixed at construction), so this is a plain call — the old
+        # version passed mode="rgb_array" first and relied on catching the
+        # resulting TypeError, which raised and swallowed an exception on
+        # every single frame.
+        frame = env.render()
+
         if frame is not None:
             # Convert RGB to BGR for cv2
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)

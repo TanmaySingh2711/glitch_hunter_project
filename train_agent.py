@@ -1,7 +1,8 @@
 import os
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
-from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback, CallbackList
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
+from stable_baselines3.common.utils import get_schedule_fn
 import numpy as np
 from collections import deque
 
@@ -47,6 +48,14 @@ class ExactMilestoneCheckpointCallback(BaseCallback):
         return os.path.join(self.save_path, f".milestone_saved_{self.name_prefix}_{target}.flag")
 
     def _init_callback(self) -> None:
+        # ─── DO NOT DELETE THE .flag FILES IN checkpoints/ ───
+        # They are 0 bytes and look like junk, but they are the ONLY record
+        # of which milestones have already been saved. Deleting them makes
+        # this set empty, so on the very next step every target at or below
+        # the current step count is treated as unsaved and gets rewritten —
+        # e.g. resuming at 6,000,000 with no flags overwrites all 15
+        # milestone .zip files with copies of the current model, destroying
+        # the entire training history in one step.
         os.makedirs(self.save_path, exist_ok=True)
         self._saved = set(t for t in self.targets if os.path.exists(self._sentinel_path(t)))
 
@@ -61,38 +70,27 @@ class ExactMilestoneCheckpointCallback(BaseCallback):
         return True
 
 
-WATCHDOG_MILESTONES = []
-
-
 class WatchdogCallback(BaseCallback):
     """
-    Smart watchdog that:
-    1. Pauses training once at each step-milestone in WATCHDOG_MILESTONES for
-       manual review (see the sentinel-file note below for why this is safe
-       to leave in across resumed/migrated runs).
-    2. Detects blind AI (all-black observations)
-    3. Detects loop collapse (reward drops >50% from peak over 50k steps)
-    4. Detects instant-death loops (episode length consistently <30 frames)
-    5. Logs warnings but does NOT spam — only alerts on real problems
+    Passive training monitor. It never stops training except in the one case
+    where continuing is provably pointless (a blind agent).
 
-    ─── BUGFIX NOTE (post-migration audit) ───
-    The original version checked `if self.num_timesteps in [400000]:`. This
-    had two real bugs:
-      (a) With NUM_ENVS=8, num_timesteps advances in steps of 8 per callback
-          call (399992 -> 400000 -> 400008, or similar depending on exact
-          rollout boundaries), so the counter can jump straight past the
-          exact value 400000 and the `in [...]` check would then NEVER fire.
-      (b) Every time training is resumed with reset_num_timesteps=True, the
-          counter restarts at 0 and will eventually hit 400000 again,
-          re-triggering the "pause for review" every single time — this is
-          almost certainly why training appeared to repeatedly stall at the
-          same 400k mark.
-    Fixed by (a) using >= instead of exact equality, and (b) writing a small
-    sentinel flag file to CHECKPOINT_DIR the first time each milestone is
-    reviewed, so it only ever pauses once per milestone, permanently,
-    regardless of how many times the run is resumed or reset_num_timesteps
-    is toggled. Delete the `.watchdog_reviewed_*.flag` files in checkpoints/
-    if you ever want a milestone to pause again on purpose.
+    1. Detects a blind agent (all-black observations) and halts — this means
+       the render pipeline broke, so every further step would train on
+       garbage.
+    2. Warns on possible policy collapse (average reward fell below half of
+       the all-time peak), rate-limited to one alert per 50k steps.
+    3. Tracks episode analytics (totals, short-death counts) for the alerts.
+
+    ─── NOTE ON READING COLLAPSE ALERTS ───
+    `peak_reward` is an all-time running maximum that never decays, so once
+    the agent hits a lucky high streak, ANY normal regression below half of
+    it keeps re-triggering this warning even when nothing is actually wrong.
+    Treat the alert as "look at the numbers", not "something broke". The
+    signature of a REAL collapse is different and much more specific:
+    `approx_kl` spiking into double digits and `entropy_loss` crashing to
+    near-zero within one or two iterations (see the target_kl comment below
+    for the incident this was written from).
     """
     def __init__(self, verbose=0):
         super(WatchdogCallback, self).__init__(verbose)
@@ -101,12 +99,6 @@ class WatchdogCallback(BaseCallback):
         self.last_alert_step = 0
         self.short_episode_count = 0
         self.total_episodes = 0
-        self._paused_milestones = set(
-            m for m in WATCHDOG_MILESTONES if os.path.exists(self._sentinel_path(m))
-        )
-
-    def _sentinel_path(self, milestone):
-        return os.path.join(CHECKPOINT_DIR, f".watchdog_reviewed_{milestone}.flag")
 
     def _on_step(self) -> bool:
         # ─── LIVE PROGRESS INDICATOR ───
@@ -121,22 +113,6 @@ class WatchdogCallback(BaseCallback):
                 if mean_pixel == 0.0:
                     print("CRITICAL: AI IS BLIND (Mean pixel = 0.0). Stopping training.")
                     return False
-
-        # ─── MILESTONE PAUSES (one-time-ever per milestone, see docstring) ───
-        for milestone in WATCHDOG_MILESTONES:
-            if self.num_timesteps >= milestone and milestone not in self._paused_milestones:
-                os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-                open(self._sentinel_path(milestone), "w").close()
-                self._paused_milestones.add(milestone)
-                print(f"\n{'='*60}")
-                print(f"WATCHDOG: Reached {self.num_timesteps:,} steps (milestone {milestone:,}).")
-                print(f"Peak reward so far: {self.peak_reward:.1f}")
-                print(f"Recent avg reward: {np.mean(self.reward_history) if self.reward_history else 0:.1f}")
-                print(f"Total episodes: {self.total_episodes}")
-                print(f"Short-death episodes (<30 frames): {self.short_episode_count}")
-                print(f"{'='*60}")
-                print("WATCHDOG: Pausing for manual review. This milestone will NOT pause again on resume.")
-                return False
 
         # ─── EPISODE ANALYTICS ───
         infos = self.locals.get("infos", [])
@@ -196,82 +172,67 @@ def make_env(rank):
     return _init
 
 CHECKPOINT_DIR = "./checkpoints/"
-# ═══════════════════════════════════════════════════════════════════════
-# RENAMED AGAIN: "mario_brain_v2_checkpoint" -> "mario_brain_v3_checkpoint".
-#
-# v1 = original pre-migration run (8 actions)
-# v2 = migrated run (10 actions, warm-started from v1's CNN weights) — this
-#      lineage is being ABANDONED. Video review after ~2M steps of
-#      post-migration training showed the agent still pure-speedrunning
-#      (zero mushrooms/fire flowers/stars collected, zero enemies killed,
-#      just flying over everything) despite the corrected reward function.
-#      Most likely explanation: the inherited CNN feature extractor was so
-#      specialized on "detect gaps, jump over them, ignore everything else"
-#      from v1's speedrun-only reward that it never developed the visual
-#      features needed to even notice a mushroom or a nearby enemy — no
-#      amount of new reward signal helps if the network was never trained
-#      to see the thing the reward is about. Rather than fight that, this
-#      is a clean restart.
-# v3 = this run: a genuine fresh start, 10 actions, current reward function
-#      (including the death-memory system), trained from scratch so the
-#      CNN learns to see mushrooms/enemies/blocks from the very beginning
-#      alongside everything else, instead of retrofitting them onto a
-#      network that already decided none of that matters.
-#
-# The v3 prefix guarantees these files can never collide with the old v1 or
-# v2 checkpoints already sitting in ./checkpoints/, regardless of what step
-# numbers either lineage passes through.
-# ═══════════════════════════════════════════════════════════════════════
-CHECKPOINT_NAME = "mario_brain_v3_checkpoint"
-FINAL_MODEL_PATH = "./mario_brain_v3_checkpoint"
+
+# Master checkpoint written on clean finish and on Ctrl+C. The checkpoint
+# discovery below prefers this file over the numbered milestones, so it is
+# always the resume point unless it is deleted or moved aside.
+CHECKPOINT_NAME = "mario_brain_checkpoint"
+FINAL_MODEL_PATH = f"./{CHECKPOINT_NAME}"
 
 # ═══════════════════════════════════════════════════════════════════════
 # FRESH_START — set True to force a brand-new model from step 0, ignoring
-# ANY checkpoint that might exist on disk (v1, v2, or even a partial v3
-# run). This is the explicit, unambiguous way to start over, rather than
-# relying on remembering to delete/move files out of the way. Once you've
-# begun real v3 training and want to resume it normally later, set this
-# back to False — the checkpoint-discovery logic below will then correctly
-# find and continue the latest v3 checkpoint, and reset_num_timesteps is
-# computed automatically based on whether a checkpoint was actually found,
-# so you never need to hand-toggle that again either.
+# ANY checkpoint on disk. This is the explicit, unambiguous way to start
+# over, rather than relying on remembering to delete/move files out of the
+# way. Set it back to False to resume normally; reset_num_timesteps is then
+# computed automatically from whether a checkpoint was actually found, so
+# that never needs hand-toggling either.
 # ═══════════════════════════════════════════════════════════════════════
-FRESH_START = True
+FRESH_START = False
 
 TOTAL_TIMESTEPS = 6_000_000
 NUM_ENVS = 8                          # Parallel environments
 
 # ═══════════════════════════════════════════════════════════════════════
-# EXACT CHECKPOINT MILESTONES — replaces the old CHECKPOINT_FREQ-based
-# periodic saving entirely. You will get exactly one .zip per number below,
-# named "mario_brain_v3_checkpoint_{N}_steps.zip", no more and no less,
+# EXACT CHECKPOINT MILESTONES — you get exactly one .zip per number below,
+# named "mario_brain_checkpoint_{N}_steps.zip", no more and no less,
 # regardless of how many times training is stopped and resumed in between.
-# See ExactMilestoneCheckpointCallback above for exactly why this is now
-# reliable where the old approach wasn't.
+# See ExactMilestoneCheckpointCallback above for why this is reliable where
+# a frequency-based approach isn't.
 # ═══════════════════════════════════════════════════════════════════════
 CHECKPOINT_MILESTONES = [400_000 * i for i in range(1, 16)]  # 400k .. 6.0M
 
-# ═══════════════════════════════════════════════════════════════════════
-# ACTION SPACE: 10 actions (see custom_mario_env.py). This run starts fresh
-# and trains directly on the 10-action space from step 0 — no migration
-# involved, see the CHECKPOINT_NAME comment above for why.
-# ═══════════════════════════════════════════════════════════════════════
+
+def _milestone_steps(filename):
+    """Step count encoded in 'mario_brain_checkpoint_{N}_steps.zip', else -1.
+
+    Returning -1 for unparseable names keeps them sorted below every real
+    milestone, so a stray file can never be picked as "latest" — the old
+    version fell back to lexicographic order on a parse failure, which
+    silently ranks '800000' above '6000000'.
+    """
+    parts = filename[:-len(".zip")].split("_")
+    if len(parts) >= 2 and parts[-1] == "steps":
+        try:
+            return int(parts[-2])
+        except ValueError:
+            return -1
+    return -1
+
 
 if __name__ == "__main__":
-    # Look for the latest v3 checkpoint (skipped entirely if FRESH_START)
+    # Look for the latest checkpoint (skipped entirely if FRESH_START).
+    # The master file wins over numbered milestones when it exists.
     latest_checkpoint = None
     if not FRESH_START:
         if os.path.exists(f"{CHECKPOINT_NAME}.zip"):
             latest_checkpoint = f"{CHECKPOINT_NAME}.zip"
         elif os.path.exists(CHECKPOINT_DIR):
-            checkpoints = [f for f in os.listdir(CHECKPOINT_DIR)
-                           if f.endswith(".zip") and f.startswith(CHECKPOINT_NAME)]
-            if checkpoints:
-                try:
-                    checkpoints.sort(key=lambda x: int(x.split("_")[-2]))
-                    latest_checkpoint = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
-                except (ValueError, IndexError):
-                    latest_checkpoint = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
+            candidates = [f for f in os.listdir(CHECKPOINT_DIR)
+                          if f.endswith(".zip") and f.startswith(CHECKPOINT_NAME)
+                          and _milestone_steps(f) >= 0]
+            if candidates:
+                newest = max(candidates, key=_milestone_steps)
+                latest_checkpoint = os.path.join(CHECKPOINT_DIR, newest)
     else:
         print("FRESH_START is True — ignoring any existing checkpoints, training from step 0.")
 
@@ -298,13 +259,56 @@ if __name__ == "__main__":
     if latest_checkpoint:
         print(f"Resuming from checkpoint: {latest_checkpoint}")
         model = PPO.load(latest_checkpoint, env=vec_env, device=device)
+        # PPO.load() restores hyperparameters from the checkpoint itself, so
+        # anything set in the fresh-start branch below never reaches a
+        # resumed run unless it's applied here too.
+        #
+        # ─── target_kl 0.03 -> 0.05 (post-5.2M tuning) ───
+        # Around 4.6M-5.2M steps, "Early stopping at step 0" was firing on
+        # most iterations with the triggering per-minibatch KL sitting at
+        # 0.05-0.07 - well above the 1.5*target_kl=0.045 break threshold,
+        # but nowhere near the 11.37 that caused the real collapse at
+        # ~3.22M. With batch_size=256, each rollout (16384 samples) splits
+        # into 64 tiny minibatches, and a single noisy one can trip the
+        # ceiling even when the overall update is fine. 0.05 keeps a large
+        # (~220x) safety margin below the value that actually caused
+        # instability, while no longer treating this routine minibatch
+        # noise as a violation.
+        model.target_kl = 0.05
+        # ─── batch_size 256 -> 512 (post-5.2M tuning) ───
+        # Larger minibatches average the KL estimate over more samples,
+        # directly reducing the per-minibatch noise described above -
+        # addresses the actual noise source rather than just raising the
+        # ceiling to tolerate it.
+        model.batch_size = 512
+        # Same trap for learning_rate: PPO.load() also restores an internal
+        # lr_schedule closure built from the checkpoint's saved rate.
+        # Setting model.learning_rate alone does NOT change what the
+        # optimizer actually uses each update - lr_schedule has to be
+        # rebuilt explicitly too, or this silently has zero effect.
+        # Left at 1e-4 (not lowered further to 1e-5): the early-stopping
+        # pattern above was present from the very first iteration after the
+        # 3.2M resume, not something that emerged as the policy "got more
+        # advanced" - so it's minibatch noise, not a step-size problem. A
+        # 10x cut this late (~800k steps left of the 6M budget) risked
+        # stalling real progress in the final stretch for a problem it
+        # wasn't actually fixing.
+        model.learning_rate = 1.0e-4
+        model.lr_schedule = get_schedule_fn(1.0e-4)
     else:
         print("Starting fresh training...")
         model = PPO(
             "CnnPolicy", vec_env,
-            learning_rate=2.5e-4,
+            learning_rate=1.0e-4,      # Lowered from 2.5e-4 for the same reason
+                                       # noted in the resume branch above: too-
+                                       # large per-epoch updates were hitting
+                                       # target_kl on every iteration.
             n_steps=2048,             # Longer rollouts = more stable learning
-            batch_size=256,
+            batch_size=512,           # Raised from 256 for the same reason
+                                       # noted in the resume branch above:
+                                       # larger minibatches average out KL
+                                       # noise instead of letting a single
+                                       # noisy one trip target_kl early.
             n_epochs=4,
             gamma=0.99,
             gae_lambda=0.95,
@@ -318,6 +322,24 @@ if __name__ == "__main__":
                                        # onto the old 8-action habits.
             vf_coef=0.5,
             max_grad_norm=0.5,
+            target_kl=0.05,           # Hard stop: if a rollout's mean KL
+                                       # divergence blows past this, SB3 cuts
+                                       # the remaining epochs for that update
+                                       # instead of continuing to push the
+                                       # policy further. clip_range alone
+                                       # doesn't guarantee this - a bad batch
+                                       # can still overwhelm the clipping
+                                       # (this is what caused the collapse at
+                                       # ~3.22M steps: approx_kl hit 11.37,
+                                       # clip_fraction 0.834, and the policy
+                                       # collapsed to near-zero entropy).
+                                       # Raised from 0.03 to 0.05 after
+                                       # ~4.6M-5.2M steps showed routine
+                                       # minibatch noise (0.05-0.07) tripping
+                                       # early stopping almost every
+                                       # iteration - still a ~220x margin
+                                       # below the value that actually caused
+                                       # the real collapse.
             verbose=1,
             device=device,
             tensorboard_log="./logs/"
@@ -336,23 +358,40 @@ if __name__ == "__main__":
 
     # Computed automatically: True only when we're actually starting a
     # brand-new model (no checkpoint found, or FRESH_START forced it).
-    # False whenever resuming an existing v3 checkpoint, so the step
-    # counter keeps climbing correctly instead of restarting at 0 — you no
-    # longer need to remember to hand-toggle this between runs.
+    # False whenever resuming an existing checkpoint, so the step counter
+    # keeps climbing correctly instead of restarting at 0.
     reset_num_timesteps = latest_checkpoint is None
 
-    try:
-        # Train
-        print("Starting training loop... You can stop this anytime with Ctrl+C and resume later.")
-        model.learn(
-            total_timesteps=TOTAL_TIMESTEPS,
-            callback=callback_list,
-            reset_num_timesteps=reset_num_timesteps,
-        )
+    # ─── BUGFIX: TOTAL_TIMESTEPS was silently a moving target ───
+    # SB3's learn() adds the model's current num_timesteps on top of
+    # whatever total_timesteps it's given whenever reset_num_timesteps=False
+    # (every resume). Passing the raw TOTAL_TIMESTEPS=6_000_000 constant
+    # unchanged meant each restart re-aimed for "6,000,000 MORE steps from
+    # right now" instead of "6,000,000 steps total, ever" - e.g. resuming
+    # from 5,200,000 actually targeted 11,200,000 internally, which is why
+    # training sailed straight through the intended 6M mark without
+    # stopping. Passing the remaining budget instead keeps the absolute
+    # lifetime target fixed no matter how many times the script restarts.
+    steps_to_run = TOTAL_TIMESTEPS if reset_num_timesteps else max(0, TOTAL_TIMESTEPS - model.num_timesteps)
 
-        # Save final model
-        model.save(FINAL_MODEL_PATH)
-        print(f"Training complete! Model saved to {FINAL_MODEL_PATH}.zip")
+    try:
+        if steps_to_run == 0:
+            # Budget already met. Return WITHOUT training and WITHOUT saving:
+            # learn(0) still collects a rollout, and re-saving here would
+            # overwrite the finished master checkpoint with a model that has
+            # been stepped past the milestone for no reason.
+            print(f"Already at TOTAL_TIMESTEPS ({TOTAL_TIMESTEPS:,}); current step: "
+                  f"{model.num_timesteps:,}. Nothing to train — raise TOTAL_TIMESTEPS to continue.")
+        else:
+            print(f"Training to {TOTAL_TIMESTEPS:,} total steps "
+                  f"({steps_to_run:,} remaining). Ctrl+C to stop and resume later.")
+            model.learn(
+                total_timesteps=steps_to_run,
+                callback=callback_list,
+                reset_num_timesteps=reset_num_timesteps,
+            )
+            model.save(FINAL_MODEL_PATH)
+            print(f"Training complete! Model saved to {FINAL_MODEL_PATH}.zip")
     except KeyboardInterrupt:
         print("\nTraining paused by user. Saving current brain state...")
         model.save(FINAL_MODEL_PATH)

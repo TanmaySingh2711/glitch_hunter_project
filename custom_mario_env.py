@@ -1,4 +1,5 @@
 import os
+import random
 import sys
 import gymnasium as gym
 from gymnasium import spaces
@@ -42,11 +43,13 @@ class CustomMarioEnv(gym.Env):
         #    approaching from the right, or backing off a ledge safely)
         #
         # Expanded from the original 8 actions specifically to give the agent
-        # a way to execute "back up, then sprint+jump" momentum plays. This
-        # is NOT backward-compatible with checkpoints trained on the old
-        # 8-action space (the policy's action head shape changes) - see
-        # migrate_checkpoint.py / IMPLEMENTATION.md for how to carry over
-        # the learned visual features anyway.
+        # a way to execute "back up, then sprint+jump" momentum plays. Note
+        # this is NOT backward-compatible with checkpoints trained on an
+        # 8-action space (the policy's action head shape changes), so such a
+        # checkpoint cannot be loaded here - it has to be retrained.
+        #
+        # Keep this list in sync with ACTION_NAMES in agent_logic.py and the
+        # info modal in templates/index.html.
         # ═══════════════════════════════════════════════════════════════════
         self.action_space = spaces.Discrete(10)
         self.observation_space = spaces.Box(low=0, high=255, shape=(240, 256, 3), dtype=np.uint8)
@@ -61,10 +64,9 @@ class CustomMarioEnv(gym.Env):
         os.chdir(self.mario_clone_dir)
         sys.path.insert(0, self.mario_clone_dir)
         
-        # Tile windows across the screen so they don't stack perfectly on top of each other
-        # The window size is ~800x600. We'll stagger them diagonally.
-        import random
-        # Give them a random offset so the 8 windows spread out on the desktop
+        # Tile windows across the screen so they don't stack perfectly on top
+        # of each other. The window is ~800x600; a random offset spreads the
+        # 8 parallel training windows out across the desktop.
         x_pos = random.randint(50, 800)
         y_pos = random.randint(50, 400)
         os.environ['SDL_VIDEO_WINDOW_POS'] = f"{x_pos},{y_pos}"
@@ -156,15 +158,12 @@ class CustomMarioEnv(gym.Env):
             # detect and reward "momentum building" (sprinting before a jump)
             # and to tell a deliberate running jump apart from idle bouncing.
             c = self.c_module
+            mario_state = getattr(mario, 'state', c.STAND)
             info['x_vel'] = float(getattr(mario, 'x_vel', 0.0))
-            info['y_vel'] = float(getattr(mario, 'y_vel', 0.0))
-            info['mario_state'] = getattr(mario, 'state', c.STAND)
-            info['on_ground'] = info['mario_state'] in (c.STAND, c.WALK)
-            info['facing_right'] = bool(getattr(mario, 'facing_right', True))
+            info['on_ground'] = mario_state in (c.STAND, c.WALK)
 
             info['score'] = self.game.state.game_info.get('score', 0) if hasattr(self.game.state, 'game_info') else 0
             info['coins'] = self.game.state.game_info.get('coin total', 0) if hasattr(self.game.state, 'game_info') else 0
-            info['lives'] = self.game.state.persist.get(c.LIVES, 3) if hasattr(self.game.state, 'persist') else 3
 
             if getattr(mario, 'fire', False):
                 info['status'] = 'fireball'
@@ -193,18 +192,14 @@ class CustomMarioEnv(gym.Env):
             if powerup_group is not None:
                 info['powerup_active_count'] = len(powerup_group)
                 nearest_dx = None
-                nearest_type = None
                 for p in powerup_group:
                     dx = p.rect.centerx - mario.rect.centerx
                     if nearest_dx is None or abs(dx) < abs(nearest_dx):
                         nearest_dx = dx
-                        nearest_type = getattr(p, 'name', 'powerup')
                 info['nearest_powerup_dx'] = nearest_dx
-                info['nearest_powerup_type'] = nearest_type
             else:
                 info['powerup_active_count'] = 0
                 info['nearest_powerup_dx'] = None
-                info['nearest_powerup_type'] = None
 
             # Small death penalty so the agent learns dying is undesirable,
             # but small enough that it won't cause "standing still" paralysis
@@ -212,26 +207,24 @@ class CustomMarioEnv(gym.Env):
             if mario.dead:
                 reward = -5.0
                 info['death_cause'] = getattr(mario, 'death_cause', None)
-            
-            # RL agents don't need to watch the 3 second death animation, so we return done immediately if Mario is dead
-            done = self.game.state.done or getattr(self.game.state.mario, 'dead', False) if hasattr(self.game.state, 'mario') else self.game.state.done
-            
+
+            # RL agents don't need to watch the ~3 second death animation, so
+            # end the episode as soon as Mario is dead. (`mario` is already
+            # bound above, so no hasattr guard is needed here — if it were
+            # missing we'd have raised AttributeError long before this line.)
+            done = bool(self.game.state.done or mario.dead)
+
         except AttributeError:
             info['x_pos'] = 0
             info['y_pos'] = 0
             info['x_vel'] = 0.0
-            info['y_vel'] = 0.0
-            info['mario_state'] = self.c_module.STAND
             info['on_ground'] = True
-            info['facing_right'] = True
             info['score'] = 0
             info['coins'] = 0
-            info['lives'] = 3
             info['status'] = 'small'
             info['flag_get'] = False
             info['powerup_active_count'] = 0
             info['nearest_powerup_dx'] = None
-            info['nearest_powerup_type'] = None
             info['death_cause'] = None
             done = self.game.state.done
             
