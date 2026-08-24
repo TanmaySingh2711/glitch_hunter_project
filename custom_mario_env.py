@@ -138,12 +138,17 @@ class CustomMarioEnv(gym.Env):
         os.chdir(self.mario_clone_dir)
         try:
             self.game.state.update(self.game.screen, self.game.keys, self.game.current_time)
-            pg.display.update()  # Force OS to paint the window so it doesn't freeze black
+            # Force OS to paint the window so it doesn't freeze black. Guarded
+            # for the dashboard's close_window(): if Stop/Reset raced with an
+            # in-flight step() call, the display may already be gone - render()
+            # already tolerates that (returns a black frame), so just skip the
+            # paint here rather than raising.
+            if pg.display.get_surface() is not None:
+                pg.display.update()
         finally:
             os.chdir(orig_cwd)
         
-        full_obs = self.render()
-        obs = cv2.resize(full_obs, (256, 240), interpolation=cv2.INTER_NEAREST)
+        obs = self._fast_obs()
         
         reward = 0.0
         done = False
@@ -258,11 +263,114 @@ class CustomMarioEnv(gym.Env):
             self.game.state.startup(0.0, persist_data)
         finally:
             os.chdir(orig_cwd)
-        
-        pg.display.update()
-        full_obs = self.render()
-        obs = cv2.resize(full_obs, (256, 240), interpolation=cv2.INTER_NEAREST)
+
+        # Guards against calling reset() while the window is closed (e.g.
+        # a stray reset between close_window() and the dashboard's next
+        # open_window() call) - render() below already tolerates this by
+        # returning a black frame, but pg.display.update() itself raises
+        # if the display hasn't been initialized at all.
+        if pg.display.get_surface() is not None:
+            pg.display.update()
+        obs = self._fast_obs()
         return obs, {}
+
+    # ═══════════════════════════════════════════════════════════════════
+    # WINDOW LIFECYCLE — for the dashboard's "pop up on Start, close on
+    # Reset/refresh" behavior. Not used during training (train_agent.py
+    # never calls these; its 8 parallel windows just stay open for the
+    # whole run, staggered by the SDL_VIDEO_WINDOW_POS logic in __init__).
+    #
+    # Important quirk this works around: pygame's actual OS window is
+    # created ONCE, at module-import time, by the top-level
+    # `pg.display.set_mode(...)` call in mario_clone/data/setup.py -
+    # constructing a new Control() (which reset() does on every episode)
+    # does NOT create a new window, it just calls pg.display.get_surface()
+    # to grab whatever window already exists. So "closing" and "reopening"
+    # the window has to be done directly through the pg.display module
+    # here, not by recreating Control().
+    # ═══════════════════════════════════════════════════════════════════
+    def open_window(self):
+        """(Re)creates the OS window if it was previously closed via
+        close_window(), then brings it to the foreground. Safe to call
+        even when the window is already open (no-op beyond refocusing)."""
+        if pg.display.get_surface() is None:
+            pg.display.init()
+            new_surface = pg.display.set_mode(self.c_module.SCREEN_SIZE)
+            pg.display.set_caption(self.setup_module.ORIGINAL_CAPTION)
+            # mario_clone/data/states/level1.py reads setup.SCREEN directly
+            # (not pg.display.get_surface()), so that module-level reference
+            # has to be updated here too - otherwise it still points at the
+            # Surface object pg.display.quit() just destroyed, and the next
+            # reset() crashes with "pygame.error: display Surface quit" the
+            # moment level1.py touches it.
+            self.setup_module.SCREEN = new_surface
+            self.setup_module.SCREEN_RECT = new_surface.get_rect()
+        self._bring_to_front()
+
+    def _bring_to_front(self):
+        """Windows-only: force the game window to the foreground. Silently
+        does nothing on other platforms - pygame has no cross-platform API
+        for this, and this project only targets Windows (see the
+        SDL_VIDEO_WINDOW_POS staggering above, which is Windows-specific
+        too). Best-effort: a focus failure here should never break
+        playback, so any error is swallowed.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            hwnd = pg.display.get_wm_info().get("window")
+            if hwnd:
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
+    def close_window(self):
+        """Destroys the OS window. Safe to call even if already closed.
+        The underlying game/model state is untouched - only the display -
+        so the next open_window() + reset() resumes cleanly."""
+        if pg.display.get_surface() is not None:
+            pg.display.quit()
+
+    def _fast_obs(self):
+        # ═══════════════════════════════════════════════════════════════
+        # Builds the (240, 256, 3) observation step()/reset() return to the
+        # agent. This used to be `cv2.resize(self.render(), (256, 240))` -
+        # i.e. pg.surfarray.array3d() on the FULL 800x600 window (a real
+        # numpy copy+transpose of ~480,000 pixels), THEN a separate cv2
+        # downscale pass. Profiling this project's actual bottleneck showed
+        # that pair costing ~5.5ms per call - the single largest cost in
+        # step(), and it happens up to 4x per agent decision under
+        # MaxAndSkipObservation's frame-skipping.
+        #
+        # Downscaling FIRST via pg.transform.scale (SDL/C, operates on the
+        # Surface directly) and only THEN converting to a numpy array cuts
+        # array3d's work down to the already-small 256x240 result instead
+        # of the full 800x600 source - measured 11.9x faster for this exact
+        # resize (0.47ms vs 5.6ms). Verified byte-for-byte IDENTICAL output
+        # to the old cv2.INTER_NEAREST path for this exact scale ratio (no
+        # behavior change to the model's input - see IMPLEMENTATION.md).
+        # ═══════════════════════════════════════════════════════════════
+        surface = pg.display.get_surface()
+        if surface is None:
+            return np.zeros((240, 256, 3), dtype=np.uint8)
+        small_surface = pg.transform.scale(surface, (256, 240))
+        view = pg.surfarray.array3d(small_surface)
+        return view.transpose([1, 0, 2])
+
+    def render_scaled(self, size):
+        """Like render(), but scales to `size` (width, height) BEFORE the
+        numpy conversion via pg.transform.scale, the same technique
+        _fast_obs() uses - see that method's comment for why this matters.
+        Used by the dashboard's streaming path (agent_logic.py), which only
+        needs display-quality output at well under native resolution, not
+        the full 800x600 capture render() below does."""
+        surface = pg.display.get_surface()
+        if surface is None:
+            return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+        small_surface = pg.transform.scale(surface, size)
+        view = pg.surfarray.array3d(small_surface)
+        return view.transpose([1, 0, 2])
 
     def render(self):
         # Convert Pygame surface to numpy array (H, W, C) for Gymnasium

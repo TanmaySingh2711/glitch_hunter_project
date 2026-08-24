@@ -4,10 +4,16 @@ import traceback
 import time
 from flask import Flask, render_template
 from flask_socketio import SocketIO
-from agent_logic import run_mario_agent
+from agent_logic import run_mario_agent, open_agent_window, close_agent_window
 
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='eventlet')
+
+# Cache-busting: appended as ?v=... on static asset URLs (see index.html)
+# so a browser that already cached an old style.css/main.js is forced to
+# fetch the current one after every restart, instead of silently showing a
+# stale page until the user thinks to hard-refresh.
+ASSET_VERSION = str(int(time.time()))
 
 test_running = False
 agent_gen = None
@@ -16,7 +22,7 @@ task_epoch = 0
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', asset_version=ASSET_VERSION)
 
 def background_agent_task(epoch):
     global test_running, agent_gen
@@ -60,10 +66,13 @@ def stop_all_music():
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    # Covers a page refresh or a closed tab, not just an explicit Reset
+    # click - the game window should not be left open with nobody watching.
     global test_running, task_epoch
     test_running = False
     task_epoch += 1
     stop_all_music()
+    close_agent_window()
 
 @socketio.on('connect')
 def handle_connect():
@@ -76,12 +85,24 @@ def handle_connect():
 def handle_start_testing(data=None):
     global test_running, task_epoch
     print(f">>> START_TESTING received!")
+    # Opens (or refocuses) the game window BEFORE backgrounding the frame
+    # loop, so the pop-up/focus happens immediately on click rather than
+    # waiting for the first streamed frame. Runs synchronously in this
+    # handler - on the very first-ever click this includes loading the
+    # model, so a short pause here is expected and matches how it always
+    # briefly paused before streaming its first frame.
+    open_agent_window()
     test_running = True
     task_epoch += 1
     socketio.start_background_task(background_agent_task, task_epoch)
 
 @socketio.on('stop_testing')
 def handle_stop_testing():
+    # Deliberately does NOT touch the window. Pausing is just "stop calling
+    # env.step()" - background_agent_task's loop exits on test_running
+    # becoming False, so both the pop-up window (last painted frame stays
+    # on screen) and the live stream (no more video_frame emits) freeze on
+    # the same last frame together, with nothing extra to do here.
     global test_running, task_epoch
     test_running = False
     task_epoch += 1
@@ -94,6 +115,7 @@ def handle_reset_game():
     task_epoch += 1
     agent_gen = None  # Force a fresh generator on the next start
     stop_all_music()
+    close_agent_window()
 
 if __name__ == '__main__':
     # debug=False on purpose: the Werkzeug reloader spawns a SECOND python

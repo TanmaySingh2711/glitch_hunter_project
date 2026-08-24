@@ -1,11 +1,11 @@
 import os
+import time
 import cv2
 import gymnasium as gym
 
 from stable_baselines3 import PPO
 import numpy as np
 from collections import deque
-import base64
 from custom_mario_env import CustomMarioEnv
 
 ACTION_NAMES = {
@@ -477,31 +477,66 @@ CHECKPOINT_NAME = "mario_brain_checkpoint"
 _global_env = None
 _global_model = None
 
-def run_mario_agent():
+# Streamed frames are resized down from the native 800x600 window before
+# JPEG encoding. The dashboard displays them scaled into a much smaller
+# panel anyway (CSS `object-fit: contain`), so sending full resolution only
+# costs encode time and bandwidth for pixels nobody sees larger. 480x360
+# keeps the exact 4:3 aspect ratio at 36% of the original pixel count.
+STREAM_SIZE = (480, 360)
+STREAM_JPEG_QUALITY = 80  # default cv2 quality (~95) costs real encode time
+                          # for no visible difference at this display size
+
+
+def _ensure_global_env_and_model():
+    """Creates the global env + loads the model on first use. Shared by
+    run_mario_agent() and open_agent_window() so a window can be popped up
+    (on the very first 'Start Testing' click) without duplicating this
+    setup logic in two places."""
     global _global_env, _global_model
-    
-    if _global_env is None:
-        
-        _global_env = CustomMarioEnv()
-        _global_env = GlitchHunterWrapper(_global_env)
-        _global_env = MaxAndSkipObservation(_global_env, skip=4)
-        _global_env = GrayscaleObservation(_global_env, keep_dim=False)
-        _global_env = ResizeObservation(_global_env, (84, 84))
-        _global_env = FrameStackObservation(_global_env, 4)
-        
-        # Initialize model. Falls back to an untrained policy so the
-        # dashboard still runs (badly) rather than crashing outright when no
-        # checkpoint is present.
-        model_path = f"{CHECKPOINT_NAME}.zip"
-        if os.path.exists(model_path):
-            _global_model = PPO.load(model_path, env=_global_env, device="auto")
-        else:
-            print(f"[WARNING] {model_path} not found — running an UNTRAINED policy.")
-            _global_model = PPO('CnnPolicy', _global_env, verbose=0)
-        
+    if _global_env is not None:
+        return
+
+    _global_env = CustomMarioEnv()
+    _global_env = GlitchHunterWrapper(_global_env)
+    _global_env = MaxAndSkipObservation(_global_env, skip=4)
+    _global_env = GrayscaleObservation(_global_env, keep_dim=False)
+    _global_env = ResizeObservation(_global_env, (84, 84))
+    _global_env = FrameStackObservation(_global_env, 4)
+
+    # Initialize model. Falls back to an untrained policy so the
+    # dashboard still runs (badly) rather than crashing outright when no
+    # checkpoint is present.
+    model_path = f"{CHECKPOINT_NAME}.zip"
+    if os.path.exists(model_path):
+        _global_model = PPO.load(model_path, env=_global_env, device="auto")
+    else:
+        print(f"[WARNING] {model_path} not found — running an UNTRAINED policy.")
+        _global_model = PPO('CnnPolicy', _global_env, verbose=0)
+
+
+def open_agent_window():
+    """Ensures the env/model exist and the game window is visible and
+    focused. Called on every 'Start Testing' click (not just the first),
+    so the window reliably comes to the front even if it's buried behind
+    other windows from earlier in the session."""
+    _ensure_global_env_and_model()
+    _global_env.unwrapped.open_window()
+
+
+def close_agent_window():
+    """Closes the game window if one exists. Called on dashboard reset and
+    on disconnect (covers a page refresh or closed tab). The model and env
+    stay loaded in memory - only the OS window closes - so the next
+    open_agent_window() call is fast, not a full reload."""
+    if _global_env is not None:
+        _global_env.unwrapped.close_window()
+
+
+def run_mario_agent():
+    _ensure_global_env_and_model()
     env = _global_env
     model = _global_model
-    
+
     # Initial reset
     reset_result = env.reset()
     if isinstance(reset_result, tuple) and len(reset_result) == 2:
@@ -511,10 +546,12 @@ def run_mario_agent():
     obs = obs.copy()
 
     step_count = 0
+    fps_window_start = time.time()
+    fps_window_frames = 0
     while True:
         action, _states = model.predict(obs, deterministic=True)
         action_val = int(action.item()) if hasattr(action, 'item') else int(action)
-        
+
         # Step environment
         step_result = env.step(action_val)
         if len(step_result) == 4:
@@ -522,26 +559,42 @@ def run_mario_agent():
         else:
             obs, reward, terminated, truncated, info = step_result
             done = terminated or truncated
-        
+
         obs = obs.copy()
         step_count += 1
-        
-        # Render frame. CustomMarioEnv.render() takes no arguments (the mode
-        # is fixed at construction), so this is a plain call — the old
-        # version passed mode="rgb_array" first and relied on catching the
-        # resulting TypeError, which raised and swallowed an exception on
-        # every single frame.
-        frame = env.render()
+
+        # Render already-downscaled to STREAM_SIZE via render_scaled() -
+        # see custom_mario_env.py for why this avoids a full-resolution
+        # array3d() call (the same technique _fast_obs() uses for the
+        # model's observation, just at a different target size for display).
+        frame = env.unwrapped.render_scaled(STREAM_SIZE)
 
         if frame is not None:
-            # Convert RGB to BGR for cv2
+            # BGR for cv2, then JPEG at a quality that doesn't waste CPU on
+            # precision nobody sees at this display size.
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            # Encode BGR to JPEG
-            _, buffer = cv2.imencode('.jpg', frame_bgr)
-            b64_string = base64.b64encode(buffer).decode('utf-8')
+            _, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, STREAM_JPEG_QUALITY])
+            # Raw bytes, not base64: flask-socketio/python-socketio send
+            # `bytes` values as a native binary WebSocket frame automatically
+            # (the client's socket.io library reassembles it transparently).
+            # Base64 was costing ~33% more payload plus real encode/decode
+            # CPU time on both ends for no benefit, since nothing here
+            # actually needs a text-safe representation.
+            frame_bytes = buffer.tobytes()
         else:
-            b64_string = ""
-            
+            frame_bytes = b""
+
+        # ─── SERVER-SIDE FPS INSTRUMENTATION ───
+        # Prints the actual measured frame rate every ~2 seconds, so "is it
+        # really running at 60fps" is something you can read from the
+        # terminal instead of guessing from how smooth the browser looks.
+        fps_window_frames += 1
+        now = time.time()
+        elapsed = now - fps_window_start
+        if elapsed >= 2.0:
+            print(f"[STREAM FPS] {fps_window_frames / elapsed:.1f}")
+            fps_window_start = now
+            fps_window_frames = 0
 
         log_message = None
         if info.get('glitch_alert'):
@@ -549,9 +602,9 @@ def run_mario_agent():
         else:
             action_name = ACTION_NAMES.get(int(action_val), "Unknown")
             log_message = f"Step {step_count}: Action: {action_name} ({action_val}) | Reward: {float(reward):.2f}"
-            
+
         yield {
-            'frame': b64_string,
+            'frame': frame_bytes,
             'action': action_val,
             'step': step_count,
             'reward': float(reward),

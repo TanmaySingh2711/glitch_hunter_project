@@ -9,6 +9,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const MAX_LOG_LINES = 200;
     let isTesting = false;
+    let currentFrameUrl = null;  // tracks the last object URL so it can be
+                                  // revoked - otherwise each frame leaks
+                                  // browser memory indefinitely
 
     startBtn.addEventListener('click', () => {
         isTesting = true;
@@ -48,7 +51,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         videoFeed.removeAttribute('src');
-        
+        if (currentFrameUrl) {
+            URL.revokeObjectURL(currentFrameUrl);
+            currentFrameUrl = null;
+        }
+
         startBtn.disabled = false;
         stopBtn.disabled = true;
         resetBtn.disabled = true;
@@ -57,8 +64,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('video_frame', (data) => {
         if (!isTesting) return;
-        if (data.frame) {
-            videoFeed.src = 'data:image/jpeg;base64,' + data.frame;
+        // The server now sends the JPEG as raw binary (an ArrayBuffer),
+        // not a base64 string - faster to produce server-side and smaller
+        // over the wire. An ArrayBuffer is always truthy even when empty,
+        // so check byteLength rather than the value itself.
+        if (data.frame && data.frame.byteLength > 0) {
+            const blob = new Blob([data.frame], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            videoFeed.src = url;
+            // Revoke the PREVIOUS frame's URL now that a new one is set -
+            // otherwise every frame permanently pins its memory, and at
+            // 60fps that's a leak of tens of URLs per second.
+            if (currentFrameUrl) {
+                URL.revokeObjectURL(currentFrameUrl);
+            }
+            currentFrameUrl = url;
         }
     });
 
