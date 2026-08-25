@@ -1,0 +1,46 @@
+═══════════════════════════════════════════════════════════════════════
+SCOPE — please read this first
+
+This repository contains code from two different sources, and only one of
+them is covered by the MIT license below.
+
+  COVERED by the MIT license (original work in this project):
+      app.py
+      agent_logic.py
+      custom_mario_env.py
+      train_agent.py
+      static/
+      templates/
+      README.md, requirements.txt, IMPLEMENTATION.md
+      mario_brain_checkpoint.zip  (the trained model weights)
+
+  NOT COVERED — third-party, different terms, see THIRD_PARTY_NOTICES.md:
+      mario_clone/          (the Super Mario Bros clone and its assets)
+
+The mario_clone/ directory is someone else's work and its upstream project
+carries no open-source license at all. Do not assume the MIT terms below
+apply to it. THIRD_PARTY_NOTICES.md explains what is and isn't permitted.
+═══════════════════════════════════════════════════════════════════════
+
+
+MIT License
+
+Copyright (c) 2026 Tanmay Singh
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

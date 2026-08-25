@@ -42,6 +42,11 @@ That's it. A game window will pop up and the same footage streams live to your b
 - **Start Testing** — pops up the game window and starts streaming it to the browser.
 - **Stop Testing** — pauses the game (both the pop-up window and the browser view freeze on the same frame).
 - **Reset Dashboard** / refreshing the page — closes the pop-up window.
+- **BUG TRACKER** (red panel) — stays empty unless the game actually breaks a
+  rule it's supposed to follow: Mario alive below the floor, moving at an
+  impossible speed, or the score/coin counter running backwards. An empty
+  panel is the normal, healthy result — it only speaks up for real problems.
+- **LOG TERMINAL** (green panel) — every action the AI takes, with its reward.
 
 If you ever see the AI acting completely random instead of playing well, check the terminal for a `[WARNING] ... running an UNTRAINED policy` line — it means `mario_brain_checkpoint.zip` (the trained brain) is missing from the folder.
 
@@ -53,10 +58,24 @@ If you ever see the AI acting completely random instead of playing well, check t
 - `agent_logic.py` — how the AI is rewarded during training, plus the code that runs it live for the dashboard.
 - `custom_mario_env.py` — connects the Mario game to the AI training library.
 - `train_agent.py` — trains the AI from scratch (takes hours — most people will never need to run this).
-- `mario_clone/` — the actual Super Mario Bros game (Python/Pygame).
+- `mario_clone/` — the actual Super Mario Bros game (Python/Pygame). Not written by us — see Credits below.
 - `static/` & `templates/` — the dashboard's look (HTML/CSS/JS).
 - `mario_brain_checkpoint.zip` — the trained AI's "brain". Needed for the AI to play well; see above if it's missing.
 - `checkpoints/` — snapshots from training, not needed just to watch the AI play.
+
+---
+
+## Credits & Licensing
+
+The game in `mario_clone/` was written by **Justin Meister**
+([Mario-Level-1](https://github.com/justinmeister/Mario-Level-1)) — not by us. It has
+**no open-source license**, and its author states it is "intended for non-commercial
+educational purposes." The artwork and sounds are Nintendo's property.
+
+**So: learn from this, don't sell it.** Our own code (`app.py`, `agent_logic.py`,
+`custom_mario_env.py`, `train_agent.py`, the dashboard) is MIT-licensed.
+
+Full details in [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ---
 

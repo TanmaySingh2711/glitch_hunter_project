@@ -4,7 +4,6 @@ import cv2
 import gymnasium as gym
 
 from stable_baselines3 import PPO
-import numpy as np
 from collections import deque
 from custom_mario_env import CustomMarioEnv
 

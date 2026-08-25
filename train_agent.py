@@ -80,7 +80,6 @@ class WatchdogCallback(BaseCallback):
        garbage.
     2. Warns on possible policy collapse (average reward fell below half of
        the all-time peak), rate-limited to one alert per 50k steps.
-    3. Tracks episode analytics (totals, short-death counts) for the alerts.
 
     ─── NOTE ON READING COLLAPSE ALERTS ───
     `peak_reward` is an all-time running maximum that never decays, so once
@@ -97,8 +96,6 @@ class WatchdogCallback(BaseCallback):
         self.reward_history = deque(maxlen=100)  # Rolling window of episode rewards
         self.peak_reward = -float('inf')
         self.last_alert_step = 0
-        self.short_episode_count = 0
-        self.total_episodes = 0
 
     def _on_step(self) -> bool:
         # ─── LIVE PROGRESS INDICATOR ───
@@ -118,20 +115,14 @@ class WatchdogCallback(BaseCallback):
         infos = self.locals.get("infos", [])
         for info in infos:
             if "episode" in info:
-                ep_len = info["episode"]["l"]
                 ep_reward = info["episode"]["r"]
-                self.total_episodes += 1
                 self.reward_history.append(ep_reward)
-                
+
                 # Track peak reward
                 avg_reward = np.mean(self.reward_history)
                 if avg_reward > self.peak_reward:
                     self.peak_reward = avg_reward
 
-                # Count short-death episodes
-                if ep_len < 30:
-                    self.short_episode_count += 1
-                
                 # ─── COLLAPSE DETECTION ───
                 # If we have enough data and reward has dropped >50% from peak
                 if len(self.reward_history) >= 50 and self.peak_reward > 0:
@@ -139,11 +130,11 @@ class WatchdogCallback(BaseCallback):
                         # Only alert once per 50k steps to avoid spam
                         if self.num_timesteps - self.last_alert_step > 50000:
                             self.last_alert_step = self.num_timesteps
-                            print(f"\n[WARNING] WATCHDOG ALERT: Possible brain collapse detected!")
+                            print("\n[WARNING] WATCHDOG ALERT: Possible brain collapse detected!")
                             print(f"    Peak reward: {self.peak_reward:.1f}")
                             print(f"    Current avg: {avg_reward:.1f}")
                             print(f"    Step: {self.num_timesteps:,}")
-                            print(f"    Continuing training (entropy should help recovery)...\n")
+                            print("    Continuing training (entropy should help recovery)...\n")
         
         return True
 
@@ -200,6 +191,27 @@ NUM_ENVS = 8                          # Parallel environments
 # a frequency-based approach isn't.
 # ═══════════════════════════════════════════════════════════════════════
 CHECKPOINT_MILESTONES = [400_000 * i for i in range(1, 16)]  # 400k .. 6.0M
+
+# ═══════════════════════════════════════════════════════════════════════
+# OPTIONAL TENSORBOARD LOGGING
+# Stable-Baselines3 hard-fails ("tensorboard is not installed") the moment
+# tensorboard_log is set to a path without the tensorboard package present.
+# tensorboard is a large dependency that is only useful for inspecting
+# training curves, so requirements.txt does NOT force everyone who just
+# wants to watch the agent play to install it. Detecting it here means
+# training works either way: you get the curves if you have it, and a plain
+# console run if you don't, instead of a crash on startup.
+#   To enable:  pip install tensorboard
+#   Then view:  tensorboard --logdir ./logs/
+# ═══════════════════════════════════════════════════════════════════════
+try:
+    import tensorboard  # noqa: F401  (imported for its presence, not its API)
+    TENSORBOARD_LOG = "./logs/"
+except ImportError:
+    TENSORBOARD_LOG = None
+    print("[INFO] tensorboard not installed - training will run without "
+          "logging curves. Install it with `pip install tensorboard` if you "
+          "want them.")
 
 
 def _milestone_steps(filename):
@@ -342,7 +354,7 @@ if __name__ == "__main__":
                                        # the real collapse.
             verbose=1,
             device=device,
-            tensorboard_log="./logs/"
+            tensorboard_log=TENSORBOARD_LOG,
         )
 
     # Auto-save at exact milestones (see ExactMilestoneCheckpointCallback
