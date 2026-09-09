@@ -11,7 +11,7 @@ them is covered by the MIT license below.
       train_agent.py
       static/
       templates/
-      README.md, requirements.txt, IMPLEMENTATION.md
+      README.md, requirements.txt
       mario_brain_checkpoint.zip  (the trained model weights)
 
   NOT COVERED — third-party, different terms, see THIRD_PARTY_NOTICES.md:

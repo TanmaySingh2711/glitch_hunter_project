@@ -1,45 +1,108 @@
-# Environments
+# ═══════════════════════════════════════════════════════════════════════
+# VIRTUAL ENVIRONMENTS
+# venv_gpu/ is this project's own env (see README setup). Never commit an
+# env: it is gigabytes of platform-specific binaries that every machine
+# has to build for itself anyway.
+# ═══════════════════════════════════════════════════════════════════════
+venv_gpu/
 venv/
 env/
-.env
 .venv/
+.env
 env.bak/
 venv.bak/
 
-# Byte-compiled / optimized / DLL files
+# ═══════════════════════════════════════════════════════════════════════
+# PYTHON BUILD / CACHE ARTIFACTS
+# All regenerated automatically; none of it is source.
+# ═══════════════════════════════════════════════════════════════════════
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+build/
+dist/
 
-# IDEs and Editors
+# ═══════════════════════════════════════════════════════════════════════
+# TEST / LINT / TYPE-CHECK CACHES
+# Created by `pytest` and `ruff` (see README "Running the tests").
+# ═══════════════════════════════════════════════════════════════════════
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ═══════════════════════════════════════════════════════════════════════
+# TRAINING ARTIFACTS  —  the big one
+#
+# These were previously untracked by accident rather than by design, which
+# is how ~90MB of old checkpoint .zip files ended up permanently baked into
+# git history across the "Update5/6/7/8" commits. Checkpoints are large
+# binaries that change on every run and are already managed by
+# train_agent.py, not by git.
+#
+# Note on order: git cannot re-include a file whose PARENT DIRECTORY is
+# excluded, so the negation below only works because the master checkpoint
+# lives at the repo root, not inside checkpoints/.
+# ═══════════════════════════════════════════════════════════════════════
+checkpoints/
+logs/
+mario_brain_*checkpoint*.zip
+
+# EXCEPTION: the master checkpoint IS tracked, so a fresh clone gets a
+# working trained agent instead of an untrained random policy. At 20MB
+# that is a reasonable one-off cost - but do NOT re-commit it after every
+# retrain: git stores a near-complete new copy each time, which is exactly
+# how this repo got bloated before. Commit an updated brain deliberately,
+# when there is a real improvement worth sharing.
+!mario_brain_checkpoint.zip
+
+# ═══════════════════════════════════════════════════════════════════════
+# EXPLORATION RETROFIT ARTIFACTS
+# backup_6M/      immutable copy of the 6M brain, restorable from
+#                   checkpoints/ - not worth a second 20MB blob in history
+# exploration_data/ generated masks and bootstrap coverage
+# checkpoints_qa/   the QA-phase model zips + their paired coverage
+# ═══════════════════════════════════════════════════════════════════════
+backup_6M/
+exploration_data/
+checkpoints_qa/
+
+# The QA-phase master lives at the repo root, next to (never on top of)
+# mario_brain_checkpoint.zip. Unlike that file it is NOT tracked: the
+# completion brain is tracked so a fresh clone can watch the agent play, and
+# the QA brain is a work in progress that would add a new 20MB blob to
+# history on every push.
+glitch_hunter_qa.zip
+glitch_hunter_qa_coverage.npz
+
+# ═══════════════════════════════════════════════════════════════════════
+# EDITORS & IDEs
+# ═══════════════════════════════════════════════════════════════════════
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS generated files
+# ═══════════════════════════════════════════════════════════════════════
+# OS-GENERATED FILES
+# This project lives inside a OneDrive folder on Windows, which sprinkles
+# Desktop.ini and thumbnail caches into directories it syncs.
+# ═══════════════════════════════════════════════════════════════════════
 .DS_Store
 Thumbs.db
-venv_gpu/
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
 # ═══════════════════════════════════════════════════════════════════════
-# ADDED — these were previously untracked-by-accident rather than by
-# design, which is how ~90MB of old checkpoint .zip files ended up
-# permanently baked into git history across the "Update5/6/7/8" commits.
-# None of this belongs in version control: checkpoints and videos are
-# large binary training artifacts that change constantly and are already
-# managed by the training scripts themselves, not by git.
+# NOT IGNORED, ON PURPOSE - listed here so nobody "helpfully" adds them:
+#   uv.lock                     - the lockfile; committing it is what makes
+#                                 `uv sync` reproducible for your friend.
+#   static/vendor/              - the vendored socket.io client. It is a
+#                                 dependency we deliberately ship so the
+#                                 dashboard works with no internet.
+#   mario_brain_checkpoint.zip  - see the exception above.
 # ═══════════════════════════════════════════════════════════════════════
-checkpoints/
-mario_brain_*checkpoint*.zip
-# EXCEPTION: the master checkpoint IS tracked, so a clone gets a working
-# trained agent immediately instead of an untrained random policy. At 20MB
-# that's a reasonable one-off cost - just don't commit it after every retrain
-# (see the note above `mario_brain_*checkpoint*.zip`: committing a changed
-# binary repeatedly adds a near-full new copy to git history each time,
-# which is exactly how this repo got bloated before). Commit an updated
-# checkpoint deliberately, when there's an actual improvement worth sharing.
-!mario_brain_checkpoint.zip
-logs/
-.milestone_saved_*.flag
-

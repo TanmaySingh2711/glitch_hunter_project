@@ -1,3 +1,4 @@
+import os
 import sys
 # Python fully buffers stdout when it isn't attached to an interactive
 # terminal (e.g. redirected to a log file, or launched from another tool) -
@@ -16,19 +17,38 @@ import sys
 # line printable regardless of the machine's console codepage.
 sys.stdout.reconfigure(line_buffering=True, encoding='utf-8')
 
-import eventlet
-eventlet.monkey_patch()
+import threading
 import traceback
 import time
 from flask import Flask, render_template
 from flask_socketio import SocketIO
 # agent_logic pulls in custom_mario_env, which sets SDL_AUDIODRIVER before
 # pygame loads - so it has to be imported before pygame is used here.
-from agent_logic import run_mario_agent, open_agent_window, close_agent_window
+from agent_logic import (run_mario_agent, open_agent_window,
+                         close_agent_window, env_lock)
 import pygame as pg
 
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode='eventlet')
+
+# ─── async_mode='threading' (was 'eventlet') ───
+# eventlet is unmaintained and Flask-SocketIO's own maintainer now
+# recommends the threading mode as the default. It also removes a failure
+# mode this project actually hit: eventlet runs every greenlet on ONE OS
+# thread and only switches at I/O points it has monkey-patched, so a
+# blocking CPU/GPU call (PPO.load(), or a slow env.step()) stalls the whole
+# server - including the heartbeat that tells the browser the connection is
+# alive. Real OS threads do not share that problem: the frame loop can sit
+# on the GPU without stopping the server from answering anyone.
+socketio = SocketIO(app, async_mode='threading')
+
+# With real threads, the shared state below is genuinely concurrent - the
+# frame loop reads it from its own thread while click handlers write to it
+# from theirs. Under eventlet this was safe by accident (one thread, and
+# switches only ever happened at explicit yield points). `task_epoch += 1`
+# is a read-modify-write and is NOT atomic, so two clicks arriving together
+# could lose an increment and leave a stale frame loop running. This lock
+# makes each state transition indivisible.
+state_lock = threading.RLock()
 
 # Cache-busting: appended as ?v=... on static asset URLs (see index.html)
 # so a browser that already cached an old style.css/main.js is forced to
@@ -38,17 +58,62 @@ ASSET_VERSION = str(int(time.time()))
 
 test_running = False
 agent_gen = None
-
 task_epoch = 0
+
+# The single live frame-loop thread, or None.
+#
+# ─── WHY THIS EXISTS ───
+# Every "Start Testing" used to call start_background_task() unconditionally.
+# Under eventlet that was harmless: greenlets are cheap and a superseded one
+# died at its next yield. With real OS threads it is not - a stress test
+# firing start/stop/reset from 4 clients produced ELEVEN consecutive
+# START_TESTING handlers, each spawning a thread that then queued up on
+# env_lock. The server pinned a core and stopped answering HTTP entirely.
+#
+# There must only ever be ONE frame loop. handle_start_testing() now retires
+# the previous one (bump the epoch, then join it) before starting another.
+agent_thread = None
+
+# How long to wait for a superseded frame loop to notice and exit. It only
+# has to finish the step it is on, which is single-digit milliseconds; the
+# generous ceiling is purely so a pathological case degrades into "skip this
+# click" instead of blocking the handler forever.
+THREAD_RETIRE_TIMEOUT = 5.0
 
 @app.route('/')
 def index():
     return render_template('index.html', asset_version=ASSET_VERSION)
 
+
+@app.route('/healthz')
+def healthz():
+    """Liveness + thread census.
+
+    Exists because a stress test once wedged this server by spawning an
+    unbounded number of frame-loop threads, and there was no way to see that
+    happening from outside. `frame_loops` must never exceed 1; anything more
+    means the single-frame-loop invariant in handle_start_testing() has
+    regressed.
+    """
+    frame_loops = sum(
+        1 for t in threading.enumerate()
+        if t.is_alive() and getattr(t, "_target", None) is background_agent_task
+    )
+    return {
+        "status": "ok",
+        "testing": test_running,
+        "threads_total": threading.active_count(),
+        "frame_loops": frame_loops,
+    }
+
 def background_agent_task(epoch):
     global test_running, agent_gen
-    if agent_gen is None:
-        agent_gen = run_mario_agent()
+    # Creating the generator touches the env, so it belongs under the lock
+    # too - otherwise a Reset arriving right now could null out agent_gen
+    # between this check and the assignment.
+    with env_lock:
+        if agent_gen is None:
+            agent_gen = run_mario_agent()
 
     target_frame_time = 1.0 / 60.0
 
@@ -73,11 +138,35 @@ def background_agent_task(epoch):
     # compute-bound rate (on battery) - unlike a fixed lower fps target,
     # it adapts automatically to either case instead of only fixing one.
 
+    # NOTE: this is a `while` loop driving next() by hand rather than a
+    # `for item in agent_gen`. That is deliberate - it is the only way to
+    # hold env_lock for exactly the duration of ONE step and release it
+    # before sleeping. A `for` loop hides the next() call, so the lock would
+    # have to wrap the whole body including the sleep, and every Reset click
+    # would then block for a full frame period instead of a few milliseconds.
     try:
         last_t = time.time()
-        for item in agent_gen:
+        while True:
             if not test_running or task_epoch != epoch:
                 break
+
+            # Advance the game under the lock, so a concurrent Reset or
+            # disconnect cannot tear down the pygame window mid-step.
+            with env_lock:
+                # Re-checked INSIDE the lock: this thread may have been
+                # waiting here while a handler superseded it, in which case
+                # stepping the env now would resurrect a window the user
+                # just closed.
+                if not test_running or task_epoch != epoch:
+                    break
+                try:
+                    item = next(agent_gen)
+                except StopIteration:
+                    break
+
+            # Emitting and sleeping happen OUTSIDE the lock - neither needs
+            # the env, and holding it across the sleep is what would make
+            # teardown feel laggy.
             socketio.emit('video_frame', {'frame': item['frame']})
             if item['log']:
                 socketio.emit('agent_log', {'log': item['log']})
@@ -117,29 +206,36 @@ def discard_agent_gen():
     asked for it rather than at some arbitrary later time.
     """
     global agent_gen
-    if agent_gen is not None:
-        try:
-            agent_gen.close()
-        except Exception:
-            pass
-        agent_gen = None
+    # env_lock guarantees the frame loop is NOT inside next(agent_gen) right
+    # now. Calling close() on a generator that another thread is actively
+    # executing raises "generator already executing"; the lock makes that
+    # impossible rather than relying on luck.
+    with env_lock:
+        if agent_gen is not None:
+            try:
+                agent_gen.close()
+            except Exception:
+                pass
+            agent_gen = None
 
 @socketio.on('disconnect')
 def handle_disconnect():
     # Covers a page refresh or a closed tab, not just an explicit Reset
     # click - the game window should not be left open with nobody watching.
     global test_running, task_epoch
-    test_running = False
-    task_epoch += 1
-    stop_all_music()
-    close_agent_window()
+    with state_lock:
+        test_running = False
+        task_epoch += 1
+        stop_all_music()
+        close_agent_window()
 
 @socketio.on('connect')
 def handle_connect():
     global test_running, task_epoch
-    test_running = False
-    task_epoch += 1
-    discard_agent_gen()
+    with state_lock:
+        test_running = False
+        task_epoch += 1
+        discard_agent_gen()
 
 @socketio.on('start_testing')
 def handle_start_testing(data=None):
@@ -155,10 +251,32 @@ def handle_start_testing(data=None):
     # handler - on the very first-ever click this includes loading the
     # model, so a short pause here is expected and matches how it always
     # briefly paused before streaming its first frame.
-    open_agent_window()
-    test_running = True
-    task_epoch += 1
-    socketio.start_background_task(background_agent_task, task_epoch)
+    global agent_thread
+    with state_lock:
+        # Retire any previous frame loop FIRST. Bumping the epoch is the
+        # signal for it to break out; test_running=False makes that
+        # unconditional even if the epoch check races.
+        previous = agent_thread
+        test_running = False
+        task_epoch += 1
+
+    if previous is not None and previous.is_alive():
+        # Joined OUTSIDE state_lock: the old loop may need to take env_lock
+        # to finish its current step, and holding state_lock here would be
+        # an unnecessary second dependency in that wait.
+        previous.join(timeout=THREAD_RETIRE_TIMEOUT)
+        if previous.is_alive():
+            print("[WARN] previous frame loop did not exit; not starting "
+                  "another (this would otherwise leak a thread).")
+            return
+
+    with state_lock:
+        open_agent_window()
+        test_running = True
+        task_epoch += 1
+        epoch = task_epoch
+        agent_thread = socketio.start_background_task(
+            background_agent_task, epoch)
 
 @socketio.on('stop_testing')
 def handle_stop_testing():
@@ -168,43 +286,45 @@ def handle_stop_testing():
     # on screen) and the live stream (no more video_frame emits) freeze on
     # the same last frame together, with nothing extra to do here.
     global test_running, task_epoch
-    test_running = False
-    task_epoch += 1
-    stop_all_music()
+    with state_lock:
+        test_running = False
+        task_epoch += 1
+        stop_all_music()
 
 @socketio.on('reset_game')
 def handle_reset_game():
     global test_running, task_epoch
-    test_running = False
-    task_epoch += 1
-    discard_agent_gen()  # Force a fresh generator on the next start
-    stop_all_music()
-    close_agent_window()
+    with state_lock:
+        test_running = False
+        task_epoch += 1
+        discard_agent_gen()  # Force a fresh generator on the next start
+        stop_all_music()
+        close_agent_window()
 
 if __name__ == '__main__':
     # ─── PRE-LOAD THE MODEL BEFORE ACCEPTING CONNECTIONS ───
     # PPO.load() onto the GPU is a real blocking call (1-3+ seconds of pure
-    # CPU/GPU work, not I/O) - eventlet's cooperative scheduler can't service
-    # ANY other socket activity while it runs, no matter which greenlet it's
-    # called from. If a client is already connected and waiting when this
-    # happens (e.g. the first-ever "Start Testing" click), the server misses
-    # that client's ping/heartbeat for long enough that it looks dead - the
-    # client disconnects and reconnects, which fires our disconnect handler
-    # and closes the game window that was *just* opened, moments before
-    # run_mario_agent() tries to use it. Confirmed exactly this way: a live
-    # client test produced "pygame.error: video system not initialized"
-    # inside env.reset(), immediately after open_agent_window() had already
-    # run successfully.
+    # CPU/GPU work, not I/O). Under the old eventlet mode that froze the
+    # entire server, because every greenlet shared one OS thread: a client
+    # already connected and waiting through the first-ever "Start Testing"
+    # click would miss its heartbeat, decide the server was dead, and
+    # reconnect - which fired the disconnect handler and closed the game
+    # window that had *just* been opened, moments before run_mario_agent()
+    # tried to use it. That produced "pygame.error: video system not
+    # initialized" inside env.reset() in a live client test.
     #
-    # Fix: do the slow part here, once, before socketio.run() starts
-    # accepting connections at all - so no live client is ever waiting
-    # through it. open_agent_window() creates the env/model AND, as a side
-    # effect of constructing CustomMarioEnv for the first time, a real OS
-    # window - close_agent_window() immediately hides that until an actual
-    # "Start Testing" click, matching the intended behavior (window only
-    # appears on Start, not just because the server is running). Every
-    # subsequent open (including the first real "Start Testing") is then
-    # just the fast reopen/focus path, never the slow model load.
+    # Threading mode removes that specific failure (a blocking call in one
+    # thread no longer stops the server answering others), but this pre-load
+    # stays for a plainer reason: it moves a multi-second stall off the
+    # user's first click and onto startup, where a printed message explains
+    # it. open_agent_window() creates the env/model AND, as a side effect of
+    # constructing CustomMarioEnv, a real OS window - close_agent_window()
+    # hides it again until an actual "Start Testing" click.
+    #
+    # It also pins ALL pygame/SDL work to this main thread for the life of
+    # the process: the window is created here, and every later open/close/
+    # step call reuses it. That matters because SDL is not safe to drive
+    # from arbitrary threads.
     print("Pre-loading the AI model (this can take a few seconds)...")
     open_agent_window()
     close_agent_window()
@@ -213,4 +333,29 @@ if __name__ == '__main__':
     # debug=False on purpose: the Werkzeug reloader spawns a SECOND python
     # process that also imports agent_logic and loads the model onto the GPU,
     # which wastes VRAM and leaves an orphan process behind on shutdown.
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    # allow_unsafe_werkzeug=True is required in threading mode: without
+    # eventlet's WSGI server, Flask-SocketIO falls back to Werkzeug's, which
+    # refuses to start outside debug mode unless explicitly allowed. This is
+    # a single-user dashboard on localhost, which is exactly the case that
+    # flag exists for.
+    # ─── BIND TO LOCALHOST ONLY BY DEFAULT ───
+    # This used to be host='0.0.0.0', which listens on EVERY network
+    # interface - anyone on the same Wi-Fi could open the dashboard, drive
+    # the agent, and watch the stream, with no password in front of it. The
+    # README only ever told you to visit localhost, so the exposure was
+    # accidental rather than intended.
+    #
+    # 127.0.0.1 means "this machine only". To deliberately watch from
+    # another device (a phone on the same network, say), opt in explicitly:
+    #     set GLITCH_HUNTER_HOST=0.0.0.0     (Windows)
+    #     GLITCH_HUNTER_HOST=0.0.0.0 python app.py   (Mac/Linux)
+    # Only do that on a network you trust - there is still no auth.
+    host = os.environ.get('GLITCH_HUNTER_HOST', '127.0.0.1')
+    port = int(os.environ.get('GLITCH_HUNTER_PORT', '5000'))
+    if host != '127.0.0.1':
+        print(f"[WARNING] Listening on {host} - reachable by other devices "
+              f"on this network, with no authentication.")
+    print(f"Dashboard ready at http://localhost:{port}")
+
+    socketio.run(app, host=host, port=port, debug=False,
+                 allow_unsafe_werkzeug=True)

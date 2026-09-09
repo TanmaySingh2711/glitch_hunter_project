@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A trained PPO agent plays a Super Mario Bros clone, streamed live with a bug tracker.">
     <title>The Glitch Hunter</title>
+    <!-- Inline SVG favicon: without one the browser requests /favicon.ico on
+         every load and the server logs a 404 each time. Inline keeps it to
+         zero extra requests and zero extra files. -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#127918;</text></svg>">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version }}">
 </head>
 <body>
@@ -18,45 +23,47 @@
                 </select>
             </div>
             <div class="button-group">
-                <button id="start-btn" class="btn-primary">START TESTING</button>
-                <button id="stop-btn" class="btn-secondary" disabled>Stop Testing</button>
-                <button id="reset-btn" class="btn-secondary" disabled>Reset Dashboard</button>
+                <button id="start-btn" class="btn-primary" type="button">START TESTING</button>
+                <button id="stop-btn" class="btn-secondary" type="button" disabled>Stop Testing</button>
+                <button id="reset-btn" class="btn-secondary" type="button" disabled>Reset Dashboard</button>
             </div>
-            
-            <div style="margin-top: auto; display: flex; justify-content: center; padding-top: 15px;">
-                <button id="info-btn" class="info-button" aria-label="Controls Info">i</button>
+
+            <div class="info-button-row">
+                <button id="info-btn" class="info-button" type="button" aria-label="Show the agent's action list">i</button>
             </div>
         </aside>
 
         <!-- Center: Video Feed -->
         <main class="panel video-panel">
             <div class="monitor">
-                <img id="video-feed" alt="Live Feed" />
+                <img id="video-feed" alt="Live view of the AI playing" />
             </div>
         </main>
 
         <!-- Middle-Right: Bug Tracker -->
         <aside class="panel bug-panel">
-            <h3 style="color: #ff4444; margin-top: 0; margin-bottom: 10px; text-align: center;">BUG TRACKER</h3>
-            <div id="bug-terminal">
-                <ul id="bug-list" style="list-style: none; padding-left: 0; margin: 0;">
-                    <li id="bug-placeholder" style="color: #666; font-style: italic;">start testing...</li>
+            <h3 class="panel-heading panel-heading--bug">BUG TRACKER</h3>
+            <div id="bug-terminal" role="log" aria-live="polite">
+                <ul id="bug-list">
+                    <li id="bug-placeholder" class="placeholder">start testing...</li>
                 </ul>
             </div>
         </aside>
 
         <!-- Right: Log Terminal -->
         <aside class="panel log-panel">
-            <h3 style="color: var(--accent-secondary); margin-top: 0; margin-bottom: 10px; text-align: center;">LOG TERMINAL</h3>
-            <div id="log-terminal"><p id="log-placeholder" style="color: #666; font-style: italic;">start testing...</p></div>
+            <h3 class="panel-heading panel-heading--log">LOG TERMINAL</h3>
+            <div id="log-terminal" role="log" aria-live="polite">
+                <p id="log-placeholder" class="placeholder">start testing...</p>
+            </div>
         </aside>
     </div>
 
     <!-- Info Modal -->
-    <div id="info-modal" class="modal hidden">
+    <div id="info-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="info-modal-title">
         <div class="modal-content">
-            <span class="close-modal">&times;</span>
-            <h2 style="color: var(--accent-primary); margin-top: 0; margin-bottom: 20px;">Agent Actions</h2>
+            <span class="close-modal" role="button" tabindex="0" aria-label="Close">&times;</span>
+            <h2 id="info-modal-title" class="modal-title">Agent Actions</h2>
             <!-- Keep in sync with ACTION_NAMES in agent_logic.py and the
                  action space in custom_mario_env.py -->
             <ul class="action-list">
@@ -73,7 +80,10 @@
             </ul>
         </div>
     </div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <!-- Served locally, not from a CDN. This dashboard is a localhost tool
+         and was previously unusable with no internet connection: the CDN
+         script would fail to load and every button silently did nothing. -->
+    <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}?v={{ asset_version }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>

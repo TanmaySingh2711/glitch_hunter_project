@@ -62,7 +62,7 @@ class CustomMarioEnv(gym.Env):
         # ═══════════════════════════════════════════════════════════════════
         self.action_space = spaces.Discrete(10)
         self.observation_space = spaces.Box(low=0, high=255, shape=(240, 256, 3), dtype=np.uint8)
-        
+
         self.fake_keys = FakeKeys()
 
         # Per-episode glitch-detection state (see _detect_glitches below).
@@ -76,11 +76,11 @@ class CustomMarioEnv(gym.Env):
         # Load the Pygame clone safely using absolute paths so SubprocVecEnv workers don't crash
         self.project_root = os.path.dirname(os.path.abspath(__file__))
         self.mario_clone_dir = os.path.join(self.project_root, 'mario_clone')
-        
+
         orig_cwd = os.getcwd()
         os.chdir(self.mario_clone_dir)
         sys.path.insert(0, self.mario_clone_dir)
-        
+
         # Tile windows across the screen so they don't stack perfectly on top
         # of each other. The window is ~800x600; a random offset spreads the
         # 8 parallel training windows out across the desktop.
@@ -89,16 +89,16 @@ class CustomMarioEnv(gym.Env):
         os.environ['SDL_VIDEO_WINDOW_POS'] = f"{x_pos},{y_pos}"
         if 'SDL_VIDEO_CENTERED' in os.environ:
             del os.environ['SDL_VIDEO_CENTERED']
-            
+
         try:
             from data import setup, tools, constants as c
             from data.states import level1
-            
+
             # Store mario clone directory
             self.tools_module = tools
             self.setup_module = setup
             self.c_module = c
-            
+
             self.game = tools.Control(setup.ORIGINAL_CAPTION)
             state_dict = {
                           c.LEVEL1: level1.Level1()
@@ -109,7 +109,7 @@ class CustomMarioEnv(gym.Env):
             os.chdir(orig_cwd)
             if self.mario_clone_dir in sys.path:
                 sys.path.remove(self.mario_clone_dir)
-            
+
     def step(self, action):
         pg.event.pump()
         keys = {
@@ -119,7 +119,7 @@ class CustomMarioEnv(gym.Env):
             pg.K_s: False, # Sprint
             pg.K_DOWN: False # Crouch
         }
-        
+
         if action in [1, 2, 3, 4]:
             keys[pg.K_RIGHT] = True
         if action in [6, 8, 9]:
@@ -130,10 +130,10 @@ class CustomMarioEnv(gym.Env):
             keys[pg.K_s] = True          # Sprint
         if action == 7:
             keys[pg.K_DOWN] = True
-            
+
         self.fake_keys.update(keys)
         self.game.keys = self.fake_keys
-        
+
         # ═══════════════════════════════════════════════════════════════════
         # PERMANENT FIX for BUG #1: Bypass the Pygame clone's anti-spam
         # jump lock. The clone requires the jump key to be released before
@@ -145,11 +145,11 @@ class CustomMarioEnv(gym.Env):
             self.game.state.mario.allow_jump = True
         except AttributeError:
             pass
-        
+
         # Advance game time by exactly 1 frame (60 FPS = 16.666 ms)
         self.fake_time += (1000.0 / 60.0)
         self.game.current_time = self.fake_time
-        
+
         # Update state with fake keys.
         #
         # No chdir here any more: this used to wrap the call in
@@ -171,15 +171,40 @@ class CustomMarioEnv(gym.Env):
 
 
         obs = self._fast_obs()
-        
+
         reward = 0.0
         done = False
         info = {}
-        
+
         try:
             mario = self.game.state.mario
             info['x_pos'] = mario.rect.x
             info['y_pos'] = mario.rect.y
+
+            # ─── WORLD-SPACE COLLIDER + CAMERA (exploration retrofit) ───
+            # `mario.rect` is in WORLD coordinates, not screen coordinates.
+            # Verified live: rect.x reached 2928 while viewport.x was 2571,
+            # and the window is only 800px wide - a screen-space rect could
+            # never exceed 800. level1.py subtracts the camera only at blit
+            # time (`mario.rect.x - self.viewport.x`), never from the rect
+            # itself. So this needs no camera correction anywhere, and the
+            # coverage bitmap can be indexed with it directly.
+            #
+            # The full rect is exported rather than just x/y because Mario's
+            # collider CHANGES SIZE with his form (30x40 small, 40x80 big),
+            # and coverage must sweep the real footprint - assuming 30x40
+            # while big would under-count half of every pixel he occupies.
+            #
+            # viewport_x is exported because the camera is ONE-WAY:
+            # update_viewport() only ever increases it, and Mario is
+            # hard-clamped to viewport.x + 5 (level1.py:518). Anything left
+            # of it is physically unreachable for the rest of the episode,
+            # so the frontier index uses this to avoid pointing the agent at
+            # impossible targets.
+            info['mario_rect'] = (int(mario.rect.x), int(mario.rect.y),
+                                  int(mario.rect.w), int(mario.rect.h))
+            viewport = getattr(self.game.state, 'viewport', None)
+            info['viewport_x'] = int(viewport.x) if viewport is not None else 0
 
             # Velocity + ground-contact info, needed by the reward wrapper to
             # detect and reward "momentum building" (sprinting before a jump)
@@ -245,6 +270,8 @@ class CustomMarioEnv(gym.Env):
         except AttributeError:
             info['x_pos'] = 0
             info['y_pos'] = 0
+            info['mario_rect'] = None
+            info['viewport_x'] = 0
             info['x_vel'] = 0.0
             info['on_ground'] = True
             info['score'] = 0
@@ -474,7 +501,7 @@ class CustomMarioEnv(gym.Env):
         # of the full 800x600 source - measured 11.9x faster for this exact
         # resize (0.47ms vs 5.6ms). Verified byte-for-byte IDENTICAL output
         # to the old cv2.INTER_NEAREST path for this exact scale ratio (no
-        # behavior change to the model's input - see IMPLEMENTATION.md).
+        # behavior change to the model's input).
         # ═══════════════════════════════════════════════════════════════
         surface = pg.display.get_surface()
         if surface is None:

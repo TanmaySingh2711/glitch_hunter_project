@@ -198,6 +198,63 @@ select:focus {
     word-break: break-all;
 }
 
+/* ─── Moved out of index.html ───
+   These rules replace style="..." attributes that used to sit on the markup.
+   Keeping them here means the look can be changed in one place, and the HTML
+   stays about structure. */
+.panel-heading {
+    margin-top: 0;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.panel-heading--bug {
+    color: #ff4444;
+}
+
+.panel-heading--log {
+    color: var(--accent-secondary);
+}
+
+.info-button-row {
+    margin-top: auto;
+    display: flex;
+    justify-content: center;
+    padding-top: 15px;
+}
+
+#bug-list {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+}
+
+/* The "start testing..." / "No bugs found yet..." idle text in both panels. */
+.placeholder {
+    color: #666;
+    font-style: italic;
+}
+
+.modal-title {
+    color: var(--accent-primary);
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+/* Bug tracker entries.
+   These used to be styled inline from JavaScript. Moving them here keeps
+   presentation in the stylesheet with everything else, and let the JS drop
+   innerHTML in favour of textContent.
+
+   The selector is deliberately `#bug-terminal li.bug-entry` and not just
+   `.bug-entry`: the shared rule above is `#bug-terminal li`, whose ID gives
+   it higher specificity than a bare class, so a plain `.bug-entry` would
+   lose and every bug would render in the log's green instead of red. */
+#bug-terminal li.bug-entry {
+    color: #ff4444;
+    margin-bottom: 8px;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
     width: 8px;

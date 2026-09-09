@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import cv2
 import gymnasium as gym
@@ -6,6 +7,9 @@ import gymnasium as gym
 from stable_baselines3 import PPO
 from collections import deque
 from custom_mario_env import CustomMarioEnv
+
+from exploration import config
+from exploration import coverage as coverage_mod
 
 ACTION_NAMES = {
     0: "Stand Still",
@@ -79,28 +83,105 @@ DANGER_ZONE_BOOST_EPISODES = 15  # how many episodes the boost stays active
 
 class GlitchHunterWrapper(gym.Wrapper):
     """
-    Reward shaping for the Mario PPO agent.
+    Reward shaping for the Mario PPO agent, in two selectable modes.
 
-    Design goals (each numbered rule below is enforced by a correspondingly
-    labelled block in step(), which carries the reasoning for that rule):
+    ═══════════════════════════════════════════════════════════════════════
+    MODE: "legacy_completion"   (exploration/config.py REWARD_MODE)
+    ═══════════════════════════════════════════════════════════════════════
+    The original objective, preserved EXACTLY - not approximated, not
+    "mostly the same". This is what the 6M-step brain was trained under, so
+    it is the only honest baseline to calibrate against and the only safe
+    thing to fall back to. Its rules:
+
       1. Reward THOROUGH exploration of the whole level, not just running
          right as fast as possible ("no speedrunning").
       2. Never let camping/idling near an obstacle be more attractive than
-         attempting it — remove reward sources that can be farmed in place,
-         and make "stuck" pressure escalate smoothly instead of a hard wall.
-      3. Make tactical backward movement (backing up to get a running start)
-         cheap, while still discouraging aimless backtracking.
-      4. Explicitly reward the mechanics needed to clear pipes/gaps: sustained
-         sprint velocity, and a clean running jump.
-      5. Don't double-count coins (the underlying game awards both
-         COIN_TOTAL +1 *and* SCORE +200 for the same coin — see custom
-         reward calc below).
-      6. Reward reaching the flagpole/level completion, since the agent
-         has never once finished a level.
+         attempting it.
+      3. Make tactical backward movement cheap, aimless backtracking not.
+      4. Explicitly reward the mechanics needed to clear pipes/gaps.
+      5. Don't double-count coins.
+      6. Reward reaching the flagpole.
+
+    ═══════════════════════════════════════════════════════════════════════
+    MODE: "qa_exploration"
+    ═══════════════════════════════════════════════════════════════════════
+    A different objective entirely: find as much of the world as possible,
+    persistently, across episodes and across processes.
+
+        previously explored territory = TRANSIT SPACE
+        new global world-space coverage = REWARD SPACE
+
+    Why the legacy reward had to go rather than just be added to: nearly
+    every dominant legacy term was a monotone function of max-x. The +1.0
+    per `visited_tiles` entry is keyed on the x-COLUMN alone - it is named
+    exploration but it is forward progress under another name, and it pays
+    the same whether Mario walks the ground or sails over everything. Add
+    +25 per 400px milestone, +0.1 per new max-x, and the completion bonus,
+    and roughly 2,180 of a ~2,200-point successful episode was "how far
+    right did you get". Layering a coverage bonus on top of that would have
+    been a rounding error against it.
+
+    So in QA mode those terms are DELETED, not down-weighted:
+        visited_tiles, visited_altitude_tiles, milestones, new-max-x,
+        the windowed backward penalty, and the x-spread stuck detector.
+
+    The x-spread stuck detector matters most of those. It punished exactly
+    the behaviours a QA explorer needs - probing a wall, trying fifteen jump
+    variants from one spot, working a single suspicious corner - because it
+    could not tell "not moving right" from "not exploring". Its replacement
+    (drought, below) keys on FAILURE TO FIND NEW PIXELS, which is the thing
+    actually worth punishing.
+
+    What is KEPT, rescaled: the locomotion skills. Clean running jumps,
+    momentum, powerups, combat. Those are capabilities, not objectives -
+    the agent needs them to reach anywhere new - so they survive at roughly
+    a tenth of their legacy weight and, importantly, become
+    DIRECTION-AGNOSTIC. A hard leftward gap is exactly as much of a jump as
+    a rightward one, and a QA explorer needs both.
+
+    Reward is per SUBSTEP. This wrapper sits BELOW
+    MaxAndSkipObservation(skip=4), which SUMS four substeps, so what PPO
+    sees per decision is about 4x the numbers here.
     """
 
-    def __init__(self, env):
+    def __init__(self, env, reward_mode=None, coverage=None, shm_names=None,
+                 testable_mask=None, attach_coverage=None):
         super().__init__(env)
+        self.reward_mode = reward_mode or config.REWARD_MODE
+        if self.reward_mode not in ("qa_exploration", "legacy_completion"):
+            raise ValueError(
+                f"unknown REWARD_MODE {self.reward_mode!r}; expected "
+                f"'qa_exploration' or 'legacy_completion'")
+
+        # ─── COVERAGE ATTACHMENT ───
+        # Coverage is RECORDED whenever it is attached, in BOTH modes. Only
+        # the REWARD branches on the mode. That separation is what lets
+        # tools/bootstrap_coverage.py replay the 6M brain under its own
+        # native legacy reward - so the routes recorded are the ones it
+        # actually learned - while still recording where it went.
+        if attach_coverage is None:
+            attach_coverage = (coverage is not None or shm_names is not None
+                               or self.reward_mode == "qa_exploration")
+        self.coverage = coverage
+        if self.coverage is None and attach_coverage:
+            mask = testable_mask
+            if mask is None:
+                mask = coverage_mod.load_testable()
+            if shm_names:
+                self.coverage = coverage_mod.open_shared(shm_names,
+                                                         testable_mask=mask)
+            else:
+                self.coverage = coverage_mod.SpatialCoverage(testable_mask=mask)
+
+        if self.reward_mode == "qa_exploration":
+            if self.coverage is None:
+                raise ValueError(
+                    "qa_exploration mode requires a coverage channel; pass "
+                    "coverage= or shm_names=, or leave attach_coverage as None")
+            # Fails at construction rather than 200k steps into a run.
+            config.assert_reward_balance()
+
+        # ─── LEGACY STATE ───
         self.visited_tiles = set()
         self.visited_altitude_tiles = set()
         self.milestones_hit = set()
@@ -120,6 +201,17 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.max_x_reached = 0
         self.last_powerup_count = 0
         self.last_powerup_phi = 0.0
+
+        # ─── QA STATE ───
+        self.last_frontier_phi = 0.0
+        self.last_frontier_version = -1
+        self.ep_novelty_shape = 0.0     # unweighted; calibration solves on this
+        self.ep_reward_total = 0.0
+        self.ep_substeps = 0
+        self.ep_drought_paid = 0.0
+        self.ep_interaction_paid = 0.0
+        self.qa_clip_events = 0
+        self.last_n_new = 0
 
         # ─── Adaptive death memory — persists ACROSS episodes on purpose ───
         self.death_streaks = {}       # (x_bucket, cause) -> consecutive count
@@ -148,6 +240,22 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.last_powerup_count = 0
         self.last_powerup_phi = 0.0
 
+        self.last_frontier_phi = 0.0
+        self.last_frontier_version = -1
+        self.ep_novelty_shape = 0.0
+        self.ep_reward_total = 0.0
+        self.ep_substeps = 0
+        self.ep_drought_paid = 0.0
+        self.ep_interaction_paid = 0.0
+        self.last_n_new = 0
+
+        # Coverage itself is NEVER cleared here - that is the entire point of
+        # the retrofit. begin_episode() only rolls the per-episode counters
+        # and drops prev_rect, so the spawn teleport is not swept as a false
+        # corridor across the level.
+        if self.coverage is not None:
+            self.coverage.begin_episode()
+
         # Decay active danger-zone boosts by one episode; drop expired ones.
         # (death_streaks and danger_zones themselves are NOT cleared here —
         # they're meant to persist across episodes, see the class docstring
@@ -160,6 +268,7 @@ class GlitchHunterWrapper(gym.Wrapper):
 
         return self.env.reset(**kwargs)
 
+    # ══════════════════════════════════════════════════════════════════════
     def step(self, action):
         step_result = self.env.step(action)
         if len(step_result) == 4:
@@ -168,6 +277,285 @@ class GlitchHunterWrapper(gym.Wrapper):
             obs, reward, terminated, truncated, info = step_result
             done = terminated or truncated
 
+        n_new = self._record_coverage(info)
+
+        if self.reward_mode == "qa_exploration":
+            reward, done = self._qa_reward(reward, done, info, n_new)
+        else:
+            reward, done = self._legacy_reward(reward, done, info)
+
+        self.ep_reward_total += float(reward)
+        self.ep_substeps += 1
+        return obs, float(reward), done, False, info
+
+    # ── coverage recording (both modes) ───────────────────────────────────
+    def _record_coverage(self, info):
+        """Marks the swept collider region and returns how many px were new.
+
+        Uses info['mario_rect'], the live collider in WORLD coordinates at
+        its real per-form size. A None rect means the env hit its
+        AttributeError fallback and genuinely does not know where Mario is;
+        recording a guess there would fabricate coverage, so it records
+        nothing.
+        """
+        self.last_n_new = 0
+        if self.coverage is None:
+            return 0
+        rect = info.get('mario_rect')
+        if not rect:
+            return 0
+        n_new = self.coverage.record({
+            'cur_rect': tuple(rect),
+            'viewport_x': info.get('viewport_x', 0),
+            'x_vel': info.get('x_vel', 0.0),
+            'on_ground': info.get('on_ground', True),
+        })
+        self.last_n_new = n_new
+        info['coverage_new_px'] = n_new
+        info['coverage_episode_new'] = self.coverage.episode_new
+        info['coverage_drought'] = self.coverage.steps_since_new_pixel
+        return n_new
+
+    # ══════════════════════════════════════════════════════════════════════
+    # QA EXPLORATION REWARD
+    # ══════════════════════════════════════════════════════════════════════
+    def _qa_reward(self, reward, done, info, n_new):
+        cov = self.coverage
+        x_pos = info.get('x_pos', self.last_x_pos or 0)
+        x_vel = info.get('x_vel', 0.0)
+        on_ground = info.get('on_ground', True)
+        rect = info.get('mario_rect')
+
+        current_bucket = int(x_pos) // DANGER_ZONE_BUCKET_PX
+        active_zone = self.danger_zones.get(current_bucket)
+
+        # ─── 1. NOVELTY — the primary signal ───
+        # Paid ONLY for world pixels no worker in this run has ever occupied.
+        # sqrt-scaled and capped, so a freak 2288px sweep cannot pay 60x what
+        # an ordinary stride pays; a bounded reward is the whole answer to
+        # "don't let magnitude explode". A revisit pays exactly
+        # REVISIT_REWARD (0.0) - free, never negative, because charging for
+        # traversal would make backtracking to reach unexplored space
+        # self-defeating, and the agent would learn to refuse to cross its
+        # own history.
+        shape = cov.novelty_shape(n_new)
+        self.ep_novelty_shape += shape
+        reward += cov.novelty_reward(n_new)
+
+        # ─── 2. FRONTIER GUIDANCE (potential-based) ───
+        # Ng/Harada/Russell shaping toward the nearest unexplored cell AHEAD
+        # of the one-way camera. Deliberately weak: the entire potential
+        # range is worth less than one agent-step of real discovery (checked
+        # by config.assert_reward_balance at construction), so approaching
+        # the frontier can never out-earn actually crossing into it.
+        #
+        # The delta is SKIPPED on the step a refresh lands. Phi jumps then
+        # because the map moved - possibly because another worker explored
+        # something - and paying for that would be paying this agent for
+        # someone else's discovery.
+        if rect:
+            cov.refresh_frontier(viewport_x=info.get('viewport_x', 0))
+            cx = rect[0] + rect[2] // 2
+            cy = rect[1] + rect[3] // 2
+            phi_now = cov.phi(cx, cy)
+            if cov.frontier_version == self.last_frontier_version:
+                reward += config.FRONTIER_WEIGHT * (
+                    config.GAMMA * phi_now - self.last_frontier_phi)
+            self.last_frontier_phi = phi_now
+            self.last_frontier_version = cov.frontier_version
+
+        # ─── 3. EXPLORATION DROUGHT ───
+        # Pressure for FAILING TO EXPLORE - not for standing on an old pixel.
+        # That distinction is the whole reason the legacy x-spread detector
+        # had to go: vertical probing, wall testing and trying many jump
+        # variants from one spot are exactly the QA behaviours it punished.
+        # Here they are free for as long as they keep finding pixels, and
+        # only a genuinely unproductive stretch costs anything.
+        # The cumulative cap is as important as the per-substep one. Without
+        # it the penalty is bounded per substep but unbounded per EPISODE, and
+        # the first calibration run measured exactly that: episodes ending at
+        # -685, with the drought outweighing everything the agent discovered
+        # by three orders of magnitude. Ending the episode is what the drought
+        # is for; the ramp is only the gradient that leads there.
+        drought = cov.steps_since_new_pixel
+        if drought > config.DROUGHT_GRACE:
+            over = drought - config.DROUGHT_GRACE
+            notch = 1 + over // config.DROUGHT_STEP
+            due = min(config.DROUGHT_MAX, config.DROUGHT_NOTCH * notch)
+            due = min(due, config.DROUGHT_EPISODE_CAP - self.ep_drought_paid)
+            if due > 0:
+                self.ep_drought_paid += due
+                reward -= due
+
+        # ─── 4. DROUGHT TERMINATION ───
+        # No infinite punishment loops: past the hard limit the episode ends.
+        # Same magnitude as the legacy stuck penalty, so this is not a new
+        # kind of catastrophe for the value function to have to absorb.
+        if drought >= config.DROUGHT_HARD_LIMIT:
+            reward += config.DROUGHT_TERMINAL_PENALTY
+            done = True
+
+        # ─── 5. RETAINED LOCOMOTION SKILLS (rescaled, direction-agnostic) ───
+        # abs(x_vel) rather than x_vel: building speed is a capability the
+        # agent already has and needs, but "speed to the RIGHT" is precisely
+        # the x-monotone bias being removed. A leftward runway into a
+        # leftward gap is the same skill.
+        momentum_multiplier = 2.0 if (active_zone and active_zone['cause'] == 'pit') else 1.0
+        if on_ground and abs(x_vel) > SPRINT_VEL_THRESHOLD:
+            self.sprint_frames = min(self.sprint_frames + 1, 30)
+            reward += (momentum_multiplier * config.QA_MOMENTUM_SCALE
+                       * 0.01 * self.sprint_frames / 30.0)
+        else:
+            self.sprint_frames = 0
+
+        # Clean jump, in either direction, for the same reason.
+        if self.was_on_ground and not on_ground:
+            self.jump_start_x = x_pos
+            self.jump_start_had_momentum = abs(x_vel) > SPRINT_VEL_THRESHOLD
+        elif (not self.was_on_ground) and on_ground:
+            if self.jump_start_had_momentum and self.jump_start_x is not None:
+                if abs(x_pos - self.jump_start_x) > 60:
+                    reward += config.QA_CLEAN_JUMP_REWARD * momentum_multiplier
+            self.jump_start_x = None
+            self.jump_start_had_momentum = False
+        self.was_on_ground = on_ground
+
+        if active_zone and active_zone['cause'] in ('goomba', 'koopa', 'koopa_shell') and not on_ground:
+            reward += 0.05 * config.QA_POWERUP_SCALE
+
+        # ─── 6. TIME ───
+        # Quartered from legacy (0.02 -> 0.005). Thorough QA is slow by
+        # nature; this exists only so an episode cannot stall forever doing
+        # nothing at all, and the drought term is what actually handles that.
+        reward -= config.QA_TIME_PENALTY
+
+        # ─── 7. WORLD INTERACTION (kept, rescaled, and CAPPED PER EPISODE) ───
+        # Coins, score and powerups still mean "you interacted with real game
+        # content", which is genuinely QA-relevant. But the cap is what makes
+        # that safe, and rescaling alone was not enough - see
+        # config.QA_INTERACTION_EPISODE_CAP for the measurement. In short:
+        # this clone pays a large end-of-level time bonus straight into
+        # `score`, so a completing QA episode was still returning ~350 against
+        # ~4 of novelty. Completion had not stopped being the objective, it
+        # had just moved into a different variable.
+        #
+        # Everything in this block is accumulated into one number and charged
+        # against a single per-episode ceiling. Penalties are exempt: capping
+        # the downside would be a loophole rather than a safeguard.
+        interaction = 0.0
+        score = info.get('score', 0)
+        coins = info.get('coins', 0)
+        status = info.get('status', 'small')
+        score_delta = score - self.last_score
+        coins_delta = coins - self.last_coins
+        if score_delta > 0 or coins_delta > 0:
+            # Same double-count fix as legacy: the game awards +200 score AND
+            # +1 coin for the same pickup.
+            score_delta_adjusted = max(0, score_delta - 200 * max(0, coins_delta))
+            interaction += score_delta_adjusted * config.QA_SCORE_SCALE
+            interaction += coins_delta * config.QA_COIN_SCALE
+
+        powerup_count = info.get('powerup_active_count', 0)
+        if powerup_count > self.last_powerup_count:
+            interaction += 8.0 * config.QA_POWERUP_SCALE
+        self.last_powerup_count = powerup_count
+
+        nearest_dx = info.get('nearest_powerup_dx', None)
+        scale = (POWERUP_PULL_SCALE_NEEDED if status == 'small'
+                 else POWERUP_PULL_SCALE_OPTIONAL) * config.QA_POWERUP_SCALE
+        phi_pow = (-min(abs(nearest_dx), POWERUP_PROXIMITY_CAP_PX)
+                   / POWERUP_PROXIMITY_CAP_PX) if nearest_dx is not None else 0.0
+        interaction += scale * (config.GAMMA * phi_pow - self.last_powerup_phi)
+        self.last_powerup_phi = phi_pow
+
+        if status != self.last_status:
+            if status in ['tall', 'fireball'] and self.last_status == 'small':
+                interaction += 20.0 * config.QA_POWERUP_SCALE
+            elif status == 'fireball' and self.last_status == 'tall':
+                interaction += 10.0 * config.QA_POWERUP_SCALE
+            elif status == 'small' and self.last_status in ['tall', 'fireball']:
+                interaction -= 10.0 * config.QA_POWERUP_SCALE
+
+        if interaction > 0.0:
+            allowed = min(interaction,
+                          config.QA_INTERACTION_EPISODE_CAP
+                          - self.ep_interaction_paid)
+            allowed = max(0.0, allowed)
+            self.ep_interaction_paid += allowed
+            reward += allowed
+        else:
+            reward += interaction
+
+        # ─── 8. COMPLETION IS NO LONGER THE POINT ───
+        # 500.0 -> 5.0. The flagpole becomes just another thing in the level,
+        # worth about as much as a mushroom. Finishing is not punished - it
+        # simply stops being the objective, which is the entire brief.
+        flag_get = info.get('flag_get', False)
+        if flag_get and not self.last_flag_get:
+            reward += config.QA_FLAG_GET_REWARD
+        self.last_flag_get = flag_get
+
+        self.last_score = score
+        self.last_coins = coins
+        self.last_status = status
+        self.last_x_pos = x_pos
+
+        # ─── 9. EPISODE SHORTFALL ───
+        # Bounded at the same magnitude as the death penalty so it can never
+        # dominate. The target tracks the agent's OWN recent median (measured
+        # decay: 72352 -> 10955 -> 16576 -> 11972 -> 1787 -> 48), because any
+        # fixed target becomes impossible within about five episodes. This
+        # exerts pressure; it is not a promise that RL will hit a number.
+        if done:
+            target = max(1, cov.episode_target())
+            if cov.episode_new < target:
+                shortfall = 1.0 - (cov.episode_new / target)
+                reward -= config.SHORTFALL_PENALTY * shortfall
+            info['coverage_total'] = cov.total_unique()
+            info['coverage_episode_target'] = target
+
+        self._track_death_memory(done, info, current_bucket)
+
+        # ─── 10. BACKSTOP CLAMP ───
+        # Every term above is individually bounded, so under correct
+        # operation this never fires. It exists so that if one ever stops
+        # being bounded, PPO's advantage estimator sees a large number rather
+        # than an unbounded one - and the counter makes that visible instead
+        # of silent.
+        if reward > config.QA_REWARD_CLIP or reward < -config.QA_REWARD_CLIP:
+            self.qa_clip_events += 1
+            reward = max(-config.QA_REWARD_CLIP,
+                         min(config.QA_REWARD_CLIP, reward))
+
+        info['qa_novelty_shape'] = self.ep_novelty_shape
+        info['qa_clip_events'] = self.qa_clip_events
+        return reward, done
+
+    def _track_death_memory(self, done, info, current_bucket):
+        """Shared by both modes - see ADAPTIVE DEATH MEMORY at top of file."""
+        death_cause = info.get('death_cause', None)
+        if done and death_cause:
+            key = (current_bucket, death_cause)
+            if self.last_death_key == key:
+                self.death_streaks[key] = self.death_streaks.get(key, 0) + 1
+            else:
+                self.death_streaks[key] = 1
+            self.last_death_key = key
+
+            if self.death_streaks[key] >= DEATH_STREAK_TRIGGER:
+                self.danger_zones[current_bucket] = {
+                    'cause': death_cause,
+                    'episodes_left': DANGER_ZONE_BOOST_EPISODES,
+                }
+                self.death_streaks[key] = 0
+
+    # ══════════════════════════════════════════════════════════════════════
+    # LEGACY COMPLETION REWARD — unchanged from the 6M training run.
+    # Do not "clean up" anything below: this is the baseline the QA reward is
+    # calibrated against and the mode to fall back to, so it has to stay
+    # exactly what the existing checkpoint was trained under.
+    # ══════════════════════════════════════════════════════════════════════
+    def _legacy_reward(self, reward, done, info):
         x_pos = info.get('x_pos', self.last_x_pos or 0)
         x_vel = info.get('x_vel', 0.0)
         on_ground = info.get('on_ground', True)
@@ -464,8 +852,7 @@ class GlitchHunterWrapper(gym.Wrapper):
                 # Reset the streak so it takes another 10 in a row before
                 # re-triggering (rather than re-arming the zone every death).
                 self.death_streaks[key] = 0
-
-        return obs, float(reward), done, False, info
+        return reward, done
 
 from gymnasium.wrappers import FrameStackObservation, GrayscaleObservation, ResizeObservation, MaxAndSkipObservation
 
@@ -475,6 +862,27 @@ CHECKPOINT_NAME = "mario_brain_checkpoint"
 
 _global_env = None
 _global_model = None
+
+# ═══════════════════════════════════════════════════════════════════════
+# ENV_LOCK — serialises every touch of the environment and its pygame window
+#
+# app.py runs Flask-SocketIO in threading mode, so a click handler ("Reset",
+# or a browser disconnect) executes on a DIFFERENT OS thread from the frame
+# loop. Without this lock, close_window() can destroy the SDL display while
+# the frame loop is part-way through env.step() or render_scaled().
+#
+# That is not hypothetical. A stress test firing start/stop/reset at random
+# intervals for 20 seconds produced 9 crashes in the frame loop:
+#     pygame.error: video system not initialized
+#     pygame.error: cannot convert without pygame.display initialized
+# The old eventlet mode could not hit this - one thread, switching only at
+# explicit yield points - so it arrived with the move to real threads.
+#
+# Rule: hold this for the duration of any single env operation, and NEVER
+# across a sleep. Teardown then lands cleanly between two steps instead of
+# in the middle of one. See background_agent_task() in app.py.
+# ═══════════════════════════════════════════════════════════════════════
+env_lock = threading.RLock()
 
 # Streamed frames are resized down from the native 800x600 window before
 # JPEG encoding. The dashboard displays them scaled into a much smaller
@@ -495,8 +903,38 @@ def _ensure_global_env_and_model():
     if _global_env is not None:
         return
 
+    # ─── THE REWARD MODE FOLLOWS THE CHECKPOINT, NOT THE CONFIG ───
+    # The dashboard displays whatever brain is on disk, so it has to display
+    # that brain's OWN reward. Reading config.REWARD_MODE here would show QA
+    # rewards for a completion-phase policy - numbers that describe an
+    # objective this checkpoint was never trained on - and would additionally
+    # let the drought terminate episodes early during a demo, which looks
+    # exactly like a bug.
+    #
+    # The QA brain wins when it exists, because by then it is the current one.
+    qa_path = f"{config.CHECKPOINT_NAME_QA}.zip"
+    if os.path.exists(qa_path):
+        model_path, mode = qa_path, "qa_exploration"
+    else:
+        model_path, mode = f"{CHECKPOINT_NAME}.zip", "legacy_completion"
+
+    # In QA mode, show coverage against the map that brain actually built.
+    # A fresh empty map would credit it with rediscovering the whole level
+    # every time the dashboard is opened.
+    coverage = None
+    if mode == "qa_exploration":
+        coverage = coverage_mod.SpatialCoverage(
+            testable_mask=coverage_mod.load_testable())
+        paired = f"{config.CHECKPOINT_NAME_QA}_coverage.npz"
+        if os.path.exists(paired):
+            try:
+                coverage.load(paired)
+            except Exception as exc:      # never block playback on telemetry
+                print(f"[WARNING] could not load {paired}: {exc}")
+
     _global_env = CustomMarioEnv()
-    _global_env = GlitchHunterWrapper(_global_env)
+    _global_env = GlitchHunterWrapper(_global_env, reward_mode=mode,
+                                      coverage=coverage)
     _global_env = MaxAndSkipObservation(_global_env, skip=4)
     _global_env = GrayscaleObservation(_global_env, keep_dim=False)
     _global_env = ResizeObservation(_global_env, (84, 84))
@@ -505,8 +943,8 @@ def _ensure_global_env_and_model():
     # Initialize model. Falls back to an untrained policy so the
     # dashboard still runs (badly) rather than crashing outright when no
     # checkpoint is present.
-    model_path = f"{CHECKPOINT_NAME}.zip"
     if os.path.exists(model_path):
+        print(f"[DASHBOARD] {model_path} ({mode})")
         _global_model = PPO.load(model_path, env=_global_env, device="auto")
     else:
         print(f"[WARNING] {model_path} not found — running an UNTRAINED policy.")
@@ -518,8 +956,9 @@ def open_agent_window():
     focused. Called on every 'Start Testing' click (not just the first),
     so the window reliably comes to the front even if it's buried behind
     other windows from earlier in the session."""
-    _ensure_global_env_and_model()
-    _global_env.unwrapped.open_window()
+    with env_lock:
+        _ensure_global_env_and_model()
+        _global_env.unwrapped.open_window()
 
 
 def close_agent_window():
@@ -527,8 +966,9 @@ def close_agent_window():
     on disconnect (covers a page refresh or closed tab). The model and env
     stay loaded in memory - only the OS window closes - so the next
     open_agent_window() call is fast, not a full reload."""
-    if _global_env is not None:
-        _global_env.unwrapped.close_window()
+    with env_lock:
+        if _global_env is not None:
+            _global_env.unwrapped.close_window()
 
 
 def run_mario_agent():
@@ -609,7 +1049,7 @@ def run_mario_agent():
             'reward': float(reward),
             'log': log_message
         }
-        
+
         if done:
             reset_result = env.reset()
             if isinstance(reset_result, tuple) and len(reset_result) == 2:

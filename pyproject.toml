@@ -1,0 +1,111 @@
+# ═══════════════════════════════════════════════════════════════════════
+# This file is OPTIONAL. The pip instructions in README.md / requirements.txt
+# still work exactly as before and remain the documented default path.
+#
+# What this adds is a one-command install via `uv`, plus linter config.
+# ═══════════════════════════════════════════════════════════════════════
+
+[project]
+name = "glitch-hunter"
+version = "1.0.0"
+description = "A PPO agent plays a Super Mario Bros clone, streamed live to a web dashboard."
+requires-python = "==3.12.*"
+
+dependencies = [
+    "gymnasium==1.3.0",
+    "cloudpickle==3.1.2",
+    "numpy==2.5.2",
+    "pygame==2.6.1",
+    "flask==3.1.3",
+    "flask-socketio==5.6.1",
+    "opencv-python==5.0.0.93",
+    "stable-baselines3==2.9.0",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+# Training curves only. Kept out of the default install so people who just
+# want to watch the agent play don't pull in a large dependency they will
+# never open (train_agent.py detects its absence and carries on).
+tensorboard = ["tensorboard>=2.18"]
+
+# ─── Why uv replaces the 3-step pip dance ───
+# stable-baselines3 2.9.0 declares torch>=2.8, but no CUDA 12.1 build of
+# torch newer than 2.5.1 exists. With plain pip that means installing SB3
+# normally silently REPLACES your GPU torch with a CPU one - hence the
+# documented "install torch first, then SB3 with --no-deps, then the rest"
+# sequence. uv can express that intent directly instead:
+#   - the explicit index below pins torch to PyTorch's own CUDA 12.1 wheels
+#   - the override tells the resolver to disregard SB3's torch lower bound,
+#     which is exactly what --no-deps was doing by hand, but scoped to the
+#     one package it needs to apply to rather than disabling ALL of SB3's
+#     dependency resolution.
+# Result: `uv sync` in place of three ordered commands.
+[tool.uv]
+override-dependencies = ["torch==2.5.1"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+# ═══════════════════════════════════════════════════════════════════════
+# RUFF - replaces the ad hoc flake8 + vulture that were only ever installed
+# by hand. One tool, same job, much faster.
+# ═══════════════════════════════════════════════════════════════════════
+[tool.ruff]
+line-length = 100
+exclude = ["mario_clone", "venv_gpu", "checkpoints"]   # vendored / generated
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "C4", "SIM", "RUF"]
+ignore = [
+    # This project has several deliberate best-effort guards - stopping music
+    # on a mixer that may not exist, focusing a window, closing a generator.
+    # Every one is commented as "must never take down the caller", so a broad
+    # except is the intended behaviour, not an oversight.
+    "BLE001",   # blind-except
+    "S110",     # try-except-pass
+    "E501",     # long lines: the explanatory comment blocks are deliberate
+    "SIM105",   # contextlib.suppress() reads worse than an annotated try/except here
+    # Import position is load-bearing in two files and must NOT be "fixed":
+    # app.py reconfigures sys.stdout before anything it imports can print,
+    # and custom_mario_env.py sets SDL_AUDIODRIVER before pygame loads.
+    # Hoisting those imports to the top silently breaks both.
+    "E402",     # module-import-not-at-top-of-file
+    # The watchdog's nested conditions each carry their own explanatory
+    # comment; collapsing them into one `and` chain loses that.
+    "SIM102",   # collapsible-if
+]
+
+[tool.ruff.lint.isort]
+# Import order in the existing files is grouped by meaning rather than
+# alphabetically. Reordering it would create a large diff across working
+# code for no functional gain.
+force-sort-within-sections = false
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]   # sys.path is adjusted in conftest before imports
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# `slow` marks the few tests that load the real 20MB checkpoint. They still
+# run by default - they cover the value-head reset, which is the one piece
+# that touches the trained brain - but the marker makes them easy to skip
+# with `-m "not slow"` during quick iteration.
+markers = [
+    # Anything needing the trained checkpoint or a full geometry rebuild.
+    # The reachability rebuild at the adopted 1 px lattice takes ~5 minutes,
+    # so `-m "not slow"` is the normal inner-loop invocation.
+    "slow: needs the trained checkpoint or a full reachability rebuild",
+]

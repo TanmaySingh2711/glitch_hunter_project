@@ -8,7 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const resetBtn = document.getElementById('reset-btn');
     
     const MAX_LOG_LINES = 200;
+    const MAX_BUG_LINES = 100;   // the log terminal is capped; this was not,
+                                 // so a long session could grow it unbounded
     let isTesting = false;
+    let hasConnectedBefore = false;
     let currentFrameUrl = null;  // tracks the last object URL so it can be
                                   // revoked - otherwise each frame leaks
                                   // browser memory indefinitely
@@ -21,22 +24,50 @@ document.addEventListener('DOMContentLoaded', () => {
         resetBtn.disabled = false;
         startBtn.textContent = 'Testing...';
         
-        const bugList = document.getElementById('bug-list');
-        if (bugList && bugList.innerHTML.includes('start testing...')) {
-            bugList.innerHTML = '<li id="bug-placeholder" style="color: #666; font-style: italic;">No bugs found yet...</li>';
+        // Looked up by id rather than by searching innerHTML for the literal
+        // text 'start testing...'. The old check broke silently if the
+        // wording changed, and re-serialised the whole panel on every click.
+        const bugPlaceholder = document.getElementById('bug-placeholder');
+        if (bugPlaceholder) {
+            bugPlaceholder.textContent = 'No bugs found yet...';
         }
-        
-        if (logTerminal.innerHTML.includes('start testing...')) {
-            logTerminal.innerHTML = '';
+
+        const logPlaceholder = document.getElementById('log-placeholder');
+        if (logPlaceholder) {
+            logPlaceholder.remove();
         }
     });
 
-    stopBtn.addEventListener('click', () => {
+    // Puts the controls back to "not running". Shared by the Stop button and
+    // by connection loss, so the two can never drift out of sync.
+    function setIdleUI() {
         isTesting = false;
-        socket.emit('stop_testing');
         stopBtn.disabled = true;
         startBtn.disabled = false;
         startBtn.textContent = 'START TESTING';
+    }
+
+    // Builds the italic grey "start testing..." line both panels show when
+    // idle. Styling lives in .placeholder in style.css, not inline here.
+    function makePlaceholder(tag, id) {
+        const el = document.createElement(tag);
+        el.id = id;
+        el.className = 'placeholder';
+        el.textContent = 'start testing...';
+        return el;
+    }
+
+    function note(message) {
+        const p = document.createElement('p');
+        p.textContent = message;
+        p.className = 'placeholder';
+        logTerminal.appendChild(p);
+        logTerminal.scrollTop = logTerminal.scrollHeight;
+    }
+
+    stopBtn.addEventListener('click', () => {
+        socket.emit('stop_testing');
+        setIdleUI();
     });
 
     resetBtn.addEventListener('click', () => {
@@ -44,10 +75,10 @@ document.addEventListener('DOMContentLoaded', () => {
         socket.emit('stop_testing');
         socket.emit('reset_game');
         
-        logTerminal.innerHTML = '<p id="log-placeholder" style="color: #666; font-style: italic;">start testing...</p>';
+        logTerminal.replaceChildren(makePlaceholder('p', 'log-placeholder'));
         const bugList = document.getElementById('bug-list');
         if (bugList) {
-            bugList.innerHTML = '<li id="bug-placeholder" style="color: #666; font-style: italic;">start testing...</li>';
+            bugList.replaceChildren(makePlaceholder('li', 'bug-placeholder'));
         }
         
         videoFeed.removeAttribute('src');
@@ -89,22 +120,34 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.log && data.log.includes('🚨 BUG FOUND:')) {
             const bugList = document.getElementById('bug-list');
             if (bugList) {
-                // Remove the placeholder if it's there
-                if (bugList.children[0] && bugList.children[0].textContent.includes('No bugs')) {
-                    bugList.innerHTML = '';
+                // Drop the placeholder by id rather than by matching its
+                // text - the old check compared against the literal string
+                // 'No bugs', so rewording the placeholder would silently
+                // leave it stuck above the first real entry.
+                const placeholder = bugList.querySelector('#bug-placeholder');
+                if (placeholder) {
+                    placeholder.remove();
                 }
-                
-                // Extract the bug reason and step
+
                 const stepMatch = data.log.match(/Step (\d+):/);
-                const bugMatch = data.log.split('🚨 BUG FOUND: ')[1];
-                
+                const bugText = data.log.split('🚨 BUG FOUND: ')[1] || data.log;
+
+                // Built with textContent, not innerHTML. These strings are
+                // assembled server-side from live game state, so anything
+                // that ever ends up looking like markup would otherwise be
+                // parsed as HTML instead of shown as text.
                 const li = document.createElement('li');
-                li.style.color = '#ff4444';
-                li.style.marginBottom = '8px';
-                li.innerHTML = `<strong>Step ${stepMatch ? stepMatch[1] : '?'}:</strong> ${bugMatch}`;
+                li.className = 'bug-entry';
+                const step = document.createElement('strong');
+                step.textContent = `Step ${stepMatch ? stepMatch[1] : '?'}: `;
+                li.appendChild(step);
+                li.appendChild(document.createTextNode(bugText));
                 bugList.appendChild(li);
-                
-                // Auto-scroll bug tracker
+
+                while (bugList.children.length > MAX_BUG_LINES) {
+                    bugList.removeChild(bugList.firstChild);
+                }
+
                 bugList.parentElement.scrollTop = bugList.parentElement.scrollHeight;
             }
         }
@@ -120,6 +163,34 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Auto-scroll
         logTerminal.scrollTop = logTerminal.scrollHeight;
+    });
+
+    // ─── CONNECTION LIFECYCLE ───
+    // Without these the dashboard could sit showing "Testing..." with the
+    // Start button greyed out long after the stream had actually stopped.
+    // The server clears its own state whenever a client connects, so after
+    // any reconnect it is definitively NOT running - the UI has to agree,
+    // or the only way out is a manual page refresh.
+    socket.on('disconnect', () => {
+        if (isTesting) {
+            note('— connection lost, testing stopped —');
+        }
+        setIdleUI();
+        resetBtn.disabled = true;
+    });
+
+    socket.on('connect', () => {
+        if (hasConnectedBefore) {
+            note('— reconnected, press START TESTING to resume —');
+            setIdleUI();
+            resetBtn.disabled = true;
+            videoFeed.removeAttribute('src');
+            if (currentFrameUrl) {
+                URL.revokeObjectURL(currentFrameUrl);
+                currentFrameUrl = null;
+            }
+        }
+        hasConnectedBefore = true;
     });
 
     // Info Modal Logic
@@ -139,6 +210,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // Close when clicking outside
         infoModal.addEventListener('click', (e) => {
             if (e.target === infoModal) {
+                infoModal.classList.add('hidden');
+            }
+        });
+
+        // ...and on Escape, which is what people reflexively press.
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
                 infoModal.classList.add('hidden');
             }
         });
