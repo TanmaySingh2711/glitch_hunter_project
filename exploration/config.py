@@ -295,10 +295,11 @@ TARGET_HISTORY_LEN = 20
 # "exploration" but is keyed on the x-column alone, making it forward
 # progress under another name. That is what is being replaced.
 # ═══════════════════════════════════════════════════════════════════════
-QA_FLAG_GET_REWARD = 5.0            # was 500.0 - completion becomes ordinary
+# The flag reward and time penalty are PHASE-SPECIFIC now - see PHASE-GATED
+# REWARD below. QA_FLAG_GET_REWARD and QA_TIME_PENALTY were removed rather
+# than kept as aliases, so nothing can silently read a phase-blind value.
 QA_CLEAN_JUMP_REWARD = 0.3          # was 3.0 - keep the skill, drop the pull
 QA_MOMENTUM_SCALE = 0.1
-QA_TIME_PENALTY = 0.005             # was 0.02 - thorough QA takes time
 QA_COIN_SCALE = 0.5
 QA_SCORE_SCALE = 0.02               # was 0.15
 QA_POWERUP_SCALE = 0.25
@@ -339,6 +340,121 @@ QA_REWARD_CLIP = 12.0
 # reach the ceiling, so the ramp plays out over 320 substeps and is fully
 # expressed well before DROUGHT_EPISODE_CAP starts binding.
 DROUGHT_NOTCH = 0.005
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PHASE-GATED REWARD (Phase 4A)
+#
+# The lifecycle (exploration/lifecycle.py) defines the priority, not a
+# blend: every episode is EXPLORE, then - once, one way - COMPLETE. There is
+# no fixed split between the two objectives; each phase pays for its own.
+#
+#   EXPLORE   maximise new testable coverage. Nothing pays for moving right,
+#             nothing charges for time, and finishing is worth no more than
+#             the shortfall it triggers.
+#   COMPLETE  finish Level 1-1. Forward progress pays, the flag pays more,
+#             novelty drops to a tie-breaker, exploration-only pressure stops.
+#
+# All values PROVISIONAL pending Phase 4B calibration against the 6M policy.
+# The constraints between them are not provisional - they are asserted by
+# assert_phase_reward_balance() below, at wrapper construction.
+# ═══════════════════════════════════════════════════════════════════════
+# The env's own death reward (custom_mario_env.step: `reward = -5.0`), named
+# so the bounds below can be stated against it.
+ENGINE_DEATH_PENALTY = 5.0
+# mario_clone constants MAX_WALK_SPEED = 6 px/frame. Walking, not sprinting,
+# is the pace the dominance check below is held to: the stricter case.
+WALK_PX_PER_SUBSTEP = 6
+
+# ─── TIME ───
+# EXPLORE: zero. The old 0.005/substep was harmless at a 2,451-step cap
+# (-49 at most) but at the 9,781-step QA cap it reaches -196 per episode -
+# several times what an episode earns from discovery, and 39x the -5 cost of
+# dying. That makes ending the episode early (by death or by the flag) the
+# single best move available, which is exactly "pressure to finish early".
+# Idling is still not free: stuck-gated drought, the safety reset and the
+# end-of-episode shortfall each cost something, and each is bounded. None of
+# them scales with how long a PRODUCTIVE episode runs.
+EXPLORE_TIME_PENALTY = 0.0
+# COMPLETE: mild urgency, the previous QA value - but capped per episode
+# BELOW the death penalty, so dying can never be a way to stop paying it.
+COMPLETE_TIME_PENALTY = 0.005
+COMPLETE_TIME_PENALTY_EPISODE_CAP = 4.0
+
+# ─── FLAG ───
+# EXPLORE: unchanged from the previous QA value, and no larger than the
+# shortfall a premature finish triggers - so reaching the flag having
+# explored nothing can at best break even, while forfeiting every pixel the
+# rest of the episode could have found.
+EXPLORE_FLAG_REWARD = 5.0
+# COMPLETE, at full completion credit. Interpolated from EXPLORE_FLAG_REWARD
+# by the credit (see lifecycle.completion_credit), so finishing in COMPLETE is
+# never worth less than finishing in EXPLORE. Kept under QA_REWARD_CLIP
+# together with everything else that can land on the same substep - the
+# legacy +500 would simply be clipped, and restoring it is not the point.
+COMPLETE_FLAG_REWARD = 10.0
+
+# ─── FORWARD PROGRESS (COMPLETE only) ───
+# Paid per px of NEW episode max-x while in COMPLETE, scaled by completion
+# credit. The baseline advances in EXPLORE too, so ground already covered
+# this episode is never paid for twice. Per-substep gain is capped at
+# MAX_FRAME_DX: anything larger is a teleport, i.e. a glitch, not progress.
+COMPLETE_PROGRESS_PER_PX = 0.03
+
+# ─── NOVELTY IN COMPLETE ───
+# Reduced to a tie-breaker, not zeroed. Coverage is still RECORDED at full
+# fidelity either way; this is only what discovery PAYS. It must be small
+# enough that walking toward the finish out-earns a detour onto virgin ground
+# (asserted below), and it deliberately ignores the StagnationCallback
+# multiplier, which escalates EXPLORATION pressure and has no business
+# growing a distraction in the phase whose job is to finish.
+COMPLETE_NOVELTY_MULT = 0.1
+
+
+def assert_phase_reward_balance():
+    """The inequalities that make the phase gating mean what it says.
+
+    Called at wrapper construction next to assert_reward_balance(), so a
+    retune that breaks one fails at startup rather than as a silently
+    speedrunning agent.
+    """
+    problems = []
+    qa_cap_substeps = QA_EPISODE_CAP_AGENT_STEPS_MEASURED * SUBSTEPS_PER_AGENT_STEP
+    if EXPLORE_TIME_PENALTY * qa_cap_substeps >= ENGINE_DEATH_PENALTY:
+        problems.append(
+            f"EXPLORE time penalty totals "
+            f"{EXPLORE_TIME_PENALTY * qa_cap_substeps:.1f} over a full QA "
+            f"episode - more than a death, so dying early would pay")
+    if COMPLETE_TIME_PENALTY_EPISODE_CAP >= ENGINE_DEATH_PENALTY:
+        problems.append("COMPLETE time penalty cap is not below the death "
+                        "penalty - dying would stop the bleeding")
+    full_stride = COMPLETE_NOVELTY_MULT * NOVELTY_WEIGHT * 1.0
+    capped_sweep = COMPLETE_NOVELTY_MULT * NOVELTY_WEIGHT * NOVELTY_CAP
+    if full_stride >= WALK_PX_PER_SUBSTEP * COMPLETE_PROGRESS_PER_PX:
+        problems.append(
+            f"in COMPLETE, walking toward the finish pays "
+            f"{WALK_PX_PER_SUBSTEP * COMPLETE_PROGRESS_PER_PX:.3f}/substep but "
+            f"a stride of virgin ground pays {full_stride:.3f} - novelty would "
+            f"pull Mario off the route")
+    if capped_sweep >= MAX_FRAME_DX * COMPLETE_PROGRESS_PER_PX:
+        problems.append("in COMPLETE, sprinting toward the finish does not "
+                        "out-earn a worst-case novelty sweep")
+    worst_flag_substep = (COMPLETE_FLAG_REWARD + capped_sweep
+                          + MAX_FRAME_DX * COMPLETE_PROGRESS_PER_PX
+                          + 2 * QA_CLEAN_JUMP_REWARD)
+    if worst_flag_substep >= QA_REWARD_CLIP:
+        problems.append(
+            f"the COMPLETE flag substep can reach {worst_flag_substep:.2f}, "
+            f"at or above the {QA_REWARD_CLIP} clip")
+    if EXPLORE_FLAG_REWARD > SHORTFALL_PENALTY:
+        problems.append("the EXPLORE flag reward exceeds the shortfall it "
+                        "triggers - rushing to the flag would pay")
+    if not EXPLORE_FLAG_REWARD <= COMPLETE_FLAG_REWARD:
+        problems.append("finishing in COMPLETE pays less than in EXPLORE")
+    if not 0.0 <= COMPLETE_NOVELTY_MULT <= 1.0:
+        problems.append("COMPLETE_NOVELTY_MULT outside [0, 1]")
+    if problems:
+        raise ValueError("phase reward balance violated: " + "; ".join(problems))
 
 
 def assert_reward_balance():

@@ -16,9 +16,12 @@ there was, and a timeout came back dressed as a death (death_cause
 'timeout'). Nothing could say "the exploration objective is met, go finish
 the level" without also saying "stop".
 
-Nothing in the reward reads the phase yet. Phase-gated reward is a later
-phase; until then the transition is observable and logged, and reward-neutral
-by construction.
+The reward reads the phase (Phase 4A - see GlitchHunterWrapper._qa_reward and
+config PHASE-GATED REWARD), but the TRANSITION itself earns nothing: entering
+COMPLETE changes which terms apply from then on, never lands a bonus. (The
+frontier potential closes its telescoping sum on the transition substep - at
+most FRONTIER_WEIGHT - and that closure is what makes WHERE the transition
+happens irrelevant to the shaping total, rather than a reward for it.)
 
 Everything is driven per SUBSTEP (the wrapper sits below
 MaxAndSkipObservation), and every threshold in config is in AGENT steps, so
@@ -95,6 +98,7 @@ class EpisodeLifecycle:
         self.phase = EpisodePhase.EXPLORE
         self.transition_reason = None
         self.transition_step = None
+        self.completion_credit = 0.0
         self.substeps = 0
         self.last_discovery_substep = 0
         self.safety_fired = False
@@ -125,6 +129,20 @@ class EpisodeLifecycle:
     @property
     def agent_steps(self):
         return self.substeps // self.sps
+
+    @property
+    def in_coherent_transit(self):
+        """Did the most recently COMPLETED window read as transit?
+
+        Judged on the last full window, so it lags by up to one window, and it
+        is False before the first window closes: there is no evidence either
+        way yet, and "no evidence" must not waive a penalty.
+        """
+        return bool(self.last_window and self.last_window['in_transit'])
+
+    @property
+    def is_complete(self):
+        return self.phase is EpisodePhase.COMPLETE
 
     def drought_agent_steps(self):
         return (self.substeps - self.last_discovery_substep) // self.sps
@@ -207,6 +225,27 @@ class EpisodeLifecycle:
             self.phase = EpisodePhase.COMPLETE
             self.transition_reason = reason
             self.transition_step = self.agent_steps
+            self.completion_credit = self._credit_for(reason)
+
+    def _credit_for(self, reason):
+        """How much of the COMPLETE-phase payout this episode has earned.
+
+        T1 and T3 mean exploration is genuinely done - the target was met, or
+        nothing reachable is left ahead - so completion is worth its full
+        value. T2 and T4 fire on exhaustion or elapsed time, and T2 in
+        particular can be REACHED ON PURPOSE by idling off the frontier for
+        three windows. Paying full completion value there would make "idle,
+        then sprint for the flag" a strategy - the speedrunner rebuilt with a
+        720-step wait bolted on the front. So there the credit is the fraction
+        of the episode's own target actually discovered.
+
+        Fixed at the transition and never revised, like the phase itself.
+        """
+        if reason in (Transition.TARGET_MET, Transition.NOTHING_AHEAD):
+            return 1.0
+        if self.coverage is None or not self.target:
+            return 0.0
+        return min(1.0, self.coverage.episode_new / self.target)
 
     # ── safety reset ──────────────────────────────────────────────────────
     def safety_reset_due(self):
@@ -231,6 +270,7 @@ class EpisodeLifecycle:
         info['episode_phase'] = self.phase.value
         info['phase_transition_reason'] = self.transition_reason
         info['phase_transition_step'] = self.transition_step
+        info['completion_credit'] = self.completion_credit
         info['lifecycle_agent_steps'] = self.agent_steps
         info['lifecycle_stuck_windows'] = self.consecutive_stuck
         info['lifecycle_in_transit'] = (self.last_window['in_transit']

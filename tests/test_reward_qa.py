@@ -33,6 +33,13 @@ def _make_qa(env, mask, patch_step):
     cov = SpatialCoverage(testable_mask=mask)
     w = GlitchHunterWrapper(env, reward_mode="qa_exploration", coverage=cov)
     w.reset()
+    # These tests pin EXPLORATION-phase reward, and predate the lifecycle. On
+    # a blank map T1 fires on the very first substep (a whole collider is
+    # 1,200 new px against a 500 px floor target), and on the empty-mask
+    # fixture T3 fires at the first window - either would silently move them
+    # into COMPLETE. Phase-specific behaviour is tested, both phases, in
+    # tests/test_phase_reward.py.
+    w.lifecycle._check_transition = lambda n_new: None
 
     def drive(**overrides):
         info = dict(BASE, **overrides)
@@ -101,9 +108,9 @@ def test_revisits_are_free_never_penalised(qa_flat):
 
     A per-step cost for old ground would make backtracking to reach
     unexplored space self-defeating - the agent would learn to refuse to
-    cross its own history, which is the exact opposite of the goal. What
-    little cost there is here must come only from the time penalty, which is
-    the same everywhere and is not a function of coverage.
+    cross its own history, which is the exact opposite of the goal. In
+    EXPLORE there is no time penalty either (config EXPLORE_TIME_PENALTY), so
+    crossing explored ground is exactly free.
     """
     for i in range(20):
         qa_flat.drive(**_at(2000 + i * 10))
@@ -112,9 +119,8 @@ def test_revisits_are_free_never_penalised(qa_flat):
     # Well inside DROUGHT_GRACE, so nothing but the time penalty applies.
     rewards = [qa_flat.drive(**_at(2000 + i * 10)) for i in range(20)]
     for r in rewards:
-        assert r == pytest.approx(-config.QA_TIME_PENALTY, abs=1e-6), (
-            f"traversing explored ground cost {r:.4f}, expected only the "
-            f"flat time penalty")
+        assert r == pytest.approx(-config.EXPLORE_TIME_PENALTY, abs=1e-6), (
+            f"traversing explored ground cost {r:.4f}; it should be free")
 
 
 # ── Test 4: the drought replaces the x-spread stuck detector ──────────────
@@ -123,7 +129,7 @@ def test_no_drought_pressure_inside_the_grace_window(qa_flat):
     qa_flat.drive(**_at(3000))
     for _ in range(config.DROUGHT_GRACE - 5):
         r = qa_flat.drive(**_at(3000))
-    assert r == pytest.approx(-config.QA_TIME_PENALTY, abs=1e-6)
+    assert r == pytest.approx(-config.EXPLORE_TIME_PENALTY, abs=1e-6)
 
 
 def test_drought_pressure_escalates_and_is_capped_per_substep(qa_flat):
@@ -137,7 +143,7 @@ def test_drought_pressure_escalates_and_is_capped_per_substep(qa_flat):
     later_notch = seen[config.DROUGHT_GRACE + config.DROUGHT_STEP * 2 + 10]
     assert inside_grace > first_notch, "pressure started inside the grace window"
     assert first_notch > later_notch, "drought pressure never escalated"
-    floor = -(config.DROUGHT_MAX + config.QA_TIME_PENALTY)
+    floor = -(config.DROUGHT_MAX + config.EXPLORE_TIME_PENALTY)
     assert min(seen) >= floor - 1e-6, "per-substep drought exceeded its ceiling"
 
 
@@ -155,7 +161,7 @@ def test_drought_is_bounded_per_episode_not_just_per_substep(qa_flat):
     long_drought = 1595
     qa_flat.drive(**_at(3700))
     total = sum(qa_flat.drive(**_at(3700)) for _ in range(long_drought))
-    drought_part = -(total + config.QA_TIME_PENALTY * long_drought)
+    drought_part = -(total + config.EXPLORE_TIME_PENALTY * long_drought)
     assert drought_part <= config.DROUGHT_EPISODE_CAP + 1e-6, (
         f"an episode paid {drought_part:.1f} in drought against a cap of "
         f"{config.DROUGHT_EPISODE_CAP}")
@@ -209,7 +215,7 @@ def test_completion_is_no_longer_the_objective(qa):
     qa.drive(**_at(6000))
     r = qa.drive(**dict(_at(6010), flag_get=True))
     assert r < 10.0, f"flag_get paid {r:.1f}; completion is still dominant"
-    assert r > config.QA_FLAG_GET_REWARD * 0.5, "flag_get paid nothing at all"
+    assert r > config.EXPLORE_FLAG_REWARD * 0.5, "flag_get paid nothing at all"
 
 
 def test_completion_score_windfall_cannot_dominate(qa_flat):
@@ -255,8 +261,14 @@ def test_x_monotone_terms_are_gone(qa):
     qa.coverage.begin_episode()
 
     total = sum(qa.drive(**_at(100 + i * 20)) for i in range(60))
-    assert total <= 0, (
-        f"crossing explored ground still pays {total:.2f} - an x-monotone "
+    # Not literally <= 0 any more. This used to pass because the flat time
+    # penalty buried the frontier-potential residue; EXPLORE has no time
+    # penalty now (config PHASE-GATED REWARD), so the residue is visible. It
+    # is bounded by FRONTIER_WEIGHT * (1 - GAMMA) per substep - 0.06 across
+    # these 60 - where a surviving tile/milestone term would pay ~+10.
+    residue_bound = 60 * config.FRONTIER_WEIGHT * (1.0 - config.GAMMA)
+    assert total <= residue_bound, (
+        f"crossing explored ground still pays {total:.4f} - an x-monotone "
         f"term survived the retrofit")
 
 
@@ -271,7 +283,7 @@ def test_frontier_residue_is_a_rounding_error_against_the_drought(qa):
     """
     qa.drive(**_at(9000))
     idle = qa.drive(**_at(9000))
-    residue = idle + config.QA_TIME_PENALTY      # strip the flat time cost
+    residue = idle + config.EXPLORE_TIME_PENALTY      # strip the flat time cost
     assert residue >= 0
     theoretical_max = config.FRONTIER_WEIGHT * (1.0 - config.GAMMA) * 1.0
     assert residue <= theoretical_max + 1e-9

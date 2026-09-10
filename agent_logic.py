@@ -126,6 +126,12 @@ class GlitchHunterWrapper(gym.Wrapper):
         visited_tiles, visited_altitude_tiles, milestones, new-max-x,
         the windowed backward penalty, and the x-spread stuck detector.
 
+    One comes back, in one place. QA episodes run EXPLORE then COMPLETE
+    (exploration/lifecycle.py), and new-max-x is paid again ONLY in COMPLETE,
+    whose objective genuinely is finishing - scaled by how much exploration
+    the episode actually did before it got there. In EXPLORE it is exactly
+    zero. See config PHASE-GATED REWARD for every phase-specific term.
+
     The x-spread stuck detector matters most of those. It punished exactly
     the behaviours a QA explorer needs - probing a wall, trying fifteen jump
     variants from one spot, working a single suspicious corner - because it
@@ -181,6 +187,7 @@ class GlitchHunterWrapper(gym.Wrapper):
                     "coverage= or shm_names=, or leave attach_coverage as None")
             # Fails at construction rather than 200k steps into a run.
             config.assert_reward_balance()
+            config.assert_phase_reward_balance()
 
         # ─── EPISODE LIFECYCLE ───
         # The engine timer is the one authoritative episode clock; QA mode
@@ -225,6 +232,9 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.ep_substeps = 0
         self.ep_drought_paid = 0.0
         self.ep_interaction_paid = 0.0
+        self.ep_max_x = 0               # episode max-x: the progress baseline
+        self.ep_progress_paid = 0.0     # COMPLETE-only forward progress paid
+        self.ep_complete_time_paid = 0.0
         self.qa_clip_events = 0
         self.last_n_new = 0
 
@@ -262,6 +272,9 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.ep_substeps = 0
         self.ep_drought_paid = 0.0
         self.ep_interaction_paid = 0.0
+        self.ep_max_x = 0               # episode max-x: the progress baseline
+        self.ep_progress_paid = 0.0     # COMPLETE-only forward progress paid
+        self.ep_complete_time_paid = 0.0
         self.last_n_new = 0
 
         # Coverage itself is NEVER cleared here - that is the entire point of
@@ -356,6 +369,13 @@ class GlitchHunterWrapper(gym.Wrapper):
         current_bucket = int(x_pos) // DANGER_ZONE_BUCKET_PX
         active_zone = self.danger_zones.get(current_bucket)
 
+        # ─── PHASE ───
+        # Read after lifecycle.observe() has run for this substep, so the
+        # transition substep is already scored as COMPLETE. Every term below
+        # that differs by phase says so; everything else is shared.
+        complete = self.lifecycle.is_complete
+        credit = self.lifecycle.completion_credit
+
         # ─── 1. NOVELTY — the primary signal ───
         # Paid ONLY for world pixels no worker in this run has ever occupied.
         # sqrt-scaled and capped, so a freak 2288px sweep cannot pay 60x what
@@ -365,9 +385,18 @@ class GlitchHunterWrapper(gym.Wrapper):
         # traversal would make backtracking to reach unexplored space
         # self-defeating, and the agent would learn to refuse to cross its
         # own history.
+        #
+        # PHASE: full weight in EXPLORE. In COMPLETE it drops to a tie-breaker
+        # (config.COMPLETE_NOVELTY_MULT) so a detour onto virgin ground cannot
+        # out-earn heading for the finish - while the pixels themselves are
+        # still RECORDED at full fidelity, in _record_coverage(), before this
+        # method ever runs. Only what they pay changes.
         shape = cov.novelty_shape(n_new)
         self.ep_novelty_shape += shape
-        reward += cov.novelty_reward(n_new)
+        if complete:
+            reward += config.COMPLETE_NOVELTY_MULT * config.NOVELTY_WEIGHT * shape
+        else:
+            reward += cov.novelty_reward(n_new)
 
         # ─── 2. FRONTIER GUIDANCE (potential-based) ───
         # Ng/Harada/Russell shaping toward the nearest unexplored cell AHEAD
@@ -380,11 +409,22 @@ class GlitchHunterWrapper(gym.Wrapper):
         # because the map moved - possibly because another worker explored
         # something - and paying for that would be paying this agent for
         # someone else's discovery.
+        #
+        # PHASE: EXPLORE only. In COMPLETE the potential is defined as 0, and
+        # the same formula keeps running - so on the transition substep it
+        # pays FRONTIER_WEIGHT * (0 - Phi_t), closing the telescoping sum,
+        # and 0 ever after. Simply STOPPING mid-sum would leave the shaping
+        # total depending on how close to the frontier Mario happened to be
+        # when the phase changed - a small reward for WHERE he transitioned.
+        # Closing it makes that irrelevant. Bounded by FRONTIER_WEIGHT (0.1).
         if rect:
-            cov.refresh_frontier(viewport_x=info.get('viewport_x', 0))
-            cx = rect[0] + rect[2] // 2
-            cy = rect[1] + rect[3] // 2
-            phi_now = cov.phi(cx, cy)
+            if complete:
+                phi_now = 0.0
+            else:
+                cov.refresh_frontier(viewport_x=info.get('viewport_x', 0))
+                cx = rect[0] + rect[2] // 2
+                cy = rect[1] + rect[3] // 2
+                phi_now = cov.phi(cx, cy)
             if cov.frontier_version == self.last_frontier_version:
                 reward += config.FRONTIER_WEIGHT * (
                     config.GAMMA * phi_now - self.last_frontier_phi)
@@ -404,8 +444,17 @@ class GlitchHunterWrapper(gym.Wrapper):
         # -685, with the drought outweighing everything the agent discovered
         # by three orders of magnitude. Ending the episode is what the drought
         # is for; the ramp is only the gradient that leads there.
+        #
+        # PHASE: never in COMPLETE - crossing covered ground toward the finish
+        # is that phase's whole job. In EXPLORE it is waived while the last
+        # completed lifecycle window read as COHERENT TRANSIT: a bare drought
+        # is not being stuck, and old territory has to stay usable as transit
+        # space. The ramp itself is unchanged, and so is its timing for
+        # anything that is not demonstrably transit - including the first
+        # window of an episode, where there is not yet any evidence either way.
         drought = cov.steps_since_new_pixel
-        if drought > config.DROUGHT_GRACE:
+        if (drought > config.DROUGHT_GRACE and not complete
+                and not self.lifecycle.in_coherent_transit):
             over = drought - config.DROUGHT_GRACE
             notch = 1 + over // config.DROUGHT_STEP
             due = min(config.DROUGHT_MAX, config.DROUGHT_NOTCH * notch)
@@ -458,10 +507,36 @@ class GlitchHunterWrapper(gym.Wrapper):
             reward += 0.05 * config.QA_POWERUP_SCALE
 
         # ─── 6. TIME ───
-        # Quartered from legacy (0.02 -> 0.005). Thorough QA is slow by
-        # nature; this exists only so an episode cannot stall forever doing
-        # nothing at all, and the drought term is what actually handles that.
-        reward -= config.QA_TIME_PENALTY
+        # PHASE: EXPLORE_TIME_PENALTY (0.0) - at the 9,781-step QA cap a flat
+        # per-substep charge would reach -196 an episode and make ending early
+        # the best available move; see config for the arithmetic. COMPLETE
+        # keeps mild urgency, capped per episode below the death penalty so
+        # dying can never be a way to stop paying it.
+        if complete:
+            due = min(config.COMPLETE_TIME_PENALTY,
+                      config.COMPLETE_TIME_PENALTY_EPISODE_CAP
+                      - self.ep_complete_time_paid)
+            if due > 0:
+                self.ep_complete_time_paid += due
+                reward -= due
+        else:
+            reward -= config.EXPLORE_TIME_PENALTY
+
+        # ─── 6b. FORWARD PROGRESS — COMPLETE ONLY ───
+        # The x-monotone signal the retrofit deleted, back in exactly one
+        # place: the phase whose objective IS finishing. The episode max-x
+        # baseline advances in EXPLORE as well, so nothing covered earlier in
+        # the episode is paid for twice, and a per-substep gain above
+        # MAX_FRAME_DX is a teleport - a glitch - so it moves the baseline
+        # without paying. Scaled by completion credit (lifecycle), which is
+        # what stops "idle into T2, then sprint" from being worth anything.
+        gain = max(0, int(x_pos) - self.ep_max_x)
+        if complete and gain:
+            paid = (config.COMPLETE_PROGRESS_PER_PX * credit
+                    * min(gain, config.MAX_FRAME_DX))
+            self.ep_progress_paid += paid
+            reward += paid
+        self.ep_max_x = max(self.ep_max_x, int(x_pos))
 
         # ─── 7. WORLD INTERACTION (kept, rescaled, and CAPPED PER EPISODE) ───
         # Coins, score and powerups still mean "you interacted with real game
@@ -520,13 +595,19 @@ class GlitchHunterWrapper(gym.Wrapper):
         else:
             reward += interaction
 
-        # ─── 8. COMPLETION IS NO LONGER THE POINT ───
-        # 500.0 -> 5.0. The flagpole becomes just another thing in the level,
-        # worth about as much as a mushroom. Finishing is not punished - it
-        # simply stops being the objective, which is the entire brief.
+        # ─── 8. THE FLAG — worth what the phase says ───
+        # EXPLORE: 5.0, no more than the shortfall a premature finish
+        # triggers, so rushing to it can at best break even. COMPLETE: the
+        # objective, rising to COMPLETE_FLAG_REWARD with completion credit -
+        # and never below the EXPLORE value. The legacy +500 is not restored:
+        # it would only be clipped, and it is not the point.
         flag_get = info.get('flag_get', False)
         if flag_get and not self.last_flag_get:
-            reward += config.QA_FLAG_GET_REWARD
+            if complete:
+                reward += config.EXPLORE_FLAG_REWARD + credit * (
+                    config.COMPLETE_FLAG_REWARD - config.EXPLORE_FLAG_REWARD)
+            else:
+                reward += config.EXPLORE_FLAG_REWARD
         self.last_flag_get = flag_get
 
         self.last_score = score
@@ -563,6 +644,8 @@ class GlitchHunterWrapper(gym.Wrapper):
 
         info['qa_novelty_shape'] = self.ep_novelty_shape
         info['qa_clip_events'] = self.qa_clip_events
+        info['qa_progress_paid'] = self.ep_progress_paid
+        info['qa_complete_time_paid'] = self.ep_complete_time_paid
         return reward, done
 
     def _track_death_memory(self, done, info, current_bucket):

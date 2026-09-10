@@ -324,21 +324,6 @@ def test_phase_is_in_info_on_every_substep(qa_env):
         assert 'phase_transition_reason' in info
 
 
-def test_phase_does_not_yet_affect_reward(qa_env):
-    """Reward-neutral, for now, by construction. The same substeps return the
-    same reward whether the episode is in EXPLORE or COMPLETE.
-
-    Phase-gated reward is a LATER phase and will change this deliberately -
-    when it does, this test should be replaced, not loosened."""
-    w, drive = qa_env
-    drive(x=800)
-    w.lifecycle.phase = EpisodePhase.EXPLORE
-    a = [drive(x=800)[1] for _ in range(20)]
-    w.lifecycle.phase = EpisodePhase.COMPLETE
-    b = [drive(x=800)[1] for _ in range(20)]
-    assert a == b
-
-
 def test_reaching_complete_does_not_end_the_episode(qa_env):
     w, drive = qa_env
     # A blank map: the first substep finds a whole collider's worth of new

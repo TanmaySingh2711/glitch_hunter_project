@@ -300,9 +300,11 @@ def main():
          config.FRONTIER_WEIGHT * (1 - config.GAMMA), "-", None),
         ("drought, full ramp", -config.DROUGHT_MAX,
          "legacy stuck penalty", -0.1),
-        ("time", -config.QA_TIME_PENALTY, "legacy time", -0.02),
+        ("time, EXPLORE", -config.EXPLORE_TIME_PENALTY, "legacy time", -0.02),
+        ("time, COMPLETE", -config.COMPLETE_TIME_PENALTY, "-", None),
         ("clean jump", config.QA_CLEAN_JUMP_REWARD, "legacy clean jump", 3.0),
-        ("flag_get", config.QA_FLAG_GET_REWARD, "legacy flag_get", 500.0),
+        ("flag_get, EXPLORE", config.EXPLORE_FLAG_REWARD, "legacy flag_get", 500.0),
+        ("flag_get, COMPLETE", config.COMPLETE_FLAG_REWARD, "-", None),
         ("death", -5.0, "legacy death", -5.0),
     ]
     for name, qa_v, legacy_name, legacy_v in rows:
