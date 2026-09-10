@@ -172,7 +172,8 @@ def test_explore_does_not_reward_rushing_to_the_finish(empty):
     empty.r(110)
     empty.complete()
     complete_rush = _rush(empty)
-    assert complete_rush > explore_rush + 100
+    budget = config.COMPLETE_PROGRESS_PER_PX * config.LEVEL_COMPLETE_SPAN_PX
+    assert complete_rush > explore_rush + 0.5 * budget
 
 
 def test_long_productive_exploration_is_not_taxed_by_time(full):
@@ -275,7 +276,12 @@ def test_complete_finishing_beats_dying_and_pays_usefully(empty):
                                env_reward=-5.0, done=True)
     finished, died = run(True), run(False)
     assert finished > died + config.ENGINE_DEATH_PENALTY
-    assert finished > 50, f"finishing from mid-level paid only {finished:.1f}"
+    # Scaled by Phase 4B: the second half of the level plus the flag, less at
+    # most the whole time cap - and the shortfall, since this blank map never
+    # meets its target (a real post-T1 episode already has).
+    useful = (config.COMPLETE_PROGRESS_PER_PX * 4700 + config.COMPLETE_FLAG_REWARD
+              - config.COMPLETE_TIME_PENALTY_EPISODE_CAP - config.SHORTFALL_PENALTY)
+    assert finished >= useful - 1e-6, f"finishing from mid-level paid only {finished:.1f}"
 
 
 @pytest.mark.parametrize("phase,credit,flag", [
@@ -309,10 +315,11 @@ def test_coverage_is_still_recorded_in_complete(full):
 
 
 def test_complete_stays_complete_for_the_episode(env, patch_step):
-    """Real transitions this time: the blank map meets the target on the
-    first substep, and then a long unproductive stretch - which in EXPLORE
+    """Real transitions this time: the blank map meets an informed target on
+    the first substep, and then a long unproductive stretch - which in EXPLORE
     would ramp the drought - never brings EXPLORE's terms back."""
     cov = SpatialCoverage(testable_mask=FULL)
+    cov.episode_new_history = [1000.0] * config.TARGET_MIN_HISTORY
     w = GlitchHunterWrapper(env, reward_mode="qa_exploration", coverage=cov)
     w.reset()
     obs = np.zeros(env.observation_space.shape, dtype=np.uint8)
@@ -350,6 +357,9 @@ class _Cov:
     def episode_target(self):
         return 10_000
 
+    def target_informed(self):
+        return True
+
 
 @pytest.mark.parametrize("reason,new,credit", [
     (Transition.TARGET_MET, 12_000, 1.0),
@@ -379,7 +389,8 @@ def test_idling_into_T2_then_sprinting_does_not_pay(empty):         # [H]
     empty.r(110)
     empty.complete(credit=1.0, reason=Transition.TARGET_MET)
     earned = _rush(empty)
-    assert earned > idle_then_rush + 100
+    budget = config.COMPLETE_PROGRESS_PER_PX * config.LEVEL_COMPLETE_SPAN_PX
+    assert earned > idle_then_rush + 0.5 * budget
 
 
 # ══════════════════════════════════════════════════════════════════════════

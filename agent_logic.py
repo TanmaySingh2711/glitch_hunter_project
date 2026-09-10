@@ -81,6 +81,21 @@ DEATH_STREAK_TRIGGER = 10        # consecutive same-cause deaths at the same spo
 DANGER_ZONE_BUCKET_PX = 200      # spatial resolution for "the same spot"
 DANGER_ZONE_BOOST_EPISODES = 15  # how many episodes the boost stays active
 
+# Every QA reward term, as a separately accounted channel. The channels of a
+# substep sum to exactly the reward it returns - 'clip' is the backstop
+# clamp's own adjustment, so nothing is left unattributed - and they are
+# accumulated per episode AND per phase (GlitchHunterWrapper.ep_channels).
+# 'death' is the env's own reward, which is -5.0 on any engine death,
+# including the timer running out.
+QA_CHANNELS = ('death', 'novelty', 'frontier', 'drought', 'safety_reset',
+               'locomotion', 'time', 'progress', 'interaction', 'flag',
+               'shortfall', 'clip')
+
+
+def _blank_channels():
+    return {phase.value: dict.fromkeys(QA_CHANNELS, 0.0)
+            for phase in lifecycle_mod.EpisodePhase}
+
 
 class GlitchHunterWrapper(gym.Wrapper):
     """
@@ -232,9 +247,12 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.ep_substeps = 0
         self.ep_drought_paid = 0.0
         self.ep_interaction_paid = 0.0
+        self.ep_locomotion_paid = 0.0
         self.ep_max_x = 0               # episode max-x: the progress baseline
         self.ep_progress_paid = 0.0     # COMPLETE-only forward progress paid
         self.ep_complete_time_paid = 0.0
+        self.ep_channels = _blank_channels()
+        self.last_channels = None
         self.qa_clip_events = 0
         self.last_n_new = 0
 
@@ -272,9 +290,14 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.ep_substeps = 0
         self.ep_drought_paid = 0.0
         self.ep_interaction_paid = 0.0
+        self.ep_locomotion_paid = 0.0
         self.ep_max_x = 0               # episode max-x: the progress baseline
         self.ep_progress_paid = 0.0     # COMPLETE-only forward progress paid
         self.ep_complete_time_paid = 0.0
+        # A NEW dict, not cleared in place: the previous episode's final info
+        # carries a snapshot of the old one.
+        self.ep_channels = _blank_channels()
+        self.last_channels = None
         self.last_n_new = 0
 
         # Coverage itself is NEVER cleared here - that is the entire point of
@@ -311,8 +334,8 @@ class GlitchHunterWrapper(gym.Wrapper):
 
         n_new = self._record_coverage(info)
         # Lifecycle sees the substep BEFORE the reward, so the safety-reset
-        # decision inside _qa_reward is made on up-to-date state. Nothing in
-        # the reward reads the phase: the transition is reward-neutral.
+        # decision inside _qa_reward is made on up-to-date state - and so the
+        # transition substep is already scored in the phase it moved into.
         if self.lifecycle is not None:
             self.lifecycle.observe(info, n_new)
 
@@ -376,6 +399,12 @@ class GlitchHunterWrapper(gym.Wrapper):
         complete = self.lifecycle.is_complete
         credit = self.lifecycle.completion_credit
 
+        # Per-channel accounting. Every term below is added to `reward` and
+        # recorded in `ch` as the same value, in the same order, so the
+        # reward itself is unchanged by keeping the books.
+        ch = dict.fromkeys(QA_CHANNELS, 0.0)
+        ch['death'] = float(reward)
+
         # ─── 1. NOVELTY — the primary signal ───
         # Paid ONLY for world pixels no worker in this run has ever occupied.
         # sqrt-scaled and capped, so a freak 2288px sweep cannot pay 60x what
@@ -394,9 +423,11 @@ class GlitchHunterWrapper(gym.Wrapper):
         shape = cov.novelty_shape(n_new)
         self.ep_novelty_shape += shape
         if complete:
-            reward += config.COMPLETE_NOVELTY_MULT * config.NOVELTY_WEIGHT * shape
+            novelty = config.COMPLETE_NOVELTY_MULT * config.NOVELTY_WEIGHT * shape
         else:
-            reward += cov.novelty_reward(n_new)
+            novelty = cov.novelty_reward(n_new)
+        reward += novelty
+        ch['novelty'] = novelty
 
         # ─── 2. FRONTIER GUIDANCE (potential-based) ───
         # Ng/Harada/Russell shaping toward the nearest unexplored cell AHEAD
@@ -426,8 +457,10 @@ class GlitchHunterWrapper(gym.Wrapper):
                 cy = rect[1] + rect[3] // 2
                 phi_now = cov.phi(cx, cy)
             if cov.frontier_version == self.last_frontier_version:
-                reward += config.FRONTIER_WEIGHT * (
+                frontier = config.FRONTIER_WEIGHT * (
                     config.GAMMA * phi_now - self.last_frontier_phi)
+                reward += frontier
+                ch['frontier'] = frontier
             self.last_frontier_phi = phi_now
             self.last_frontier_version = cov.frontier_version
 
@@ -462,6 +495,7 @@ class GlitchHunterWrapper(gym.Wrapper):
             if due > 0:
                 self.ep_drought_paid += due
                 reward -= due
+                ch['drought'] = -due
 
         # ─── 4. SAFETY RESET (replaces the old bare-drought hard limit) ───
         # No infinite punishment loops - but a drought alone is not being
@@ -476,6 +510,7 @@ class GlitchHunterWrapper(gym.Wrapper):
         if not done and self.lifecycle.safety_reset_due():
             self.lifecycle.fire_safety_reset()
             reward += config.DROUGHT_TERMINAL_PENALTY
+            ch['safety_reset'] = config.DROUGHT_TERMINAL_PENALTY
             done = True
 
         # ─── 5. RETAINED LOCOMOTION SKILLS (rescaled, direction-agnostic) ───
@@ -486,8 +521,11 @@ class GlitchHunterWrapper(gym.Wrapper):
         momentum_multiplier = 2.0 if (active_zone and active_zone['cause'] == 'pit') else 1.0
         if on_ground and abs(x_vel) > SPRINT_VEL_THRESHOLD:
             self.sprint_frames = min(self.sprint_frames + 1, 30)
-            reward += (momentum_multiplier * config.QA_MOMENTUM_SCALE
-                       * 0.01 * self.sprint_frames / 30.0)
+            momentum = self._locomotion_allowance(
+                momentum_multiplier * config.QA_MOMENTUM_SCALE
+                * 0.01 * self.sprint_frames / 30.0)
+            reward += momentum
+            ch['locomotion'] += momentum
         else:
             self.sprint_frames = 0
 
@@ -498,13 +536,18 @@ class GlitchHunterWrapper(gym.Wrapper):
         elif (not self.was_on_ground) and on_ground:
             if self.jump_start_had_momentum and self.jump_start_x is not None:
                 if abs(x_pos - self.jump_start_x) > 60:
-                    reward += config.QA_CLEAN_JUMP_REWARD * momentum_multiplier
+                    jump = self._locomotion_allowance(
+                        config.QA_CLEAN_JUMP_REWARD * momentum_multiplier)
+                    reward += jump
+                    ch['locomotion'] += jump
             self.jump_start_x = None
             self.jump_start_had_momentum = False
         self.was_on_ground = on_ground
 
         if active_zone and active_zone['cause'] in ('goomba', 'koopa', 'koopa_shell') and not on_ground:
-            reward += 0.05 * config.QA_POWERUP_SCALE
+            attempt = self._locomotion_allowance(0.05 * config.QA_POWERUP_SCALE)
+            reward += attempt
+            ch['locomotion'] += attempt
 
         # ─── 6. TIME ───
         # PHASE: EXPLORE_TIME_PENALTY (0.0) - at the 9,781-step QA cap a flat
@@ -519,8 +562,10 @@ class GlitchHunterWrapper(gym.Wrapper):
             if due > 0:
                 self.ep_complete_time_paid += due
                 reward -= due
+                ch['time'] = -due
         else:
             reward -= config.EXPLORE_TIME_PENALTY
+            ch['time'] = -config.EXPLORE_TIME_PENALTY
 
         # ─── 6b. FORWARD PROGRESS — COMPLETE ONLY ───
         # The x-monotone signal the retrofit deleted, back in exactly one
@@ -536,6 +581,7 @@ class GlitchHunterWrapper(gym.Wrapper):
                     * min(gain, config.MAX_FRAME_DX))
             self.ep_progress_paid += paid
             reward += paid
+            ch['progress'] = paid
         self.ep_max_x = max(self.ep_max_x, int(x_pos))
 
         # ─── 7. WORLD INTERACTION (kept, rescaled, and CAPPED PER EPISODE) ───
@@ -592,8 +638,10 @@ class GlitchHunterWrapper(gym.Wrapper):
             allowed = max(0.0, allowed)
             self.ep_interaction_paid += allowed
             reward += allowed
+            ch['interaction'] = allowed
         else:
             reward += interaction
+            ch['interaction'] = interaction
 
         # ─── 8. THE FLAG — worth what the phase says ───
         # EXPLORE: 5.0, no more than the shortfall a premature finish
@@ -604,10 +652,12 @@ class GlitchHunterWrapper(gym.Wrapper):
         flag_get = info.get('flag_get', False)
         if flag_get and not self.last_flag_get:
             if complete:
-                reward += config.EXPLORE_FLAG_REWARD + credit * (
+                flag = config.EXPLORE_FLAG_REWARD + credit * (
                     config.COMPLETE_FLAG_REWARD - config.EXPLORE_FLAG_REWARD)
             else:
-                reward += config.EXPLORE_FLAG_REWARD
+                flag = config.EXPLORE_FLAG_REWARD
+            reward += flag
+            ch['flag'] = flag
         self.last_flag_get = flag_get
 
         self.last_score = score
@@ -626,6 +676,7 @@ class GlitchHunterWrapper(gym.Wrapper):
             if cov.episode_new < target:
                 shortfall = 1.0 - (cov.episode_new / target)
                 reward -= config.SHORTFALL_PENALTY * shortfall
+                ch['shortfall'] = -config.SHORTFALL_PENALTY * shortfall
             info['coverage_total'] = cov.total_unique()
             info['coverage_episode_target'] = target
 
@@ -639,14 +690,36 @@ class GlitchHunterWrapper(gym.Wrapper):
         # of silent.
         if reward > config.QA_REWARD_CLIP or reward < -config.QA_REWARD_CLIP:
             self.qa_clip_events += 1
+            unclipped = reward
             reward = max(-config.QA_REWARD_CLIP,
                          min(config.QA_REWARD_CLIP, reward))
+            ch['clip'] = reward - unclipped
+
+        acc = self.ep_channels[self.lifecycle.phase.value]
+        for k, v in ch.items():
+            acc[k] += v
+        self.last_channels = ch
+        if done:
+            # A snapshot, so the final info survives the next reset().
+            info['qa_channels'] = {p: dict(c) for p, c in self.ep_channels.items()}
 
         info['qa_novelty_shape'] = self.ep_novelty_shape
         info['qa_clip_events'] = self.qa_clip_events
         info['qa_progress_paid'] = self.ep_progress_paid
         info['qa_complete_time_paid'] = self.ep_complete_time_paid
         return reward, done
+
+    def _locomotion_allowance(self, amount):
+        """What is left of this episode's locomotion budget, up to `amount`.
+
+        Below the cap this returns `amount` itself, so every ordinary
+        locomotion payment is unchanged to the bit. See
+        config.QA_LOCOMOTION_EPISODE_CAP for the farm that made it necessary.
+        """
+        allowed = max(0.0, min(amount, config.QA_LOCOMOTION_EPISODE_CAP
+                               - self.ep_locomotion_paid))
+        self.ep_locomotion_paid += allowed
+        return allowed
 
     def _track_death_memory(self, done, info, current_bucket):
         """Shared by both modes - see ADAPTIVE DEATH MEMORY at top of file."""

@@ -625,6 +625,15 @@ class SpatialCoverage:
         return -min(dist, config.FRONTIER_DIST_CAP) / config.FRONTIER_DIST_CAP
 
     # ── adaptive target ───────────────────────────────────────────────────
+    def target_informed(self) -> bool:
+        """Is the target measured from this worker's own history yet?
+
+        Before TARGET_MIN_HISTORY episodes, episode_target() returns the bare
+        TARGET_FLOOR, which says nothing about how much this policy finds on
+        this map.
+        """
+        return len(self.episode_new_history) >= config.TARGET_MIN_HISTORY
+
     def episode_target(self) -> int:
         """New-pixel target for the current episode.
 
@@ -638,7 +647,7 @@ class SpatialCoverage:
         """
         hist = self.episode_new_history
         baseline = (float(np.median(hist[-config.TARGET_HISTORY_LEN:]))
-                    if len(hist) >= 5 else float(config.TARGET_FLOOR))
+                    if self.target_informed() else float(config.TARGET_FLOOR))
         remaining = self.remaining()
         ceiling = (max(config.TARGET_FLOOR,
                        int(config.TARGET_REMAIN_FRAC * remaining))

@@ -36,14 +36,18 @@ class FakeCoverage:
     test that is about straightness is not also silently about the frontier.
     """
 
-    def __init__(self, target=10_000, frontier=None):
+    def __init__(self, target=10_000, frontier=None, informed=True):
         self.episode_new = 0
         self._target = target
+        self._informed = informed
         self.testable = None if frontier is None else True
         self._frontier = frontier          # fn(viewport_x, points) -> (n, d)
 
     def episode_target(self):
         return self._target
+
+    def target_informed(self):
+        return self._informed
 
     def frontier_query(self, viewport_x, points):
         return self._frontier(viewport_x, points)
@@ -243,6 +247,31 @@ def test_meeting_the_target_moves_to_complete():                    # [E]
     assert lc.transition_reason == Transition.TARGET_MET
 
 
+def test_an_uninformed_target_cannot_fire_T1():
+    """A worker's first episodes have no history, so the target is the bare
+    floor. Meeting it is not evidence of anything and must not end EXPLORE -
+    on a virgin map it used to on the first substep (Phase 4B)."""
+    cov = FakeCoverage(target=config.TARGET_FLOOR, informed=False)
+    lc = EpisodeLifecycle(cov)
+    cov.episode_new = 50 * config.TARGET_FLOOR
+    lc.observe(_info(200), 5000)
+    assert lc.phase is EpisodePhase.EXPLORE
+    # The other criteria still work: sustained exhaustion moves it on (one
+    # extra window, since the first one holds the 5,000 px found above).
+    _pace(lc, WINDOW * (config.YIELD_WINDOWS + 1), n_new=0)
+    assert lc.transition_reason == Transition.YIELD_EXHAUSTED
+
+
+def test_real_coverage_informs_the_target_after_enough_history():
+    cov = SpatialCoverage(
+        testable_mask=np.ones((config.GRID_H, config.GRID_W), dtype=bool))
+    cov.episode_new_history = [8000.0] * (config.TARGET_MIN_HISTORY - 1)
+    assert not EpisodeLifecycle(cov).target_informed
+    cov.episode_new_history.append(8000.0)
+    lc = EpisodeLifecycle(cov)
+    assert lc.target_informed and lc.target == 8000
+
+
 def test_transition_is_one_way():
     cov = FakeCoverage(target=10)
     lc = EpisodeLifecycle(cov)
@@ -327,8 +356,10 @@ def test_phase_is_in_info_on_every_substep(qa_env):
 def test_reaching_complete_does_not_end_the_episode(qa_env):
     w, drive = qa_env
     # A blank map: the first substep finds a whole collider's worth of new
-    # pixels (1,200), above the 500-px floor target.
-    assert w.lifecycle.target == config.TARGET_FLOOR
+    # pixels (1,200), above an informed 1,000-px target.
+    w.coverage.episode_new_history = [1000.0] * config.TARGET_MIN_HISTORY
+    w.lifecycle.begin_episode()
+    assert w.lifecycle.target == 1000 and w.lifecycle.target_informed
     _obs, _r, done, _t, info = drive(x=900)
     assert info['episode_phase'] == 'complete'
     assert info['phase_transition_reason'] == Transition.TARGET_MET

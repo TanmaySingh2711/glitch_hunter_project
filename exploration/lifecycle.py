@@ -116,6 +116,8 @@ class EpisodeLifecycle:
         # with episode HISTORY anyway, which changes between episodes.
         self.target = (self.coverage.episode_target()
                        if self.coverage is not None else None)
+        self.target_informed = (self.coverage is not None
+                                and self.coverage.target_informed())
 
     def _reset_window(self):
         self._w_start = None
@@ -209,8 +211,19 @@ class EpisodeLifecycle:
         self._reset_window()
 
     def _check_transition(self, n_new):
+        # T1 needs an INFORMED target. With fewer than TARGET_MIN_HISTORY
+        # episodes behind it - every worker's first episodes of every run -
+        # the target is the bare 500 px floor, which says nothing about this
+        # policy on this map. Phase 4B measured what firing on it does: on a
+        # virgin map the 6M policy met it on the FIRST substep, so an episode
+        # that found ~630,000 px earned 0.00 EXPLORE novelty (every pixel paid
+        # at the COMPLETE tie-breaker rate) against 1,157-1,516 for the same
+        # policy once the target was informed - and on the bootstrap map it
+        # handed out full completion credit after 69-233 steps. No evidence,
+        # no T1; T2-T4 still apply, exactly as in_coherent_transit refuses to
+        # waive a penalty before any window has closed.
         reason = None
-        if (n_new and self.target is not None
+        if (n_new and self.target is not None and self.target_informed
                 and self.coverage.episode_new >= self.target):
             reason = Transition.TARGET_MET
         elif self.consecutive_exhausted >= config.YIELD_WINDOWS:

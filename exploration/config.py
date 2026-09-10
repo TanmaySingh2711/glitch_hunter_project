@@ -285,6 +285,10 @@ TARGET_BETA = 1.0
 TARGET_FLOOR = 500
 TARGET_REMAIN_FRAC = 0.25
 TARGET_HISTORY_LEN = 20
+# Episodes of history before the target stops being the bare floor. Until
+# then the target is not a measurement of anything, and T1 does not fire on
+# it (see lifecycle._check_transition for the calibration that forced this).
+TARGET_MIN_HISTORY = 5
 
 # ═══════════════════════════════════════════════════════════════════════
 # LEGACY REWARD RESCALING (applied only in "qa_exploration" mode)
@@ -326,6 +330,22 @@ QA_POWERUP_SCALE = 0.25
 # a cap on penalties would be a loophole, not a safeguard.
 QA_INTERACTION_EPISODE_CAP = 10.0
 
+# ─── CUMULATIVE LOCOMOTION CAP (Phase 4B) ───
+# Momentum and clean running jumps are direction-agnostic on purpose (see
+# the wrapper), which also makes them farmable in place. Measured with a
+# scripted controller (run right, running jump, run back left, hop) that
+# never leaves the spawn screen and is never "stuck" - its box is wider than
+# STUCK_BBOX_AREA, so the safety reset cannot end it: it collected 35.7 over
+# a full 9,782-step episode, climbing linearly, against a natural maximum of
+# 8.14 across 276 calibration episodes of the 6M policy (median 5.74, p99
+# 7.91). At the calibrated COMPLETE scale that was enough to make farming
+# out the timer pay about as much as a whole full-credit run to the
+# castle - Requirement B inverted. Capped like interaction: above every
+# natural episode measured, so ordinary play never meets it; a farm stops
+# paying at the cap. Asserted against the COMPLETE payout in
+# assert_phase_reward_balance.
+QA_LOCOMOTION_EPISODE_CAP = 10.0
+
 # Hard clamp on the reward PPO can receive from any single SUBSTEP. This is a
 # backstop, not a tuning knob: every term above is individually bounded, so
 # under correct operation this never fires. If it starts firing (the wrapper
@@ -355,9 +375,29 @@ DROUGHT_NOTCH = 0.005
 #   COMPLETE  finish Level 1-1. Forward progress pays, the flag pays more,
 #             novelty drops to a tie-breaker, exploration-only pressure stops.
 #
-# All values PROVISIONAL pending Phase 4B calibration against the 6M policy.
-# The constraints between them are not provisional - they are asserted by
-# assert_phase_reward_balance() below, at wrapper construction.
+# ─── CALIBRATED IN PHASE 4B (tools/calibrate_phase_reward.py) ───
+# The 4A values were sized against PER-SUBSTEP dominance only, and measured
+# at EPISODE scale they were badly off. The 6M policy, run with inference
+# only from the bootstrap map, earns this much EXPLORE novelty per episode
+# (EXPLORE pinned for the whole run, 20 episodes):
+#     median 8.92, mean 24.53 (0 .. 128; it is heavily skewed)
+# while ONE full-credit COMPLETE run to the castle paid 259 progress + 10 flag
+# at 4A's 0.03/px - thirty median exploration episodes. The policy cannot
+# see the phase (same 4x84x84 frames in both), so that pay leaks into
+# EXPLORE behaviour wherever the two phases share the screen. Measured on
+# the natural lifecycle (ppo_boot + eps_boot + campaign, 90 episodes,
+# steady state = after the target-history warm-up):
+#
+#                                         4A values     4B values
+#     completion / exploration, summed       3.05          0.24
+#     ... discounted-return spread           4.40          0.39
+#     COMPLETE > EXPLORE pay at x >= 3072    every bucket  flag area only
+#
+# The spread is the number that matters for PPO: it is the part of each
+# group's discounted return the critic cannot absorb, i.e. what reaches the
+# advantage. 4B holds it under 0.5 - completion is a real but minority
+# signal - rather than at a fixed split. See the report in the Phase 4B
+# commit for every arm's per-channel breakdown.
 # ═══════════════════════════════════════════════════════════════════════
 # The env's own death reward (custom_mario_env.step: `reward = -5.0`), named
 # so the bounds below can be stated against it.
@@ -365,6 +405,13 @@ ENGINE_DEATH_PENALTY = 5.0
 # mario_clone constants MAX_WALK_SPEED = 6 px/frame. Walking, not sprinting,
 # is the pace the dominance check below is held to: the stricter case.
 WALK_PX_PER_SUBSTEP = 6
+# Spawn x = 110 to the castle door: every completed episode in calibration
+# ended at max-x 8,745-8,751. The whole of what forward progress can pay.
+LEVEL_COMPLETE_SPAN_PX = 8641
+# The measured reference that bounds a whole COMPLETE run (see above): the
+# mean EXPLORE novelty of one 6M episode from the bootstrap map.
+CALIB_EXPLORE_EPISODE_NOVELTY_MEAN = 24.53
+CALIB_EXPLORE_EPISODE_NOVELTY_MEDIAN = 8.92
 
 # ─── TIME ───
 # EXPLORE: zero. The old 0.005/substep was harmless at a 2,451-step cap
@@ -376,10 +423,16 @@ WALK_PX_PER_SUBSTEP = 6
 # end-of-episode shortfall each cost something, and each is bounded. None of
 # them scales with how long a PRODUCTIVE episode runs.
 EXPLORE_TIME_PENALTY = 0.0
-# COMPLETE: mild urgency, the previous QA value - but capped per episode
-# BELOW the death penalty, so dying can never be a way to stop paying it.
-COMPLETE_TIME_PENALTY = 0.005
-COMPLETE_TIME_PENALTY_EPISODE_CAP = 4.0
+# COMPLETE: mild urgency, capped per episode at HALF the death penalty, so
+# dying can never be a way to stop paying it - and a stuck agent can save at
+# most 2.0 by dying instead of timing out, not 4.0 as under 4A. The rate is
+# set so the cap binds at 1,600 substeps = 400 agent steps, about one whole
+# 6M completion run (median 410 steps): 4A's 0.005 hit its cap after 200
+# steps and gave no urgency for the second half of a run. Per substep it is
+# 1/7 of what walking toward the castle pays, so it adds urgency without
+# ever competing with progress.
+COMPLETE_TIME_PENALTY = 0.00125
+COMPLETE_TIME_PENALTY_EPISODE_CAP = 2.0
 
 # ─── FLAG ───
 # EXPLORE: unchanged from the previous QA value, and no larger than the
@@ -389,26 +442,39 @@ COMPLETE_TIME_PENALTY_EPISODE_CAP = 4.0
 EXPLORE_FLAG_REWARD = 5.0
 # COMPLETE, at full completion credit. Interpolated from EXPLORE_FLAG_REWARD
 # by the credit (see lifecycle.completion_credit), so finishing in COMPLETE is
-# never worth less than finishing in EXPLORE. Kept under QA_REWARD_CLIP
-# together with everything else that can land on the same substep - the
-# legacy +500 would simply be clipped, and restoring it is not the point.
-COMPLETE_FLAG_REWARD = 10.0
+# never worth less than finishing in EXPLORE. 4A's 10.0 was a sparse jackpot
+# 25x a median exploration episode's worth; 6.0 is under half the dense
+# progress budget (13.0), so the route pays more than the finish line, and
+# it keeps the flag substep under QA_REWARD_CLIP even if a powerup lands on
+# the same substep - which 10.0 did not (asserted below). The legacy +500
+# would simply be clipped, and restoring it is not the point.
+COMPLETE_FLAG_REWARD = 6.0
 
 # ─── FORWARD PROGRESS (COMPLETE only) ───
 # Paid per px of NEW episode max-x while in COMPLETE, scaled by completion
 # credit. The baseline advances in EXPLORE too, so ground already covered
 # this episode is never paid for twice. Per-substep gain is capped at
 # MAX_FRAME_DX: anything larger is a teleport, i.e. a glitch, not progress.
-COMPLETE_PROGRESS_PER_PX = 0.03
+#
+# 0.03 -> 0.0015 (Phase 4B). A whole level of progress is now 13.0, and with
+# the flag a full-credit run from the spawn pays 19.0 - under the MEAN
+# exploration episode (24.53), about two MEDIAN ones. 0.002 was measured too:
+# it passed at the start of training but pushed completion past exploration
+# (ratio 1.2) in the persistent campaign once the map began to fill, which
+# is the direction training moves in.
+COMPLETE_PROGRESS_PER_PX = 0.0015
 
 # ─── NOVELTY IN COMPLETE ───
 # Reduced to a tie-breaker, not zeroed. Coverage is still RECORDED at full
 # fidelity either way; this is only what discovery PAYS. It must be small
 # enough that walking toward the finish out-earns a detour onto virgin ground
-# (asserted below), and it deliberately ignores the StagnationCallback
-# multiplier, which escalates EXPLORATION pressure and has no business
-# growing a distraction in the phase whose job is to finish.
-COMPLETE_NOVELTY_MULT = 0.1
+# (asserted below, with a 2x margin), and it deliberately ignores the
+# StagnationCallback multiplier, which escalates EXPLORATION pressure and has
+# no business growing a distraction in the phase whose job is to finish.
+# It scales with COMPLETE_PROGRESS_PER_PX, so 4B's 20x cut in progress takes
+# it from 0.1 to 0.003: a full virgin stride pays 0.0036 against 0.009 for a
+# walking substep toward the castle.
+COMPLETE_NOVELTY_MULT = 0.003
 
 
 def assert_phase_reward_balance():
@@ -420,28 +486,38 @@ def assert_phase_reward_balance():
     """
     problems = []
     qa_cap_substeps = QA_EPISODE_CAP_AGENT_STEPS_MEASURED * SUBSTEPS_PER_AGENT_STEP
+    walk = WALK_PX_PER_SUBSTEP * COMPLETE_PROGRESS_PER_PX
+    sprint = MAX_FRAME_DX * COMPLETE_PROGRESS_PER_PX
+    progress_budget = COMPLETE_PROGRESS_PER_PX * LEVEL_COMPLETE_SPAN_PX
     if EXPLORE_TIME_PENALTY * qa_cap_substeps >= ENGINE_DEATH_PENALTY:
         problems.append(
             f"EXPLORE time penalty totals "
             f"{EXPLORE_TIME_PENALTY * qa_cap_substeps:.1f} over a full QA "
             f"episode - more than a death, so dying early would pay")
-    if COMPLETE_TIME_PENALTY_EPISODE_CAP >= ENGINE_DEATH_PENALTY:
-        problems.append("COMPLETE time penalty cap is not below the death "
-                        "penalty - dying would stop the bleeding")
+    # Half, not merely below: the most a stuck agent can save by dying
+    # instead of timing out is the unpaid part of this cap.
+    if COMPLETE_TIME_PENALTY_EPISODE_CAP > 0.5 * ENGINE_DEATH_PENALTY:
+        problems.append("COMPLETE time penalty cap exceeds half the death "
+                        "penalty - dying would save too much of it")
+    if walk < 4 * COMPLETE_TIME_PENALTY:
+        problems.append(
+            f"COMPLETE time ({COMPLETE_TIME_PENALTY}/substep) is more than a "
+            f"quarter of walking progress ({walk:.4f}) - urgency would compete "
+            f"with the direction it is meant to hurry")
     full_stride = COMPLETE_NOVELTY_MULT * NOVELTY_WEIGHT * 1.0
     capped_sweep = COMPLETE_NOVELTY_MULT * NOVELTY_WEIGHT * NOVELTY_CAP
-    if full_stride >= WALK_PX_PER_SUBSTEP * COMPLETE_PROGRESS_PER_PX:
+    if 2 * full_stride > walk:
         problems.append(
-            f"in COMPLETE, walking toward the finish pays "
-            f"{WALK_PX_PER_SUBSTEP * COMPLETE_PROGRESS_PER_PX:.3f}/substep but "
-            f"a stride of virgin ground pays {full_stride:.3f} - novelty would "
-            f"pull Mario off the route")
-    if capped_sweep >= MAX_FRAME_DX * COMPLETE_PROGRESS_PER_PX:
+            f"in COMPLETE, walking toward the finish pays {walk:.4f}/substep "
+            f"but a stride of virgin ground pays {full_stride:.4f} - less than "
+            f"a 2x margin, so novelty could pull Mario off the route")
+    if 2 * capped_sweep > sprint:
         problems.append("in COMPLETE, sprinting toward the finish does not "
-                        "out-earn a worst-case novelty sweep")
-    worst_flag_substep = (COMPLETE_FLAG_REWARD + capped_sweep
-                          + MAX_FRAME_DX * COMPLETE_PROGRESS_PER_PX
-                          + 2 * QA_CLEAN_JUMP_REWARD)
+                        "out-earn a worst-case novelty sweep by 2x")
+    # The flag substep can also carry a powerup (small -> tall = 20 x scale),
+    # which is the worst case QA_REWARD_CLIP was sized for.
+    worst_flag_substep = (COMPLETE_FLAG_REWARD + capped_sweep + sprint
+                          + 2 * QA_CLEAN_JUMP_REWARD + 20.0 * QA_POWERUP_SCALE)
     if worst_flag_substep >= QA_REWARD_CLIP:
         problems.append(
             f"the COMPLETE flag substep can reach {worst_flag_substep:.2f}, "
@@ -451,6 +527,30 @@ def assert_phase_reward_balance():
                         "triggers - rushing to the flag would pay")
     if not EXPLORE_FLAG_REWARD <= COMPLETE_FLAG_REWARD:
         problems.append("finishing in COMPLETE pays less than in EXPLORE")
+    if progress_budget < COMPLETE_FLAG_REWARD:
+        problems.append(
+            f"the COMPLETE flag ({COMPLETE_FLAG_REWARD}) is worth more than "
+            f"the whole level of progress ({progress_budget:.2f}) - a sparse "
+            f"jackpot, not a finish line")
+    # Episode scale, which 4A never checked. The phase is invisible to the
+    # policy, so one full-credit run to the castle must not be worth more
+    # than one measured exploration episode.
+    full_run = progress_budget + COMPLETE_FLAG_REWARD
+    if full_run > CALIB_EXPLORE_EPISODE_NOVELTY_MEAN:
+        problems.append(
+            f"a full-credit COMPLETE run pays {full_run:.1f}, more than the "
+            f"measured mean exploration episode "
+            f"({CALIB_EXPLORE_EPISODE_NOVELTY_MEAN}) - completion would "
+            f"dominate what the policy learns")
+    # A COMPLETE agent that farms locomotion until the timer ends it earns
+    # at most the cap, less the time cost and the timer's own death charge.
+    # Finishing - even at zero credit - pays at least the EXPLORE flag.
+    farm = (QA_LOCOMOTION_EPISODE_CAP - COMPLETE_TIME_PENALTY_EPISODE_CAP
+            - ENGINE_DEATH_PENALTY)
+    if farm >= EXPLORE_FLAG_REWARD:
+        problems.append(
+            f"farming locomotion out the timer in COMPLETE can net {farm:.1f}, "
+            f"not less than the {EXPLORE_FLAG_REWARD} a finish pays")
     if not 0.0 <= COMPLETE_NOVELTY_MULT <= 1.0:
         problems.append("COMPLETE_NOVELTY_MULT outside [0, 1]")
     if problems:
@@ -581,8 +681,8 @@ QA_END_ON_LEVEL_COMPLETE = True
 #
 # Every episode starts in EXPLORE. It moves to COMPLETE, once and one way,
 # when any transition criterion fires. The transition is a LIFECYCLE event,
-# not a termination: it never ends the episode, and nothing in the reward
-# reads the phase yet (phase-gated reward is a later phase).
+# not a termination: it never ends the episode. What each phase pays is in
+# PHASE-GATED REWARD above.
 #
 # All counts below are AGENT steps; the lifecycle converts via
 # SUBSTEPS_PER_AGENT_STEP because the wrapper sees substeps.
