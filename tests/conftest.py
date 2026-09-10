@@ -18,12 +18,32 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+_SESSION_ENV = []
+
+
 @pytest.fixture(scope="session")
 def env():
     from custom_mario_env import CustomMarioEnv
     e = CustomMarioEnv()
+    _SESSION_ENV.append(e)
     yield e
     e.close_window()
+
+
+@pytest.fixture(autouse=True)
+def _restore_engine_lifecycle():
+    """Puts the shared env's episode lifecycle back to the engine default.
+
+    Constructing a QA-mode GlitchHunterWrapper sets a longer engine timer and
+    castle-door termination on the env it wraps. With one env for the whole
+    session, that would silently carry into every later test file - a raw-env
+    test would then run 1600 time units instead of the engine's 401. Only
+    acts if the env already exists, so it never creates one on its own.
+    """
+    yield
+    for e in _SESSION_ENV:
+        e.episode_time_units = None
+        e.end_on_level_complete = False
 
 
 @pytest.fixture

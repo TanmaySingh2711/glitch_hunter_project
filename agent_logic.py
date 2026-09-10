@@ -10,6 +10,7 @@ from custom_mario_env import CustomMarioEnv
 
 from exploration import config
 from exploration import coverage as coverage_mod
+from exploration import lifecycle as lifecycle_mod
 
 ACTION_NAMES = {
     0: "Stand Still",
@@ -181,6 +182,20 @@ class GlitchHunterWrapper(gym.Wrapper):
             # Fails at construction rather than 200k steps into a run.
             config.assert_reward_balance()
 
+        # ─── EPISODE LIFECYCLE ───
+        # The engine timer is the one authoritative episode clock; QA mode
+        # raises its budget and ends at the castle door (measurements in
+        # exploration/config.py, EPISODE LENGTH). Set in BOTH modes, not only
+        # QA: an env is configured by whichever wrapper wraps it, so a legacy
+        # wrapper can never inherit a QA budget left behind on a shared env.
+        base = self.env.unwrapped
+        qa = self.reward_mode == "qa_exploration"
+        base.episode_time_units = config.QA_EPISODE_TIME_UNITS if qa else None
+        base.end_on_level_complete = config.QA_END_ON_LEVEL_COMPLETE if qa else False
+        # EXPLORE -> COMPLETE and the safety reset are part of the QA
+        # objective only. Legacy keeps its own stuck termination, untouched.
+        self.lifecycle = lifecycle_mod.EpisodeLifecycle(self.coverage) if qa else None
+
         # ─── LEGACY STATE ───
         self.visited_tiles = set()
         self.visited_altitude_tiles = set()
@@ -255,6 +270,10 @@ class GlitchHunterWrapper(gym.Wrapper):
         # corridor across the level.
         if self.coverage is not None:
             self.coverage.begin_episode()
+        # After coverage.begin_episode(), which is what rolls the history the
+        # adaptive target is computed from.
+        if self.lifecycle is not None:
+            self.lifecycle.begin_episode()
 
         # Decay active danger-zone boosts by one episode; drop expired ones.
         # (death_streaks and danger_zones themselves are NOT cleared here —
@@ -278,11 +297,19 @@ class GlitchHunterWrapper(gym.Wrapper):
             done = terminated or truncated
 
         n_new = self._record_coverage(info)
+        # Lifecycle sees the substep BEFORE the reward, so the safety-reset
+        # decision inside _qa_reward is made on up-to-date state. Nothing in
+        # the reward reads the phase: the transition is reward-neutral.
+        if self.lifecycle is not None:
+            self.lifecycle.observe(info, n_new)
 
         if self.reward_mode == "qa_exploration":
             reward, done = self._qa_reward(reward, done, info, n_new)
         else:
             reward, done = self._legacy_reward(reward, done, info)
+
+        if self.lifecycle is not None:
+            self.lifecycle.annotate(info, done)
 
         self.ep_reward_total += float(reward)
         self.ep_substeps += 1
@@ -387,11 +414,18 @@ class GlitchHunterWrapper(gym.Wrapper):
                 self.ep_drought_paid += due
                 reward -= due
 
-        # ─── 4. DROUGHT TERMINATION ───
-        # No infinite punishment loops: past the hard limit the episode ends.
-        # Same magnitude as the legacy stuck penalty, so this is not a new
-        # kind of catastrophe for the value function to have to absorb.
-        if drought >= config.DROUGHT_HARD_LIMIT:
+        # ─── 4. SAFETY RESET (replaces the old bare-drought hard limit) ───
+        # No infinite punishment loops - but a drought alone is not being
+        # stuck. The old rule ended the episode after 1600 substeps without a
+        # new pixel, which killed agents crossing already-covered ground to
+        # reach new ground, and kept every episode far below the 5,000-step
+        # floor. The lifecycle now requires a long episode AND a long drought
+        # AND sustained genuine stuckness (exploration/lifecycle.py). The
+        # terminal charge is the same term and magnitude as before. Only
+        # evaluated on substeps the engine has not already ended, so a death
+        # is never charged twice.
+        if not done and self.lifecycle.safety_reset_due():
+            self.lifecycle.fire_safety_reset()
             reward += config.DROUGHT_TERMINAL_PENALTY
             done = True
 

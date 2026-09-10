@@ -150,11 +150,12 @@ def test_drought_is_bounded_per_episode_not_just_per_substep(qa_flat):
     the same episode. A term that can outweigh the entire objective by two
     orders of magnitude is the objective.
     """
+    # Long enough for the cumulative cap to bind (~870 substeps), and well
+    # short of anything that could end the episode.
+    long_drought = 1595
     qa_flat.drive(**_at(3700))
-    total = sum(qa_flat.drive(**_at(3700))
-                for _ in range(config.DROUGHT_HARD_LIMIT - 5))
-    drought_part = -(total + config.QA_TIME_PENALTY *
-                     (config.DROUGHT_HARD_LIMIT - 5))
+    total = sum(qa_flat.drive(**_at(3700)) for _ in range(long_drought))
+    drought_part = -(total + config.QA_TIME_PENALTY * long_drought)
     assert drought_part <= config.DROUGHT_EPISODE_CAP + 1e-6, (
         f"an episode paid {drought_part:.1f} in drought against a cap of "
         f"{config.DROUGHT_EPISODE_CAP}")
@@ -174,16 +175,18 @@ def test_drought_ramp_completes_before_the_episode_cap_binds(qa_flat):
         f"episode cap is {config.DROUGHT_EPISODE_CAP} - the ramp is dead code")
 
 
-def test_drought_terminates_the_episode(qa):
-    """No infinite punishment loops."""
+def test_drought_alone_no_longer_ends_the_episode(qa):
+    """The retired DROUGHT_HARD_LIMIT used to end the episode here, at 1600
+    substeps without a new pixel. A drought is not being stuck - see
+    tests/test_episode_lifecycle.py for what does end an unproductive
+    episode now, and why it needs more than elapsed time."""
     qa.drive(**_at(4000))
-    done = False
-    for _ in range(config.DROUGHT_HARD_LIMIT + 10):
-        _obs, _r, done, _t, _i = qa.step(0)
-        if done:
-            break
-    assert done, "a fully unproductive episode never ended"
-    assert qa.coverage.steps_since_new_pixel >= config.DROUGHT_HARD_LIMIT
+    for _ in range(1700):
+        _obs, _r, done, _t, info = qa.step(0)
+        assert not done, (
+            f"a bare drought of {qa.coverage.steps_since_new_pixel} substeps "
+            f"ended the episode")
+    assert info['episode_phase'] in ('explore', 'complete')
 
 
 def test_vertical_probing_is_not_punished(qa):

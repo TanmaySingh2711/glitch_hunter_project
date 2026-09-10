@@ -73,6 +73,19 @@ class CustomMarioEnv(gym.Env):
         self._pending_glitch = None
         self._pending_ttl = 0
 
+        # ─── EPISODE LIFECYCLE OVERRIDES (QA mode only) ───
+        # Both default to "leave the engine exactly as it is", which is what
+        # legacy mode and the 6M brain rely on. GlitchHunterWrapper sets them
+        # in qa_exploration mode - gated on the wrapper's own mode rather than
+        # a global, so a legacy wrapper in a QA-configured process still gets
+        # the untouched 401-unit engine. See exploration/config.py EPISODE
+        # LENGTH for the measurements behind both.
+        #   episode_time_units      None -> the engine's own 401
+        #   end_on_level_complete   end at the castle door, not after the
+        #                           time-to-score countdown
+        self.episode_time_units = None
+        self.end_on_level_complete = False
+
         # Load the Pygame clone safely using absolute paths so SubprocVecEnv workers don't crash
         self.project_root = os.path.dirname(os.path.abspath(__file__))
         self.mario_clone_dir = os.path.join(self.project_root, 'mario_clone')
@@ -261,11 +274,20 @@ class CustomMarioEnv(gym.Env):
                 reward = -5.0
                 info['death_cause'] = getattr(mario, 'death_cause', None)
 
+            # The engine's episode clock, exported so the lifecycle and its
+            # tests can see the authoritative timer rather than infer it.
+            info['time_left'] = int(self.game.state.overhead_info_display.time)
+
             # RL agents don't need to watch the ~3 second death animation, so
             # end the episode as soon as Mario is dead. (`mario` is already
             # bound above, so no hasattr guard is needed here — if it were
             # missing we'd have raised AttributeError long before this line.)
             done = bool(self.game.state.done or mario.dead)
+            # Same reasoning for the victory sequence, in QA mode: after the
+            # castle door every frame is a fixed countdown whose length is the
+            # remaining time budget, not anything the agent did.
+            if self.end_on_level_complete and info['flag_get']:
+                done = True
 
         except AttributeError:
             info['x_pos'] = 0
@@ -282,6 +304,7 @@ class CustomMarioEnv(gym.Env):
             info['nearest_powerup_dx'] = None
             info['death_cause'] = None
             info['is_dead'] = False
+            info['time_left'] = None
             done = self.game.state.done
 
         self._detect_glitches(info)
@@ -415,6 +438,13 @@ class CustomMarioEnv(gym.Env):
             self.c_module.TOP_SCORE: 0
         }
         self.game.state.startup(0.0, persist_data)
+
+        # The engine's HUD counter IS the episode clock (info.py), so a longer
+        # QA episode is set there, on the one authoritative timer, rather than
+        # emulated by a wrapper that would then disagree with the game about
+        # when time runs out. Additive: None leaves the engine's 401 alone.
+        if self.episode_time_units is not None:
+            self.game.state.overhead_info_display.time = int(self.episode_time_units)
 
         # Guards against calling reset() while the window is closed (e.g.
         # a stray reset between close_window() and the dashboard's next

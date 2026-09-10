@@ -231,8 +231,20 @@ DROUGHT_STEP = 80
 # brief actually asks for: novelty is the primary signal and the drought is
 # only pressure against camping.
 DROUGHT_MAX = 0.02
-DROUGHT_HARD_LIMIT = 1600           # substeps -> terminate the episode
-DROUGHT_TERMINAL_PENALTY = -5.0     # same magnitude as the legacy stuck penalty
+# ─── DROUGHT_HARD_LIMIT IS RETIRED (Phase 3) ───
+# It used to end the episode after 1600 substeps (400 agent steps) with no new
+# pixel. That is a BARE drought, and a bare drought is not being stuck: with
+# the bootstrap map loaded, the whole opening of the level is already covered,
+# so an agent crossing it to reach new ground was being killed for doing
+# exactly the right thing. It also made the 5,000-step safety floor
+# unreachable a second time over, independently of the engine timer.
+# Unproductive episodes are now ended by the SAFETY RESET below, which needs
+# a long episode AND a long drought AND sustained genuine stuckness. The
+# per-substep drought ramp above is reward logic and is unchanged.
+#
+# Charged when the safety reset fires - the same term, and the same magnitude
+# as the legacy stuck penalty, that the retired hard limit used to charge.
+DROUGHT_TERMINAL_PENALTY = -5.0
 
 # ─── CUMULATIVE CAP (added after the first calibration run) ───
 # The per-substep penalty above is bounded, but it was applied on EVERY
@@ -378,30 +390,119 @@ def assert_reward_balance():
 PENETRATION_TOL = 6
 
 # ═══════════════════════════════════════════════════════════════════════
-# BLOCKING DESIGN FACT — EPISODE LENGTH IS CAPPED BY THE ENGINE
+# EPISODE LENGTH — ROOT CAUSE OF THE 2,451-STEP CAP, AND THE FIX
 #
-# Recorded here in Phase 2, to be ACTED ON in the episode-lifecycle phase.
-# Nothing here changes the engine yet.
+# The authoritative episode clock is the ENGINE's HUD timer, nothing else.
+# mario_clone/data/components/info.py:
 #
-# info.py sets self.time = 401 and decrements it once per 400 ms of game
-# time. Game time advances 16.667 ms per substep, so one time-unit is 24
-# substeps = 6 agent steps. Measured directly by holding NOOP from reset:
+#     self.time = 401                                           (line 23)
+#     elif (CURRENT_TIME - self.current_time) > 400:            (line 302)
+#         self.current_time = CURRENT_TIME
+#         self.time -= 1
 #
-#     DONE at substep 9806  =>  2,451 agent steps
-#     time left 0, death_cause 'timeout'
+# and level1.check_if_time_out() kills Mario with death_cause 'timeout' the
+# frame it reaches 0. CustomMarioEnv advances CURRENT_TIME by 1000/60 ms per
+# substep, so a unit needs 24 substeps of exactly 400.000 ms - but the test is
+# STRICTLY greater-than, and float accumulation of 1000/60 lands just above or
+# just below 400 on alternate units. Measured on the raw engine, NOOP held:
 #
-# Consequences that block the Explore->Complete design as drafted:
-#   * TimeLimit(max_episode_steps=4000) in train_agent.make_env() NEVER
-#     FIRES. The in-game timer always wins first.
-#   * A 5,000-agent-step safety-reset floor is UNREACHABLE. Any threshold
-#     above 2,451 is dead code.
-#   * "Explore for a long time, then finish the level" does not fit in one
-#     episode at the current cap.
+#     401 units:  218 x 24 + 182 x 25 substeps   ->  timeout at substep 9806
+#                 9806 / 4 (MaxAndSkipObservation skip)  =  2,451 agent steps
 #
-# The fix (raising the timer for QA mode only, additively and gated) belongs
-# to the episode-lifecycle phase, not to the pixel-count correction.
-EPISODE_CAP_AGENT_STEPS_MEASURED = 2451
-EPISODE_CAP_TIME_UNITS_DEFAULT = 401
+# The env ends the episode the same substep (it skips the death animation),
+# so there is no tail. That is the whole cap: 401 units x 24.45 substeps / 4.
+#
+# THE LIMIT HIERARCHY, after this fix. Exactly one clock is authoritative;
+# everything else is either a deliberate backstop or a lifecycle rule:
+#
+#   1. Engine timer   AUTHORITATIVE. QA: QA_EPISODE_TIME_UNITS. Legacy: 401,
+#                     untouched, so the 6M brain still sees the episode it was
+#                     trained in.
+#   2. TimeLimit      BACKSTOP only, strictly above the measured timer cap, so
+#                     it can never pre-empt the timer. It exists for the one
+#                     case the timer cannot handle: a glitch that freezes the
+#                     HUD clock. In a QA tool that is a realistic failure, not
+#                     a hypothetical one.
+#   3. Safety reset   LIFECYCLE rule (exploration/lifecycle.py). Needs a floor
+#                     AND a drought AND sustained stuckness; elapsed steps
+#                     alone can never fire it.
+#
+# The retired DROUGHT_HARD_LIMIT was a fourth, conflicting limit; see above.
+# ═══════════════════════════════════════════════════════════════════════
+SUBSTEPS_PER_AGENT_STEP = 4         # MaxAndSkipObservation(skip=...) - one source
+
+ENGINE_TIME_UNITS_DEFAULT = 401
+ENGINE_CAP_AGENT_STEPS_MEASURED = 2451          # 9806 substeps, NOOP, raw engine
+
+# QA mode only. Set on the engine's HUD counter at reset, so the game's own
+# clock stays the one authority rather than being second-guessed by a wrapper.
+# Measured with the same NOOP hold: 1600 units -> timeout at substep 39126
+# = 9,781 agent steps (873 x 24 + 726 x 25 substeps per unit), 3.99x the
+# default. The HUD renders "1600" without layout corruption (verified by
+# rendering it); in the agent's 84x84 observation it differs from a 3-digit
+# time in 31 of 7056 pixels, all in the HUD corner.
+QA_EPISODE_TIME_UNITS = 1600
+QA_EPISODE_CAP_AGENT_STEPS_MEASURED = 9781
+
+# TimeLimit backstops, in agent steps. Each is strictly above its mode's
+# measured timer cap (asserted by tests/test_episode_lifecycle.py). The legacy
+# value is unchanged from what the 6M brain was trained with.
+QA_EPISODE_MAX_STEPS = 12000
+LEGACY_EPISODE_MAX_STEPS = 4000
+
+# End QA episodes at the castle door instead of after the engine's victory
+# sequence. At the door the HUD switches to FAST_COUNT_DOWN and burns the
+# REMAINING time one unit per frame, converting it to score, before `done`.
+# Measured tail = remaining units + ~121 substeps: 130 agent steps at the
+# default budget, but 429 at 1600 - hundreds of steps per completion where no
+# action has any effect, a length set by the timer budget rather than by the
+# agent. The env already ends on death for the same reason (it skips the
+# death animation). Legacy mode keeps the full sequence it was trained with.
+QA_END_ON_LEVEL_COMPLETE = True
+
+# ═══════════════════════════════════════════════════════════════════════
+# EPISODE LIFECYCLE — EXPLORE -> COMPLETE  (exploration/lifecycle.py)
+#
+# Every episode starts in EXPLORE. It moves to COMPLETE, once and one way,
+# when any transition criterion fires. The transition is a LIFECYCLE event,
+# not a termination: it never ends the episode, and nothing in the reward
+# reads the phase yet (phase-gated reward is a later phase).
+#
+# All counts below are AGENT steps; the lifecycle converts via
+# SUBSTEPS_PER_AGENT_STEP because the wrapper sees substeps.
+# ═══════════════════════════════════════════════════════════════════════
+# One tumbling window serves both the transit/stuck classifier and the
+# novelty-yield check. The brief sets TRANSIT_WINDOW and YIELD_WINDOW both to
+# 240; making them ONE window means "exhausted and not in transit" (T2) is
+# judged over the same span of play, not two windows that drift apart.
+LIFECYCLE_WINDOW = 240
+
+# T2 - novelty yield exhausted and NOT in transit, sustained.
+YIELD_FLOOR = 200                   # new testable px per window
+YIELD_WINDOWS = 3                   # consecutive exhausted windows
+# T4 - backstop only. 0.75 x the measured QA cap, per the brief. If T4 is
+# the criterion that usually fires, the other thresholds are wrong.
+MAX_EXPLORE_STEPS = int(0.75 * QA_EPISODE_CAP_AGENT_STEPS_MEASURED)    # 7335
+
+# Transit vs stuck. "No new pixels for a while" is NEVER stuck on its own:
+# crossing covered ground to reach new ground is the job.
+TRANSIT_STRAIGHTNESS = 0.35         # net displacement / path length
+TRANSIT_FRONTIER_GAIN_PX = 200      # closed this much distance on the frontier
+STUCK_BBOX_AREA = 120 * 120         # px^2 of the window's position bbox
+
+# ═══════════════════════════════════════════════════════════════════════
+# SAFETY RESET — requires ALL THREE. Fires in either phase.
+#
+# Reachable now that the QA cap is 9,781: 5,000 < 9,781. At the old 2,451
+# cap it was dead code, and so was anything above 2,451.
+# ═══════════════════════════════════════════════════════════════════════
+SAFETY_MIN_EPISODE_STEPS = 5000     # a FLOOR, never a trigger by itself
+SAFETY_DROUGHT_STEPS = 1500         # agent steps since meaningful discovery
+SAFETY_STUCK_WINDOWS = 4            # consecutive IS_STUCK windows
+# What counts as "meaningful". 1 testable px - the most conservative choice,
+# since it makes the fallback as hard as possible to fire. n_new already
+# counts only TESTABLE pixels, so an out-of-world clip cannot reset it.
+SAFETY_MEANINGFUL_NEW_PX = 1
 
 # ═══════════════════════════════════════════════════════════════════════
 # TRAINING (QA PHASE)

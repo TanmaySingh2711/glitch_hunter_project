@@ -547,11 +547,18 @@ class SpatialCoverage:
         self._steps_since_frontier = 0
         self._remaining_cached = None
         self.frontier_version += 1
+        self._frontier_cells = self._frontier_centres(viewport_x)
 
+    def _frontier_centres(self, viewport_x):
+        """World-space centres of unexplored testable cells ahead of the camera.
+
+        Computed fresh from the live bitmap every call. refresh_frontier()
+        stores the result as the PBRS snapshot; frontier_query() uses it
+        directly and stores nothing.
+        """
+        empty = np.zeros((0, 2), dtype=np.int64)
         if self.testable is None:
-            self._frontier_cells = np.zeros((0, 2), dtype=np.int64)
-            return
-
+            return empty
         cell = config.FRONTIER_CELL
         ch, cw = self.h // cell, self.w // cell
         unexplored = self.testable[:ch * cell, :cw * cell] & (
@@ -560,14 +567,34 @@ class SpatialCoverage:
 
         cy, cx = np.nonzero(blocks)
         if cy.size == 0:
-            self._frontier_cells = np.zeros((0, 2), dtype=np.int64)
-            return
-
+            return empty
         world_cx = cx * cell + self.x0 + cell // 2
         world_cy = cy * cell + self.y0 + cell // 2
         ahead = (cx * cell + cell + self.x0) >= viewport_x
-        self._frontier_cells = np.stack(
-            [world_cx[ahead], world_cy[ahead]], axis=1).astype(np.int64)
+        return np.stack([world_cx[ahead], world_cy[ahead]],
+                        axis=1).astype(np.int64)
+
+    def frontier_query(self, viewport_x, points):
+        """(cells ahead of the camera, nearest-cell distance per point).
+
+        READ-ONLY, and deliberately independent of the PBRS snapshot. That
+        snapshot refreshes every FRONTIER_REFRESH_STEPS substeps and can be
+        left over from the PREVIOUS episode, built at a camera position far to
+        the right of where the new episode starts - so it may report nothing
+        ahead when the level is in fact full of unexplored space. The
+        lifecycle's "nothing left to find" and "closing on the frontier"
+        judgements would both be wrong on it. Refreshing the snapshot instead
+        would change what the frontier-shaping REWARD sees, so this computes
+        its own view and leaves the reward's untouched.
+
+        Distances are inf when nothing remains ahead.
+        """
+        cells = self._frontier_centres(viewport_x)
+        pts = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+        if cells.shape[0] == 0:
+            return 0, np.full(pts.shape[0], np.inf)
+        d = cells[None, :, :].astype(np.float64) - pts[:, None, :]
+        return int(cells.shape[0]), np.sqrt((d ** 2).sum(axis=2)).min(axis=1)
 
     def phi(self, x, y) -> float:
         """Potential for frontier shaping: -min(dist, cap) / cap.

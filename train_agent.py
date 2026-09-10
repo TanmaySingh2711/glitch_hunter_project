@@ -277,6 +277,59 @@ class CoverageStatsCallback(BaseCallback):
         return True
 
 
+class LifecycleStatsCallback(BaseCallback):
+    """How episodes move through EXPLORE -> COMPLETE, and how they end.
+
+    Counts per-episode outcomes from the final info of every finished
+    episode, across all workers, and reports them on the same cadence as the
+    coverage line. Two numbers here are diagnostic alarms rather than stats:
+
+      * T4 (the explore backstop) should be RARE. If it is the usual
+        transition, the adaptive criteria are mis-set - the brief says report
+        it rather than tune around it.
+      * safety_reset should be rare too. It is the last-resort ending, after
+        level completion and death.
+    """
+
+    def __init__(self, every=10_000, verbose=0):
+        super().__init__(verbose)
+        self.every = every
+        self._next = 0
+        self._transitions = {}
+        self._ends = {}
+        self._episodes = 0
+
+    def _on_step(self) -> bool:
+        for done, info in zip(self.locals.get("dones", []),
+                              self.locals.get("infos", []), strict=True):
+            if not done:
+                continue
+            self._episodes += 1
+            t = info.get("phase_transition_reason") or "none"
+            self._transitions[t] = self._transitions.get(t, 0) + 1
+            end = info.get("episode_end_reason") or "unknown"
+            # TimeLimit sits above the wrapper; SB3 flags its truncation here.
+            if info.get("TimeLimit.truncated"):
+                end = "time_limit"
+            self._ends[end] = self._ends.get(end, 0) + 1
+
+        if self.num_timesteps < self._next or not self._episodes:
+            return True
+        self._next = self.num_timesteps + self.every
+
+        def fmt(d):
+            return ", ".join(f"{k} {v}" for k, v in sorted(d.items()))
+        print(f"[LIFECYCLE] {self._episodes} episodes | "
+              f"transitions: {fmt(self._transitions)} | ends: {fmt(self._ends)}")
+        if self.logger is not None:
+            for k, v in self._transitions.items():
+                self.logger.record(f"lifecycle/transition_{k}", v / self._episodes)
+            for k, v in self._ends.items():
+                self.logger.record(f"lifecycle/end_{k}", v / self._episodes)
+        self._transitions, self._ends, self._episodes = {}, {}, 0
+        return True
+
+
 class StagnationCallback(BaseCallback):
     """Escalates exploration pressure when discovery genuinely stalls.
 
@@ -359,6 +412,17 @@ def make_env(rank, shm_names=None, reward_mode=None):
     one of them would be paid full novelty for the same opening stretch of
     the level, and coverage would be counted eight times over forever.
     """
+    # Resolved HERE, in the parent, and closed over as plain ints - so the
+    # worker receives numbers rather than having to re-derive the mode.
+    # TimeLimit is a BACKSTOP strictly above the engine timer's measured cap
+    # (the engine clock is authoritative - see exploration/config.py EPISODE
+    # LENGTH). It used to be 4000 in both modes, which was dead code: the
+    # engine always timed out first, at 2,451 agent steps.
+    mode = reward_mode or xconfig.REWARD_MODE
+    max_steps = (xconfig.QA_EPISODE_MAX_STEPS if mode == "qa_exploration"
+                 else xconfig.LEGACY_EPISODE_MAX_STEPS)
+    skip = xconfig.SUBSTEPS_PER_AGENT_STEP
+
     def _init():
         import time
         time.sleep(rank * 0.5)  # Stagger window creation to prevent Windows DWM race conditions
@@ -372,11 +436,11 @@ def make_env(rank, shm_names=None, reward_mode=None):
         env = CustomMarioEnv()
         env = GlitchHunterWrapper(env, reward_mode=reward_mode,
                                   shm_names=shm_names)
-        env = MaxAndSkipObservation(env, skip=4)
+        env = MaxAndSkipObservation(env, skip=skip)
         env = GrayscaleObservation(env, keep_dim=False)
         env = ResizeObservation(env, (84, 84))
         env = FrameStackObservation(env, 4)
-        env = TimeLimit(env, max_episode_steps=4000)
+        env = TimeLimit(env, max_episode_steps=max_steps)
         env = Monitor(env)
         return env
     return _init
@@ -868,6 +932,7 @@ if __name__ == "__main__":
                 normal_lr=xconfig.NORMAL_LR,
             ))
             callbacks.append(CoverageStatsCallback(coverage))
+            callbacks.append(LifecycleStatsCallback())
             callbacks.append(StagnationCallback(coverage))
         callback_list = CallbackList(callbacks)
 
