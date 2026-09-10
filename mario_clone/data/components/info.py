@@ -21,6 +21,11 @@ class OverheadInfo(object):
         self.sprite_sheet = setup.GFX['text_images']
         self.coin_total = game_info[c.COIN_TOTAL]
         self.time = 401
+        # glitch_hunter: units of self.time the TIME box leaves out. 0 draws
+        # self.time as-is (the original game). Every rule - the timeout, the
+        # time-to-score countdown, the hurry-up music - reads self.time, never
+        # this; see display_time() and custom_mario_env.reset().
+        self.display_time_offset = 0
         self.current_time = 0
         self.total_lives = game_info[c.LIVES]
         self.top_score = game_info[c.TOP_SCORE]
@@ -148,7 +153,19 @@ class OverheadInfo(object):
     def create_countdown_clock(self):
         """Creates the count down clock for the level"""
         self.count_down_images = []
-        self.create_label(self.count_down_images, str(self.time), 645, 55)
+        self.create_label(self.count_down_images, str(self.display_time()), 645, 55)
+
+
+    def display_time(self):
+        """The number drawn in the TIME box. With an offset, the extra units
+        come off the top: the box shows what the original clock would show
+        this far into the episode, and holds at 1 once that clock would have
+        run out, until the real one does. Drawing only - it never feeds back
+        into the clock, so the box reads 0 on exactly the frame the timeout
+        fires, and never before."""
+        if not self.display_time_offset or self.time <= 0:
+            return self.time
+        return max(1, self.time - self.display_time_offset)
 
 
     def create_label(self, label_list, string, x, y):
@@ -303,7 +320,7 @@ class OverheadInfo(object):
             self.current_time = level_info[c.CURRENT_TIME]
             self.time -= 1
         self.count_down_images = []
-        self.create_label(self.count_down_images, str(self.time), 645, 55)
+        self.create_label(self.count_down_images, str(self.display_time()), 645, 55)
         if len(self.count_down_images) < 2:
             for i in range(2):
                 self.count_down_images.insert(0, Character(self.image_dict['0']))

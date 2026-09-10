@@ -267,13 +267,38 @@ def run_arm(name, spec, bootstrap, seed):
     if isinstance(ctl, Switch):
         ctl.lifecycle = lc
 
+    # The lifecycle's own inputs, substep by substep, and every window verdict
+    # it closed. The policy never sees the phase and the env never reads it,
+    # so a trajectory is the same whatever the transition rule is - which is
+    # what lets --replay re-run candidate rules on this exact stream.
+    trace = {}
+    real_observe = lc.observe
+
+    def observe(info, n_new):
+        before_window, before_phase = lc.last_window, lc.phase
+        real_observe(info, n_new)
+        trace['new'].append(int(n_new))
+        rect = info.get('mario_rect')
+        trace['pos'].append((rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
+                            if rect else trace['pos'][-1] if trace['pos'] else (0, 0))
+        if lc.last_window is not before_window:
+            w = lc.last_window
+            trace['windows'].append((lc.substeps, w['new_px'], w['in_transit'],
+                                     w['exhausted'], w['is_stuck'],
+                                     -1 if w['cells_ahead'] is None else w['cells_ahead']))
+        if lc.phase is not before_phase:
+            trace['switch_substep'] = lc.substeps
+    lc.observe = observe
+
     episodes = []
     for ep in range(spec['n']):
         if not spec.get('persist'):
             restore(cov, bits)
         clip0 = inner.qa_clip_events
+        trace.update(new=[], pos=[], windows=[], switch_substep=None)
         obs, info = env.reset(seed=seed + ep)
         ctl.reset()
+        informed = lc.target_informed
         covered0 = cov.covered_testable()
         target = lc.target
         prev = _flat(inner.ep_channels)
@@ -312,6 +337,11 @@ def run_arm(name, spec, bootstrap, seed):
             "step_phase": np.asarray(steps_phase, dtype=np.int8),
             "step_x": np.asarray(steps_x, dtype=np.int32),
             "step_reward": np.asarray(steps_r, dtype=np.float32),
+            "target_informed": bool(informed),
+            "sub_new": np.asarray(trace['new'], dtype=np.int32),
+            "sub_pos": np.asarray(trace['pos'], dtype=np.int16).reshape(-1, 2),
+            "windows": np.asarray(trace['windows'], dtype=np.int64).reshape(-1, 6),
+            "switch_substep": trace['switch_substep'],
         }
         episodes.append(rec)
         e, c = chans['explore'], chans['complete']

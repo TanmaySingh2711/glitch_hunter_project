@@ -339,9 +339,13 @@ def test_meeting_an_informed_target_then_finishing_pays(env, patch_step):
         return w.step(0)[4]
 
     x = 150
-    while not w.lifecycle.is_complete:
+    while cov.episode_new < w.lifecycle.target:
         step(x, y=560 - (x % 3) * 30)
         x += 3
+    assert w.lifecycle.phase is EpisodePhase.EXPLORE, "target alone fired it early"
+    # Hold still: the yield genuinely dries up (Phase 4C), and COMPLETE follows.
+    while not w.lifecycle.is_complete:
+        step(x, y=560 - (x % 3) * 30)
     assert w.lifecycle.transition_reason == Transition.TARGET_MET
     assert w.lifecycle.completion_credit == 1.0
     while x < 8700:

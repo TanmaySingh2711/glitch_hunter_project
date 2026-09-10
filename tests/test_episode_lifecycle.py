@@ -13,6 +13,7 @@ Two kinds of test live here, on purpose:
 Letters in brackets are the brief's test IDs (section 9).
 """
 
+import hashlib
 import inspect
 import math
 
@@ -146,26 +147,44 @@ def _hold_noop_until_done(env, units):
     env.episode_time_units = units
     env.end_on_level_complete = False
     env.reset()
-    sub = 0
+    offset = env.game.state.overhead_info_display.display_time_offset
+    sub, frames = 0, []
     while True:
-        _o, _r, done, _t, info = env.step(0)
+        o, _r, done, _t, info = env.step(0)
         sub += 1
+        frames.append(hashlib.sha1(o.tobytes()).digest())
+        # The TIME box and the clock the timeout reads, on every substep:
+        # the clock itself in legacy; in QA the legacy-equivalent clock,
+        # holding at 1 until the real clock is out (Phase 4D).
+        t = info['time_left']
+        want = t if offset == 0 or t <= 0 else max(1, t - offset)
+        assert info['hud_time'] == want, f"substep {sub}"
         if done:
-            return sub, info
+            return sub, info, frames
 
 
 @pytest.mark.slow
 def test_measured_timer_caps(env):
     """The root cause, reproduced. 401 units x ~24.45 substeps = 9806 =
     2,451 agent steps; 1600 units = 39,126 = 9,781. If either number moves,
-    the engine's clock changed and every limit above it must be re-derived."""
+    the engine's clock changed and every limit above it must be re-derived.
+
+    The QA run is also the full-length check of the TIME box (Phase 4D): it
+    never lets the timeout drift off the real clock, and for every substep
+    legacy is alive, the QA frame IS the legacy frame, byte for byte."""
     try:
-        sub, info = _hold_noop_until_done(env, None)
-        assert sub // SPS == config.ENGINE_CAP_AGENT_STEPS_MEASURED
+        legacy_sub, info, legacy_frames = _hold_noop_until_done(env, None)
+        assert legacy_sub // SPS == config.ENGINE_CAP_AGENT_STEPS_MEASURED
         assert info['death_cause'] == 'timeout'
-        sub, info = _hold_noop_until_done(env, config.QA_EPISODE_TIME_UNITS)
+        assert info['hud_time'] == 0
+        sub, info, qa_frames = _hold_noop_until_done(env, config.QA_EPISODE_TIME_UNITS)
         assert sub // SPS == config.QA_EPISODE_CAP_AGENT_STEPS_MEASURED
         assert info['death_cause'] == 'timeout'
+        assert info['time_left'] == 0 and info['hud_time'] == 0
+        alive = legacy_sub - 1          # legacy's last frame is its death
+        first_diff = next((i for i in range(alive)
+                           if qa_frames[i] != legacy_frames[i]), None)
+        assert first_diff is None, f"QA frame differs from legacy at substep {first_diff + 1}"
     finally:
         env.episode_time_units = None
 
@@ -236,6 +255,9 @@ def test_first_step_is_explore_on_the_real_map(fresh):              # [A]
 
 
 def test_meeting_the_target_moves_to_complete():                    # [E]
+    """Target alone is not enough (Phase 4C): COMPLETE also needs the yield
+    to have genuinely dried up - see test_target_alone_does_not_transition
+    and test_declining_yield_after_target_moves_to_complete for each half."""
     cov = FakeCoverage(target=1000)
     lc = EpisodeLifecycle(cov)
     cov.episode_new = 999
@@ -243,8 +265,59 @@ def test_meeting_the_target_moves_to_complete():                    # [E]
     assert lc.phase is EpisodePhase.EXPLORE
     cov.episode_new = 1000
     lc.observe(_info(202), 1)
+    assert lc.phase is EpisodePhase.EXPLORE, "fired the instant the count crossed the target"
+    # Still finding things: healthy yield keeps it in EXPLORE even though the
+    # target has been met the whole time.
+    for i in range(20):
+        cov.episode_new += 10
+        lc.observe(_info(210 + i), 10)
+    assert lc.phase is EpisodePhase.EXPLORE
+    # Now the yield genuinely dries up.
+    _pace(lc, (config.T1_DECLINE_DROUGHT_STEPS + 1) * SPS, n_new=0)
     assert lc.phase is EpisodePhase.COMPLETE
     assert lc.transition_reason == Transition.TARGET_MET
+
+
+def test_target_alone_does_not_transition():                        # [1]
+    """Hitting the adaptive target does not itself trigger COMPLETE while
+    novelty yield remains healthy - required test 1."""
+    cov = FakeCoverage(target=500)
+    lc = EpisodeLifecycle(cov)
+    for i in range(50):
+        cov.episode_new += 20
+        lc.observe(_info(200 + i), 20)
+    assert cov.episode_new >= lc.target
+    assert lc.phase is EpisodePhase.EXPLORE
+
+
+def test_declining_yield_after_target_moves_to_complete():          # [2]
+    """Target achieved AND sustained novelty decline CAN trigger COMPLETE -
+    required test 2."""
+    cov = FakeCoverage(target=500)
+    lc = EpisodeLifecycle(cov)
+    cov.episode_new = 500
+    lc.observe(_info(200), 500)
+    assert lc.phase is EpisodePhase.EXPLORE
+    _pace(lc, (config.T1_DECLINE_DROUGHT_STEPS + 1) * SPS, n_new=0)
+    assert lc.phase is EpisodePhase.COMPLETE
+    assert lc.transition_reason == Transition.TARGET_MET
+
+
+def test_short_novelty_dips_do_not_transition():                    # [3]
+    """A brief pause well under the decline threshold does not fire T1 -
+    required test 3. A find right at the edge resets the drought clock, the
+    same way it resets the reward's own drought pressure."""
+    cov = FakeCoverage(target=500)
+    lc = EpisodeLifecycle(cov)
+    cov.episode_new = 500
+    lc.observe(_info(200), 500)
+    _pace(lc, (config.T1_DECLINE_DROUGHT_STEPS - 1) * SPS, n_new=0)
+    assert lc.phase is EpisodePhase.EXPLORE, "a short dip fired T1 early"
+    cov.episode_new += 1
+    lc.observe(_info(500), 1)             # resets the drought clock
+    assert lc.phase is EpisodePhase.EXPLORE
+    _pace(lc, (config.T1_DECLINE_DROUGHT_STEPS - 1) * SPS, n_new=0)
+    assert lc.phase is EpisodePhase.EXPLORE, "the reset was not honoured"
 
 
 def test_an_uninformed_target_cannot_fire_T1():
@@ -272,11 +345,13 @@ def test_real_coverage_informs_the_target_after_enough_history():
     assert lc.target_informed and lc.target == 8000
 
 
-def test_transition_is_one_way():
+def test_transition_is_one_way():                                   # [6]
     cov = FakeCoverage(target=10)
     lc = EpisodeLifecycle(cov)
     cov.episode_new = 10
     lc.observe(_info(200), 10)
+    assert lc.phase is EpisodePhase.EXPLORE, "target alone should not fire it yet"
+    _pace(lc, (config.T1_DECLINE_DROUGHT_STEPS + 1) * SPS, n_new=0)
     assert lc.phase is EpisodePhase.COMPLETE
     step = lc.transition_step
     cov.episode_new = 0
@@ -322,6 +397,53 @@ def test_closing_on_the_frontier_counts_as_transit():               # [G]
     assert lc.phase is EpisodePhase.EXPLORE
 
 
+def test_transit_with_target_met_does_not_transition():             # [4]
+    """Legitimate transit toward remaining unexplored space does not force
+    COMPLETE even once the target is met and the drought has run well past
+    the decline threshold - required test 4.
+
+    The exemption needs a CLOSED window's worth of evidence, the same as
+    everywhere else in this file it is used (in_coherent_transit is False,
+    "no evidence", until the first window closes) - so the crossing has to
+    run a full LIFECYCLE_WINDOW, not merely past T1_DECLINE_DROUGHT_STEPS.
+    """
+    goal = np.array([50_000.0, 498.0])
+
+    def frontier(_vx, pts):
+        pts = np.asarray(pts, float)
+        return 7, np.hypot(*(pts - goal).T)
+    cov = FakeCoverage(target=10, frontier=frontier)
+    lc = EpisodeLifecycle(cov)
+    cov.episode_new = 10
+    lc.observe(_info(200), 10)
+    assert lc.phase is EpisodePhase.EXPLORE
+    # A straight crossing of already-covered ground toward the frontier,
+    # long enough to close a window and to push the drought well past the
+    # decline threshold: zero new pixels the whole way.
+    _walk_straight(lc, WINDOW + (config.T1_DECLINE_DROUGHT_STEPS + 1) * SPS, n_new=0)
+    assert lc.last_window['in_transit'] is True
+    assert lc.drought_agent_steps() > config.T1_DECLINE_DROUGHT_STEPS
+    assert lc.phase is EpisodePhase.EXPLORE, "coherent transit was read as exhaustion"
+
+
+def test_elapsed_steps_alone_cannot_trigger_T1():                   # [8]
+    """No fixed elapsed-step threshold, on its own, can fire T1 - required
+    test 8. Finding new pixels every window (so T2 never sees an exhausted
+    streak) but never reaching an unreachably high target: the episode runs
+    all the way to the T4 backstop, and the transition is T4, never T1."""
+    cov = FakeCoverage(target=10 ** 9)
+    lc = EpisodeLifecycle(cov)
+    x = 0.0
+    for _ in range(config.MAX_EXPLORE_STEPS * SPS):
+        x += 3.0
+        cov.episode_new += 1            # keeps every window well above YIELD_FLOOR
+        lc.observe(_info(x), 1)
+        if lc.phase is EpisodePhase.COMPLETE:
+            break
+    assert lc.phase is EpisodePhase.COMPLETE
+    assert lc.transition_reason == Transition.EXPLORE_BACKSTOP
+
+
 def test_nothing_left_ahead_moves_to_complete():                    # T3
     lc = EpisodeLifecycle(FakeCoverage(frontier=lambda _vx, pts: (0, np.full(len(pts), np.inf))))
     _walk_straight(lc, WINDOW, n_new=0)
@@ -361,6 +483,13 @@ def test_reaching_complete_does_not_end_the_episode(qa_env):
     w.lifecycle.begin_episode()
     assert w.lifecycle.target == 1000 and w.lifecycle.target_informed
     _obs, _r, done, _t, info = drive(x=900)
+    assert info['episode_phase'] == 'explore', "target alone fired it before any drought"
+    assert w.coverage.episode_new >= w.lifecycle.target
+    # Standing still finds nothing further - the yield genuinely dries up.
+    for _ in range((config.T1_DECLINE_DROUGHT_STEPS + 1) * SPS):
+        _obs, _r, done, _t, info = drive(x=900)
+        if done:
+            break
     assert info['episode_phase'] == 'complete'
     assert info['phase_transition_reason'] == Transition.TARGET_MET
     assert not done, "the phase transition terminated the episode"

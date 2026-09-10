@@ -633,7 +633,8 @@ PENETRATION_TOL = 6
 #
 #   1. Engine timer   AUTHORITATIVE. QA: QA_EPISODE_TIME_UNITS. Legacy: 401,
 #                     untouched, so the 6M brain still sees the episode it was
-#                     trained in.
+#                     trained in. The TIME box draws a legacy-equivalent
+#                     view of it in QA; see QA_EPISODE_TIME_UNITS.
 #   2. TimeLimit      BACKSTOP only, strictly above the measured timer cap, so
 #                     it can never pre-empt the timer. It exists for the one
 #                     case the timer cannot handle: a glitch that freezes the
@@ -654,9 +655,22 @@ ENGINE_CAP_AGENT_STEPS_MEASURED = 2451          # 9806 substeps, NOOP, raw engin
 # clock stays the one authority rather than being second-guessed by a wrapper.
 # Measured with the same NOOP hold: 1600 units -> timeout at substep 39126
 # = 9,781 agent steps (873 x 24 + 726 x 25 substeps per unit), 3.99x the
-# default. The HUD renders "1600" without layout corruption (verified by
-# rendering it); in the agent's 84x84 observation it differs from a 3-digit
-# time in 31 of 7056 pixels, all in the HUD corner.
+# default.
+#
+# What the TIME box DRAWS is decoupled from this clock (Phase 4D): it leaves
+# the extra units out and shows the clock a legacy episode would show at the
+# same point, holding at 001 once legacy would have timed out, and reading
+# 000 on the frame the real clock runs out (OverheadInfo.display_time, set up
+# in CustomMarioEnv.reset). Drawing only; every rule still reads the clock.
+# Measured on identical action sequences through the real 84x84 pipeline:
+#   drawing the clock itself ("1600")  34.8 px differ from legacy per frame,
+#                                      on 100% of frames (4-digit layout)
+#   legacy-equivalent clock            0 px on every frame up to legacy's
+#                                      own timeout; every later frame is a
+#                                      frame legacy also drew ("001")
+# The 6M policy on real states with only the timer swapped: "001" vs "401"
+# agree on the argmax action 99.2%, closer than two adjacent legacy frames
+# ("200" vs "199": 96.4%), so the hold is not read as imminent death.
 QA_EPISODE_TIME_UNITS = 1600
 QA_EPISODE_CAP_AGENT_STEPS_MEASURED = 9781
 
@@ -692,6 +706,43 @@ QA_END_ON_LEVEL_COMPLETE = True
 # 240; making them ONE window means "exhausted and not in transit" (T2) is
 # judged over the same span of play, not two windows that drift apart.
 LIFECYCLE_WINDOW = 240
+
+# T1 - target met is necessary but not sufficient (Phase 4C). It must ALSO
+# have been at least this many agent steps since the last meaningfully-new
+# pixel (EpisodeLifecycle.drought_agent_steps(), the same signal the safety
+# reset below already uses) - reusing an existing, continuously-updated
+# per-substep counter rather than a windowed one, because a LIFECYCLE_WINDOW
+# is 240 agent steps and the natural mix's median episode is ~400: most
+# episodes never close even one window, so a decline check gated on closed
+# windows almost never gets evidence before the episode ends (measured: a
+# window-based version converged to the SAME outcome across ratios from 0.15
+# to 1.0 - it was really just deferring everything to T2).
+#
+# MUST be >= LIFECYCLE_WINDOW, not just "large enough" by feel. The transit
+# exemption (in_coherent_transit, below) only has evidence once a window has
+# closed; before that it reads as "no evidence", same as everywhere else in
+# this file (see test_transit_with_target_met_does_not_transition, which
+# fails at any value below LIFECYCLE_WINDOW). Worst case for how EARLY the
+# drought clock can reach its threshold is discovery on literally the first
+# substep of the episode, making drought_agent_steps() grow from substep 0 -
+# so a threshold below LIFECYCLE_WINDOW*SPS substeps can cross before window
+# 1 has ever closed, and the exemption has nothing to exempt with yet.
+# Set equal to LIFECYCLE_WINDOW, the tightest value with that guarantee:
+# _close_window() always runs (unconditionally, every observe()) before
+# _check_transition() on the SAME substep, so by the time drought can first
+# reach LIFECYCLE_WINDOW agent steps, window 1 has already closed or is
+# closing on that exact substep - T1 can never fire ahead of the first
+# window's own verdict.
+#
+# Measured on ppo_boot+eps_boot+campaign, 90 episodes of the 6M policy from
+# the bootstrap map: post-switch discovery share 59.3% -> 1.4%, premature
+# switches (half or more of the episode's total discovery still ahead)
+# 20/90 -> 0/90, switches attributable to T1 31/90 -> 8/90 (T2: 11 in both -
+# the same episodes reach genuine exhaustion either way). 180-239 measured
+# the same aggregate outcome on this data but do not carry the guarantee
+# above; below 180 the outcome visibly degrades (more premature switches) as
+# the threshold shrinks toward DROUGHT_GRACE.
+T1_DECLINE_DROUGHT_STEPS = LIFECYCLE_WINDOW
 
 # T2 - novelty yield exhausted and NOT in transit, sustained.
 YIELD_FLOOR = 200                   # new testable px per window

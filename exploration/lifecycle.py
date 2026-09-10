@@ -222,9 +222,37 @@ class EpisodeLifecycle:
         # handed out full completion credit after 69-233 steps. No evidence,
         # no T1; T2-T4 still apply, exactly as in_coherent_transit refuses to
         # waive a penalty before any window has closed.
+        #
+        # T1 ALSO needs the target's yield to have genuinely dried up (Phase
+        # 4C). Meeting the target alone used to fire T1 on the very substep
+        # the count crossed it - which on real 6M trajectories meant 55-64%
+        # of an episode's total discovery happened AFTER the switch, at the
+        # reduced COMPLETE novelty rate, while EXPLORE was still finding
+        # plenty: median 2,202 px in the 60 agent steps right before
+        # switching. drought_agent_steps() is the same "steps since a
+        # meaningfully new pixel" signal the safety reset already tracks;
+        # reusing it here (rather than a windowed rate, which most episodes
+        # are too short to ever close even one LIFECYCLE_WINDOW of - median
+        # 400 agent steps, one window is 240) let T1 wait for a real pause in
+        # discovery. Measured on the same trajectories: post-switch discovery
+        # 59.3% -> 1.4%, premature switches (>=50% of the episode's total
+        # discovery still ahead) 20/90 -> 0/90. T2/T3/T4 are untouched: on
+        # the same data they never overlapped with T1's old or new firing
+        # point.
+        #
+        # Transit is exempt for the same reason it is everywhere else: a
+        # temporary dip while crossing old ground toward a real frontier is
+        # not exhaustion, so it must not be read as one here either. That
+        # exemption is WHY T1_DECLINE_DROUGHT_STEPS == LIFECYCLE_WINDOW, not
+        # merely "large enough by feel" - see config.py for the guarantee
+        # this equality buys (the drought threshold can never be crossed
+        # before the first window has closed to give the exemption evidence
+        # to act on).
         reason = None
-        if (n_new and self.target is not None and self.target_informed
-                and self.coverage.episode_new >= self.target):
+        if (self.target is not None and self.target_informed
+                and self.coverage.episode_new >= self.target
+                and self.drought_agent_steps() >= config.T1_DECLINE_DROUGHT_STEPS
+                and not self.in_coherent_transit):
             reason = Transition.TARGET_MET
         elif self.consecutive_exhausted >= config.YIELD_WINDOWS:
             reason = Transition.YIELD_EXHAUSTED

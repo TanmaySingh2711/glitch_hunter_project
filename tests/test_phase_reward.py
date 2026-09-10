@@ -315,9 +315,10 @@ def test_coverage_is_still_recorded_in_complete(full):
 
 
 def test_complete_stays_complete_for_the_episode(env, patch_step):
-    """Real transitions this time: the blank map meets an informed target on
-    the first substep, and then a long unproductive stretch - which in EXPLORE
-    would ramp the drought - never brings EXPLORE's terms back."""
+    """Real transitions this time: the blank map meets an informed target
+    right away, but COMPLETE only starts once the yield has also genuinely
+    dried up (Phase 4C) - and from there, a long unproductive stretch never
+    brings EXPLORE's terms back."""
     cov = SpatialCoverage(testable_mask=FULL)
     cov.episode_new_history = [1000.0] * config.TARGET_MIN_HISTORY
     w = GlitchHunterWrapper(env, reward_mode="qa_exploration", coverage=cov)
@@ -326,9 +327,14 @@ def test_complete_stays_complete_for_the_episode(env, patch_step):
     info = dict(BASE, mario_rect=(900, 498, 30, 40), x_pos=900)
     patch_step(lambda a: (obs, 0.0, False, False, dict(info)))
     phases = [w.step(0)[4]['episode_phase'] for _ in range(3_000)]
-    assert phases[0] == 'complete'
-    assert set(phases) == {'complete'}, "the episode fell back to EXPLORE"
-    assert w.ep_drought_paid == 0.0
+    assert phases[0] == 'explore', "target alone fired it before the yield dried up"
+    switch = phases.index('complete')
+    assert switch > 0, "never switched"
+    assert set(phases[:switch]) == {'explore'}
+    assert set(phases[switch:]) == {'complete'}, "the episode fell back to EXPLORE"
+    # Drought is EXPLORE-only reward - whatever ramped before the switch, it
+    # is never charged once COMPLETE, no matter how the switch was gated.
+    assert w.ep_channels['complete']['drought'] == 0.0
     w.reset()
     assert w.lifecycle.phase is EpisodePhase.EXPLORE, "a new episode began in COMPLETE"
 

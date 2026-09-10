@@ -275,8 +275,12 @@ class CustomMarioEnv(gym.Env):
                 info['death_cause'] = getattr(mario, 'death_cause', None)
 
             # The engine's episode clock, exported so the lifecycle and its
-            # tests can see the authoritative timer rather than infer it.
-            info['time_left'] = int(self.game.state.overhead_info_display.time)
+            # tests can see the authoritative timer rather than infer it -
+            # and, next to it, the number the TIME box is drawing, which in QA
+            # mode is the legacy-equivalent clock (reset()).
+            hud = self.game.state.overhead_info_display
+            info['time_left'] = int(hud.time)
+            info['hud_time'] = int(hud.display_time())
 
             # RL agents don't need to watch the ~3 second death animation, so
             # end the episode as soon as Mario is dead. (`mario` is already
@@ -305,6 +309,7 @@ class CustomMarioEnv(gym.Env):
             info['death_cause'] = None
             info['is_dead'] = False
             info['time_left'] = None
+            info['hud_time'] = None
             done = self.game.state.done
 
         self._detect_glitches(info)
@@ -443,8 +448,20 @@ class CustomMarioEnv(gym.Env):
         # QA episode is set there, on the one authoritative timer, rather than
         # emulated by a wrapper that would then disagree with the game about
         # when time runs out. Additive: None leaves the engine's 401 alone.
+        #
+        # The TIME box, though, leaves the extension out: it draws the clock a
+        # legacy episode would show at this point (401 counting down), so up
+        # to the substep legacy itself would time out, a QA frame is pixel for
+        # pixel a legacy frame. Past that the box holds at 001 - a frame legacy
+        # also drew - until the real clock runs out and it reads 000, on the
+        # timeout frame. Drawing only: the clock, the timeout and the
+        # time-to-score countdown all still run on the full budget. The
+        # engine's own 401 is read off the fresh engine before it is replaced,
+        # rather than copied here.
         if self.episode_time_units is not None:
-            self.game.state.overhead_info_display.time = int(self.episode_time_units)
+            hud = self.game.state.overhead_info_display
+            hud.display_time_offset = max(0, int(self.episode_time_units) - hud.time)
+            hud.time = int(self.episode_time_units)
 
         # Guards against calling reset() while the window is closed (e.g.
         # a stray reset between close_window() and the dashboard's next
