@@ -31,9 +31,14 @@ def gates(full: bool) -> list[tuple[str, list[str]]]:
         tests += ["--cov", f"--cov-fail-under={COVERAGE_FLOOR}"]
     else:
         tests += ["-m", "not slow"]
+    # mypy judges `sys.platform` checks for the platform it runs on. CI type-
+    # checks on Linux while development happens on Windows, so both are run
+    # here - a Windows-only name outside its platform guard fails locally,
+    # not first on CI.
     return [
         ("lint", [py, "-m", "ruff", "check", "."]),
         ("types", [py, "-m", "mypy"]),
+        ("types (linux)", [py, "-m", "mypy", "--platform", "linux"]),
         ("tests", tests),
         ("artifacts", [py, os.path.join("tools", "verify_artifacts.py")]),
     ]

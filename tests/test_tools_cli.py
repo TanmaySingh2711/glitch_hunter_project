@@ -44,7 +44,8 @@ def test_check_runs_the_same_gates_as_ci():
     finally:
         sys.path.pop(0)
     fast = [name for name, _cmd in check.gates(full=False)]
-    assert fast == ["lint", "types", "tests", "artifacts"]
+    assert fast == ["lint", "types", "types (linux)", "tests", "artifacts"]
+    assert dict(check.gates(full=False))["types (linux)"][-2:] == ["--platform", "linux"]
     fast_tests = dict(check.gates(full=False))["tests"]
     full_tests = dict(check.gates(full=True))["tests"]
     assert "not slow" in fast_tests

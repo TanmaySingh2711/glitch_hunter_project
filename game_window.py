@@ -68,48 +68,56 @@ def _hwnd() -> int | None:
 @functools.cache
 def _user32() -> Any:
     """A private user32 handle, so declaring argtypes here cannot change how
-    any other module's ctypes.windll.user32 calls behave."""
-    import ctypes
-    from ctypes import wintypes
-    u = ctypes.WinDLL('user32', use_last_error=True)
-    u.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
-    u.MonitorFromPoint.restype = wintypes.HMONITOR
-    u.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.c_void_p]
-    u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-    u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
-                               ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
-    u.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-    u.IsIconic.argtypes = [wintypes.HWND]
-    u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-    return u
+    any other module's ctypes.windll.user32 calls behave.
+
+    The Windows-only bodies here and below sit INSIDE `if sys.platform ==
+    'win32':` blocks rather than after an early return: mypy then skips them
+    when type-checking for another platform (CI runs it on Linux) instead of
+    reporting Windows-only names and unreachable statements."""
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+        u = ctypes.WinDLL('user32', use_last_error=True)
+        u.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        u.MonitorFromPoint.restype = wintypes.HMONITOR
+        u.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.c_void_p]
+        u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                   ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        u.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+        u.IsIconic.argtypes = [wintypes.HWND]
+        u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        return u
+    raise OSError("user32 exists only on Windows")
 
 
 def current_work_area() -> Area | None:
     """(left, top, right, bottom) of the work area of the monitor under the
     cursor, or None where that cannot be known."""
-    if sys.platform != 'win32':
-        return None
-    try:
-        import ctypes
-        from ctypes import wintypes
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            from ctypes import wintypes
 
-        class MONITORINFO(ctypes.Structure):
-            _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT),
-                        ('rcWork', wintypes.RECT), ('dwFlags', wintypes.DWORD)]
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT),
+                            ('rcWork', wintypes.RECT), ('dwFlags', wintypes.DWORD)]
 
-        u = _user32()
-        pt = wintypes.POINT()
-        if not u.GetCursorPos(ctypes.byref(pt)):
+            u = _user32()
+            pt = wintypes.POINT()
+            if not u.GetCursorPos(ctypes.byref(pt)):
+                return None
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(MONITORINFO)
+            if not u.GetMonitorInfoW(u.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST),
+                                     ctypes.byref(info)):
+                return None
+            r = info.rcWork
+            return (r.left, r.top, r.right, r.bottom)
+        except Exception:
+            _log.debug("window-manager call failed", exc_info=True)
             return None
-        info = MONITORINFO()
-        info.cbSize = ctypes.sizeof(MONITORINFO)
-        if not u.GetMonitorInfoW(u.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST),
-                                 ctypes.byref(info)):
-            return None
-        r = info.rcWork
-        return (r.left, r.top, r.right, r.bottom)
-    except Exception:
-        _log.debug("window-manager call failed", exc_info=True)
+    else:
         return None
 
 
@@ -201,25 +209,31 @@ def show() -> bool:
 
 
 def is_minimized() -> bool:
-    hwnd = _hwnd()
-    if not hwnd or sys.platform != 'win32':
-        return False
-    try:
-        return bool(_user32().IsIconic(hwnd))
-    except Exception:
-        _log.debug("window-manager call failed", exc_info=True)
+    if sys.platform == 'win32':
+        hwnd = _hwnd()
+        if not hwnd:
+            return False
+        try:
+            return bool(_user32().IsIconic(hwnd))
+        except Exception:
+            _log.debug("window-manager call failed", exc_info=True)
+            return False
+    else:
         return False
 
 
 def bring_to_front() -> bool:
     """Best-effort foreground request (Windows only). A refusal - Windows'
     focus-stealing rules - must never break playback."""
-    hwnd = _hwnd()
-    if not hwnd or sys.platform != 'win32':
-        return False
-    try:
-        import ctypes
-        return bool(ctypes.windll.user32.SetForegroundWindow(hwnd))
-    except Exception:
-        _log.debug("window-manager call failed", exc_info=True)
+    if sys.platform == 'win32':
+        hwnd = _hwnd()
+        if not hwnd:
+            return False
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.SetForegroundWindow(hwnd))
+        except Exception:
+            _log.debug("window-manager call failed", exc_info=True)
+            return False
+    else:
         return False
