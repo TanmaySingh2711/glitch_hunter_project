@@ -1,5 +1,7 @@
 # Glitch Hunter Project
 
+[![CI](https://github.com/TanmaySingh2711/glitch_hunter_project/actions/workflows/ci.yml/badge.svg)](https://github.com/TanmaySingh2711/glitch_hunter_project/actions/workflows/ci.yml)
+
 A trained AI plays a Super Mario Bros clone, and you watch it live in your browser.
 
 ---
@@ -75,18 +77,33 @@ If you ever see the AI acting completely random instead of playing well, check t
 
 ## Project Structure
 
-- `app.py` — the web server (Flask + WebSockets) that streams the game to your browser.
-- `agent_logic.py` — how the AI is rewarded during training, plus the code that runs it live for the dashboard.
-- `custom_mario_env.py` — connects the Mario game to the AI training library.
-- `train_agent.py` — trains the AI from scratch (takes hours — most people will never need to run this).
-- `mario_clone/` — the actual Super Mario Bros game (Python/Pygame). Not written by us — see Credits below.
-- `static/` & `templates/` — the dashboard's look (HTML/CSS/JS). Includes
-  `static/vendor/socket.io.min.js`, kept locally so the dashboard works with
-  no internet connection.
-- `mario_brain_checkpoint.zip` — the trained AI's "brain". Needed for the AI to play well; see above if it's missing.
-- `checkpoints/` — snapshots from training, not needed just to watch the AI play.
-- `tests/` — fast automated checks (`python -m pytest`, ~4 seconds).
-- `pyproject.toml` — the one-command `uv sync` install, plus linter settings.
+```
+app.py                  the web server (Flask + WebSockets) that streams the game to your browser
+dashboard_service.py    the one thread that owns the game window (Start / Stop / Reset / its X)
+dashboard_backend.py    loads the brain on disk and turns each step into a frame + a log line
+game_window.py          where the window appears, and the Windows calls pygame lacks
+custom_mario_env.py     the Mario game as a Gymnasium environment, plus the agent's 84x84 view
+agent_logic.py          GlitchHunterWrapper: coverage recording, episode lifecycle, reward
+rewards/                the two objectives - qa.py (exploration) and legacy.py (the 6M brain's)
+train_agent.py          trains the AI (takes hours - most people never need to run it)
+training/               training building blocks: callbacks, checkpoint helpers, value-head reset
+exploration/            world-pixel coverage, the testable-pixel mask, the EXPLORE -> COMPLETE
+                        lifecycle, Level-1 completion, and config.py - every tunable, with its evidence
+evaluation/             can a checkpoint still finish the level? (completion retention, verification)
+common/                 logging, atomic file writes, the tools' shared start-up
+tools/                  command-line scripts, one job each - see tools/README.md
+tests/                  the automated checks (see "Running the tests")
+docs/ARCHITECTURE.md    how the pieces fit together, and the invariants that hold across them
+docs/PERFORMANCE.md     where the time and memory go per worker, and how to re-measure
+mario_clone/            the actual Super Mario Bros game (Python/Pygame). Not written by us - see Credits
+static/, templates/     the dashboard page; static/vendor/socket.io.min.js is kept locally so the
+                        dashboard works with no internet connection
+mario_brain_checkpoint.zip   the trained AI's "brain" - needed for the AI to play well
+artifacts.json          SHA-256 of every protected artifact (python tools/verify_artifacts.py)
+```
+
+Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security notes:
+[`SECURITY.md`](SECURITY.md).
 
 ---
 
@@ -235,15 +252,21 @@ cp checkpoints/mario_brain_checkpoint_5200000_steps.zip mario_brain_checkpoint.z
 ### Running the tests
 
 ```bash
-pip install pytest
-python -m pytest
+pip install pytest pytest-cov ruff mypy
+python tools/check.py          # lint, type check, fast tests, artifact hashes (~2 min)
+python tools/check.py --full   # everything, including the slow tests (~15 min) and coverage
 ```
-About 4 seconds, no GPU and no trained model needed. Worth running after any
-change to `custom_mario_env.py` or `agent_logic.py` — it covers the
-environment contract, the reward-shaping rules, and the bug detector
-(including that it stays quiet during normal play).
 
-Linting, if you want it: `pip install ruff` then `python -m ruff check .`
+No GPU needed. The fast tests cover the environment contract, the reward
+rules of both modes, the episode lifecycle and safety reset, coverage and its
+persistence, the dashboard's window control, and the bug detector (including
+that it stays quiet during normal play). The `slow` ones replay the real
+engine for thousands of steps, rebuild the 4,013,723-pixel mask, and load the
+real 6M brain. Tests that need a git-ignored file (`exploration_data/`,
+`checkpoints/`, `backup_6M/`) skip themselves when it is missing.
+
+The same gates run on every push in CI (`.github/workflows/ci.yml`), and
+`pre-commit install` runs lint and type checks on every commit.
 
 ### Why it only listens on localhost
 

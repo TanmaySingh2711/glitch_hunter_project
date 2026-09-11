@@ -36,8 +36,32 @@ import math
 from collections import deque
 from enum import Enum
 from itertools import pairwise
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from . import config
+
+if TYPE_CHECKING:
+    from .coverage import SpatialCoverage
+
+Point = tuple[float, float]
+Info = dict[str, Any]
+
+
+class WindowVerdict(TypedDict):
+    """What one closed LIFECYCLE_WINDOW of play amounted to (_close_window)."""
+    new_px: int                     # testable pixels discovered in the window
+    straightness: float             # net displacement / path length
+    frontier_gain: float            # how much closer to the frontier it ended
+    bbox_area: float                # area of the box Mario's centre stayed in
+    cells_ahead: int | None         # unexplored frontier cells ahead (None: no mask)
+    start: Point | None             # Mario's centre at the first / last substep;
+    end: Point | None               # None when Mario was never observed
+    path: float                     # distance walked by that centre
+    centre: Point | None            # middle of the box
+    in_transit: bool
+    is_stuck: bool
+    exhausted: bool
+    unproductive: bool
 
 
 class EpisodePhase(Enum):
@@ -71,7 +95,15 @@ class SafetyReason:
     LOOP = "unproductive_loop"
 
 
-def classify_end(info, safety_fired):
+def _seen(point: Point | None) -> Point:
+    """A window's position, which every window in a stagnation span has: an
+    unproductive window is by definition one in which Mario was observed."""
+    if point is None:
+        raise ValueError("a window with no observed position inside a stagnation span")
+    return point
+
+
+def classify_end(info: Info, safety_fired: bool) -> str:
     """Why the episode ended, from the final substep's info.
 
     Engine reasons outrank the safety reset: if Mario died on the same
@@ -98,31 +130,35 @@ class EpisodeLifecycle:
     what lets the classifier be unit-tested on synthetic paths.
     """
 
-    def __init__(self, coverage=None):
+    def __init__(self, coverage: SpatialCoverage | None = None) -> None:
         self.coverage = coverage
         self.sps = config.SUBSTEPS_PER_AGENT_STEP
         self.window_substeps = config.LIFECYCLE_WINDOW * self.sps
+        # False pins the phase: the natural T1-T4 checks never run, and only
+        # force_complete() moves it. For calibration arms and tests that need
+        # an episode held in one phase; training never turns it off.
+        self.auto_transition = True
         self.begin_episode()
 
     # ── episode boundaries ────────────────────────────────────────────────
-    def begin_episode(self):
+    def begin_episode(self) -> None:
         self.phase = EpisodePhase.EXPLORE
-        self.transition_reason = None
-        self.transition_step = None
+        self.transition_reason: str | None = None
+        self.transition_step: int | None = None
         self.completion_credit = 0.0
         self.substeps = 0
         self.last_discovery_substep = 0
         self.safety_fired = False
-        self.safety_reason = None
-        self.end_reason = None
+        self.safety_reason: str | None = None
+        self.end_reason: str | None = None
 
         self.consecutive_exhausted = 0
         self.consecutive_stuck = 0
         self.consecutive_unproductive = 0
-        self.last_window = None          # the most recent window's verdict
+        self.last_window: WindowVerdict | None = None  # the most recent window's verdict
         # Recent verdicts, for judging a streak of windows as ONE span (the
         # LOOP arm). Bounded: only the last SAFETY_STUCK_WINDOWS are read.
-        self.recent_windows = deque(maxlen=64)
+        self.recent_windows: deque[WindowVerdict] = deque(maxlen=64)
         self._reset_window()
 
         # T1's target, frozen for the episode. coverage.episode_target() calls
@@ -130,14 +166,14 @@ class EpisodeLifecycle:
         # invalidates its cache - evaluating it on every discovering substep
         # would cost several times a whole env.step(). The target only moves
         # with episode HISTORY anyway, which changes between episodes.
-        self.target = (self.coverage.episode_target()
-                       if self.coverage is not None else None)
+        self.target: int | None = (self.coverage.episode_target()
+                                   if self.coverage is not None else None)
         self.target_informed = (self.coverage is not None
                                 and self.coverage.target_informed())
 
-    def _reset_window(self):
-        self._w_start = None
-        self._w_prev = None
+    def _reset_window(self) -> None:
+        self._w_start: Point | None = None
+        self._w_prev: Point | None = None
         self._w_path = 0.0
         self._w_min = [math.inf, math.inf]
         self._w_max = [-math.inf, -math.inf]
@@ -145,11 +181,11 @@ class EpisodeLifecycle:
         self._w_substeps = 0
 
     @property
-    def agent_steps(self):
+    def agent_steps(self) -> int:
         return self.substeps // self.sps
 
     @property
-    def in_coherent_transit(self):
+    def in_coherent_transit(self) -> bool:
         """Did the most recently COMPLETED window read as transit?
 
         Judged on the last full window, so it lags by up to one window, and it
@@ -159,14 +195,14 @@ class EpisodeLifecycle:
         return bool(self.last_window and self.last_window['in_transit'])
 
     @property
-    def is_complete(self):
+    def is_complete(self) -> bool:
         return self.phase is EpisodePhase.COMPLETE
 
-    def drought_agent_steps(self):
+    def drought_agent_steps(self) -> int:
         return (self.substeps - self.last_discovery_substep) // self.sps
 
     # ── per substep ───────────────────────────────────────────────────────
-    def observe(self, info, n_new):
+    def observe(self, info: Info, n_new: int) -> None:
         """Folds one substep in. Call BEFORE the reward is computed."""
         self.substeps += 1
         self._w_substeps += 1
@@ -177,7 +213,7 @@ class EpisodeLifecycle:
         rect = info.get('mario_rect')
         if rect:
             p = (rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0)
-            if self._w_start is None:
+            if self._w_start is None or self._w_prev is None:
                 self._w_start = p
             else:
                 self._w_path += math.hypot(p[0] - self._w_prev[0],
@@ -190,44 +226,49 @@ class EpisodeLifecycle:
         if self._w_substeps >= self.window_substeps:
             self._close_window(info.get('viewport_x', 0))
 
-        if self.phase is EpisodePhase.EXPLORE:
+        if self.phase is EpisodePhase.EXPLORE and self.auto_transition:
             self._check_transition(n_new)
 
-    def _close_window(self, viewport_x):
+    def _close_window(self, viewport_x: int) -> None:
         """Classifies the window just finished as transit / stuck / neither."""
-        v = {'new_px': self._w_new, 'straightness': 0.0,
-             'frontier_gain': 0.0, 'bbox_area': 0.0, 'cells_ahead': None,
-             'start': self._w_start, 'end': self._w_prev, 'path': self._w_path,
-             'centre': None}
-        if self._w_start is not None:
-            v['centre'] = ((self._w_min[0] + self._w_max[0]) / 2.0,
-                           (self._w_min[1] + self._w_max[1]) / 2.0)
-            s, e = self._w_start, self._w_prev
-            net = math.hypot(e[0] - s[0], e[1] - s[1])
-            v['straightness'] = net / max(self._w_path, 1e-6)
-            v['bbox_area'] = ((self._w_max[0] - self._w_min[0])
-                              * (self._w_max[1] - self._w_min[1]))
+        start, end = self._w_start, self._w_prev
+        straightness = frontier_gain = bbox_area = 0.0
+        cells_ahead: int | None = None
+        centre: Point | None = None
+        if start is not None and end is not None:
+            centre = ((self._w_min[0] + self._w_max[0]) / 2.0,
+                      (self._w_min[1] + self._w_max[1]) / 2.0)
+            net = math.hypot(end[0] - start[0], end[1] - start[1])
+            straightness = net / max(self._w_path, 1e-6)
+            bbox_area = ((self._w_max[0] - self._w_min[0])
+                         * (self._w_max[1] - self._w_min[1]))
             if self.coverage is not None and self.coverage.testable is not None:
                 # Both ends measured against the SAME, current frontier, so a
                 # map that moved mid-window (another worker exploring) is not
                 # mistaken for Mario moving.
-                n_ahead, d = self.coverage.frontier_query(viewport_x, [s, e])
-                v['cells_ahead'] = n_ahead
+                n_ahead, d = self.coverage.frontier_query(viewport_x, [start, end])
+                cells_ahead = n_ahead
                 if n_ahead:
-                    v['frontier_gain'] = float(d[0] - d[1])
+                    frontier_gain = float(d[0] - d[1])
 
-        in_transit = (v['straightness'] > config.TRANSIT_STRAIGHTNESS
-                      or v['frontier_gain'] > config.TRANSIT_FRONTIER_GAIN_PX)
-        is_stuck = (not in_transit and self._w_start is not None
-                    and v['bbox_area'] < config.STUCK_BBOX_AREA
-                    and v['new_px'] == 0)
-        exhausted = v['new_px'] < config.YIELD_FLOOR and not in_transit
+        new_px = self._w_new
+        observed = start is not None
+        in_transit = (straightness > config.TRANSIT_STRAIGHTNESS
+                      or frontier_gain > config.TRANSIT_FRONTIER_GAIN_PX)
+        is_stuck = (not in_transit and observed
+                    and bbox_area < config.STUCK_BBOX_AREA
+                    and new_px == 0)
+        exhausted = new_px < config.YIELD_FLOOR and not in_transit
         # The LOOP arm's window: Mario was somewhere, found nothing at all, and
         # was NOT transit. is_stuck is the same thing confined to a small box.
-        unproductive = (v['new_px'] == 0 and not in_transit
-                        and self._w_start is not None)
-        v.update(in_transit=in_transit, is_stuck=is_stuck, exhausted=exhausted,
-                 unproductive=unproductive)
+        unproductive = new_px == 0 and not in_transit and observed
+        v: WindowVerdict = {
+            'new_px': new_px, 'straightness': straightness,
+            'frontier_gain': frontier_gain, 'bbox_area': bbox_area,
+            'cells_ahead': cells_ahead, 'start': start, 'end': end,
+            'path': self._w_path, 'centre': centre, 'in_transit': in_transit,
+            'is_stuck': is_stuck, 'exhausted': exhausted, 'unproductive': unproductive,
+        }
         self.recent_windows.append(v)
 
         self.consecutive_stuck = self.consecutive_stuck + 1 if is_stuck else 0
@@ -238,7 +279,7 @@ class EpisodeLifecycle:
         self.last_window = v
         self._reset_window()
 
-    def _check_transition(self, n_new):
+    def _check_transition(self, n_new: int) -> None:
         # T1 needs an INFORMED target. With fewer than TARGET_MIN_HISTORY
         # episodes behind it - every worker's first episodes of every run -
         # the target is the bare 500 px floor, which says nothing about this
@@ -278,6 +319,7 @@ class EpisodeLifecycle:
         # to act on).
         reason = None
         if (self.target is not None and self.target_informed
+                and self.coverage is not None
                 and self.coverage.episode_new >= self.target
                 and self.drought_agent_steps() >= config.T1_DECLINE_DROUGHT_STEPS
                 and not self.in_coherent_transit):
@@ -289,14 +331,24 @@ class EpisodeLifecycle:
         elif self.agent_steps >= config.MAX_EXPLORE_STEPS:
             reason = Transition.EXPLORE_BACKSTOP
         if reason is not None:
-            # One way, once per episode. Flip-flopping would make the reward
-            # non-stationary within an episode as soon as reward reads phase.
-            self.phase = EpisodePhase.COMPLETE
-            self.transition_reason = reason
-            self.transition_step = self.agent_steps
-            self.completion_credit = self._credit_for(reason)
+            self.force_complete(reason)
 
-    def _credit_for(self, reason):
+    def force_complete(self, reason: str, credit: float | None = None) -> None:
+        """Moves the episode into COMPLETE, recording why and when.
+
+        The natural criteria end here; calibration and tests call it directly
+        to put an episode in COMPLETE at a chosen step. `credit` overrides the
+        completion credit the lifecycle would compute for `reason`.
+
+        One way, once per episode. Flip-flopping would make the reward
+        non-stationary within an episode as soon as reward reads phase.
+        """
+        self.phase = EpisodePhase.COMPLETE
+        self.transition_reason = reason
+        self.transition_step = self.agent_steps
+        self.completion_credit = self._credit_for(reason) if credit is None else credit
+
+    def _credit_for(self, reason: str) -> float:
         """How much of the COMPLETE-phase payout this episode has earned.
 
         T1 and T3 mean exploration is genuinely done - the target was met, or
@@ -317,10 +369,10 @@ class EpisodeLifecycle:
         return min(1.0, self.coverage.episode_new / self.target)
 
     # ── safety reset ──────────────────────────────────────────────────────
-    def safety_reset_due(self):
+    def safety_reset_due(self) -> bool:
         return self.safety_evidence() is not None
 
-    def safety_evidence(self):
+    def safety_evidence(self) -> str | None:
         """The SafetyReason the episode has earned a reset for, or None.
 
         Every reset needs STAGNATION EVIDENCE; nothing made of elapsed steps
@@ -360,28 +412,30 @@ class EpisodeLifecycle:
         return None
 
     @staticmethod
-    def _span_progressed(span):
+    def _span_progressed(span: list[WindowVerdict]) -> bool:
         """Did Mario get meaningfully anywhere across these windows?"""
-        a, b = span[0]['centre'], span[-1]['centre']
+        a, b = _seen(span[0]['centre']), _seen(span[-1]['centre'])
         moved = math.hypot(b[0] - a[0], b[1] - a[1])
         closed_in = sum(w['frontier_gain'] for w in span)
         return (moved > config.TRANSIT_FRONTIER_GAIN_PX
                 or closed_in > config.TRANSIT_FRONTIER_GAIN_PX)
 
     @staticmethod
-    def _span_straightness(span):
-        path = sum(w['path'] for w in span) + sum(
-            math.hypot(b['start'][0] - a['end'][0], b['start'][1] - a['end'][1])
-            for a, b in pairwise(span))
-        first, last = span[0]['start'], span[-1]['end']
+    def _span_straightness(span: list[WindowVerdict]) -> float:
+        walked = sum(w['path'] for w in span)
+        gaps = sum(math.hypot(_seen(b['start'])[0] - _seen(a['end'])[0],
+                              _seen(b['start'])[1] - _seen(a['end'])[1])
+                   for a, b in pairwise(span))
+        path = walked + gaps
+        first, last = _seen(span[0]['start']), _seen(span[-1]['end'])
         return math.hypot(last[0] - first[0], last[1] - first[1]) / max(path, 1e-6)
 
-    def fire_safety_reset(self):
+    def fire_safety_reset(self) -> None:
         self.safety_fired = True
         self.safety_reason = self.safety_evidence()
 
     # ── info, every substep ───────────────────────────────────────────────
-    def annotate(self, info, done):
+    def annotate(self, info: Info, done: bool) -> None:
         """Writes the lifecycle into info on EVERY substep.
 
         MaxAndSkipObservation keeps only the last of its four info dicts, so

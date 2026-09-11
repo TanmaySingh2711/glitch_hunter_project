@@ -36,31 +36,39 @@ import pickle
 import sys
 import time
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from common.cli import prepare_tool
+
+ROOT = prepare_tool()
+
+from collections.abc import Callable, Sequence
+from typing import Any
+
+import gymnasium as gym
 import numpy as np
 
+from agent_logic import GlitchHunterWrapper
 from exploration import config
 from exploration.coverage import SpatialCoverage, load_testable
-from exploration.lifecycle import EpisodePhase, Transition
+from exploration.lifecycle import EpisodeLifecycle, EpisodePhase, Transition
 
 N_ACTIONS = 10
 
 
 # ── controllers ─────────────────────────────────────────────────────────────
+Info = dict[str, Any]
+ArmSpec = dict[str, Any]
+Episode = dict[str, Any]
+
+
 class Controller:
     uses_model = False
 
-    def reset(self):
+    def reset(self) -> None:
         pass
 
-    def act(self, obs, t, info):
+    def act(self, obs: Any, t: int, info: Info) -> int:
         raise NotImplementedError
 
 
@@ -68,11 +76,12 @@ class Policy(Controller):
     """The 6M policy, sampled stochastically as PPO does during rollouts."""
     uses_model = True
 
-    def __init__(self, model, eps=0.0, rng=None):
+    def __init__(self, model: Any, eps: float = 0.0,
+                 rng: np.random.Generator | None = None) -> None:
         self.model, self.eps = model, eps
         self.rng = rng or np.random.default_rng(0)
 
-    def act(self, obs, t, info):
+    def act(self, obs: Any, t: int, info: Info) -> int:
         if self.eps and self.rng.random() < self.eps:
             return int(self.rng.integers(N_ACTIONS))
         action, _ = self.model.predict(obs, deterministic=False)
@@ -80,10 +89,10 @@ class Policy(Controller):
 
 
 class Hold(Controller):
-    def __init__(self, action):
+    def __init__(self, action: int) -> None:
         self.action = action
 
-    def act(self, obs, t, info):
+    def act(self, obs: Any, t: int, info: Info) -> int:
         return self.action
 
 
@@ -100,13 +109,14 @@ class Oscillate(Controller):
     # QA_LOCOMOTION_EPISODE_CAP existed).
     FARM = ((3, 6), (4, 4), (8, 8), (5, 2))
 
-    def __init__(self, pattern=None):
+    def __init__(self, pattern: Sequence[tuple[int, int]] | None = None) -> None:
         self.pattern = pattern or self.PATTERN
+        self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         self.i, self.left = 0, self.pattern[0][1]
 
-    def act(self, obs, t, info):
+    def act(self, obs: Any, t: int, info: Info) -> int:
         if self.left <= 0:
             self.i = (self.i + 1) % len(self.pattern)
             self.left = self.pattern[self.i][1]
@@ -117,28 +127,30 @@ class Oscillate(Controller):
 class Switch(Controller):
     """`first` until `until(t, info, lifecycle)` is true, then `second`."""
 
-    def __init__(self, first, second, until):
+    def __init__(self, first: Controller, second: Controller,
+                 until: Callable[[int, Info, EpisodeLifecycle | None], bool]) -> None:
         self.first, self.second, self.until = first, second, until
         self.uses_model = first.uses_model or second.uses_model
-        self.lifecycle = None
+        self.lifecycle: EpisodeLifecycle | None = None
+        self.switched = False
 
-    def reset(self):
+    def reset(self) -> None:
         self.switched = False
         self.first.reset()
         self.second.reset()
 
-    def act(self, obs, t, info):
+    def act(self, obs: Any, t: int, info: Info) -> int:
         if not self.switched and self.until(t, info, self.lifecycle):
             self.switched = True
         return (self.second if self.switched else self.first).act(obs, t, info)
 
 
 # ── arms ────────────────────────────────────────────────────────────────────
-def _in_complete(t, info, lc):
-    return lc.is_complete
+def _in_complete(t: int, info: Info, lc: EpisodeLifecycle | None) -> bool:
+    return lc is not None and lc.is_complete
 
 
-def arm_specs(model):
+def arm_specs(model: Any) -> dict[str, ArmSpec]:
     """name -> dict(controller, episodes, map, forcing).
 
     map:      'bootstrap' | 'empty' | 'full'   (starting bitmap)
@@ -149,16 +161,19 @@ def arm_specs(model):
               pin=True keeps EXPLORE forever)
     """
     rng = np.random.default_rng(1234)
-    P = lambda eps=0.0: Policy(model, eps=eps, rng=rng)   # noqa: E731
-    T1, T2, T4 = (Transition.TARGET_MET, Transition.YIELD_EXHAUSTED,
+
+    def ppo(eps: float = 0.0) -> Policy:
+        return Policy(model, eps=eps, rng=rng)
+
+    t1, t2, t4 = (Transition.TARGET_MET, Transition.YIELD_EXHAUSTED,
                   Transition.EXPLORE_BACKSTOP)
     return {
         # natural lifecycle ------------------------------------------------
-        'ppo_boot':  {"ctl": P(), "n": 30, "map": 'bootstrap'},
-        'eps_boot':  {"ctl": P(0.3), "n": 20, "map": 'bootstrap'},
-        'ppo_empty': {"ctl": P(), "n": 8, "map": 'empty'},
-        'campaign':  {"ctl": P(), "n": 40, "map": 'bootstrap', "persist": True},
-        'ppo_full':  {"ctl": P(), "n": 6, "map": 'full'},
+        'ppo_boot':  {"ctl": ppo(), "n": 30, "map": 'bootstrap'},
+        'eps_boot':  {"ctl": ppo(0.3), "n": 20, "map": 'bootstrap'},
+        'ppo_empty': {"ctl": ppo(), "n": 8, "map": 'empty'},
+        'campaign':  {"ctl": ppo(), "n": 40, "map": 'bootstrap', "persist": True},
+        'ppo_full':  {"ctl": ppo(), "n": 6, "map": 'full'},
         'idle':      {"ctl": Hold(0), "n": 2, "map": 'bootstrap'},
         'oscillate': {"ctl": Oscillate(), "n": 2, "map": 'bootstrap'},
         # the measured locomotion farm, EXPLORE pinned and in COMPLETE
@@ -168,101 +183,87 @@ def arm_specs(model):
                           "force": {"at": 0, "reason": Transition.TARGET_MET,
                                      "credit": 1.0}},
         # T2 on purpose: stand still until the lifecycle gives up, then run
-        'idle_then_ppo': {"ctl": Switch(Hold(0), P(), _in_complete), "n": 8,
+        'idle_then_ppo': {"ctl": Switch(Hold(0), ppo(), _in_complete), "n": 8,
                               "map": 'bootstrap'},
         # forced phase -----------------------------------------------------
         # EXPLORE for the whole episode: the straightforward speedrun check
-        'e_ppo':     {"ctl": P(), "n": 20, "map": 'bootstrap',
+        'e_ppo':     {"ctl": ppo(), "n": 20, "map": 'bootstrap',
                           "force": {"pin": True}},
         'e_suicide': {"ctl": Hold(1), "n": 3, "map": 'bootstrap',
                           "force": {"pin": True}},
         # COMPLETE from the spawn, full credit (a legitimate T1)
-        'c_ppo':     {"ctl": P(), "n": 20, "map": 'bootstrap',
-                          "force": {"at": 0, "reason": T1, "credit": 1.0}},
+        'c_ppo':     {"ctl": ppo(), "n": 20, "map": 'bootstrap',
+                          "force": {"at": 0, "reason": t1, "credit": 1.0}},
         'c_idle':    {"ctl": Hold(0), "n": 2, "map": 'bootstrap',
-                          "force": {"at": 0, "reason": T1, "credit": 1.0}},
+                          "force": {"at": 0, "reason": t1, "credit": 1.0}},
         'c_oscillate': {"ctl": Oscillate(), "n": 2, "map": 'bootstrap',
-                            "force": {"at": 0, "reason": T1, "credit": 1.0}},
+                            "force": {"at": 0, "reason": t1, "credit": 1.0}},
         'c_suicide': {"ctl": Hold(1), "n": 3, "map": 'bootstrap',
-                          "force": {"at": 0, "reason": T1, "credit": 1.0}},
+                          "force": {"at": 0, "reason": t1, "credit": 1.0}},
         # COMPLETE mid-level, then walk away from the castle
-        'c_backward': {"ctl": Switch(P(), Hold(8), _in_complete), "n": 4,
+        'c_backward': {"ctl": Switch(ppo(), Hold(8), _in_complete), "n": 4,
                            "map": 'bootstrap',
-                           "force": {"at": 150, "reason": T1, "credit": 1.0}},
+                           "force": {"at": 150, "reason": t1, "credit": 1.0}},
         # T4 by the backstop clock, credit from the real formula
-        't4_osc_then_ppo': {"ctl": Switch(Oscillate(), P(), _in_complete),
+        't4_osc_then_ppo': {"ctl": Switch(Oscillate(), ppo(), _in_complete),
                                 "n": 2, "map": 'bootstrap',
                                 "force": {"at": config.MAX_EXPLORE_STEPS,
-                                           "reason": T4, "credit": None}},
+                                           "reason": t4, "credit": None}},
         # T2 by hand at the earliest point idling could reach it, real credit
-        't2_forced_ppo': {"ctl": P(), "n": 8, "map": 'bootstrap',
+        't2_forced_ppo': {"ctl": ppo(), "n": 8, "map": 'bootstrap',
                               "force": {"at": config.YIELD_WINDOWS
                                          * config.LIFECYCLE_WINDOW,
-                                         "reason": T2, "credit": None}},
+                                         "reason": t2, "credit": None}},
     }
 
 
 # ── env ─────────────────────────────────────────────────────────────────────
-def build_env(coverage):
-    from gymnasium.wrappers import (FrameStackObservation, GrayscaleObservation,
-                                    MaxAndSkipObservation, ResizeObservation,
-                                    TimeLimit)
+def build_env(coverage: SpatialCoverage) -> tuple[gym.Env[Any, Any], GlitchHunterWrapper]:
+    from gymnasium.wrappers import TimeLimit
 
-    from agent_logic import GlitchHunterWrapper
-    from custom_mario_env import CustomMarioEnv
+    from custom_mario_env import CustomMarioEnv, wrap_observation
 
-    env = CustomMarioEnv()
-    inner = GlitchHunterWrapper(env, reward_mode="qa_exploration",
+    inner = GlitchHunterWrapper(CustomMarioEnv(), reward_mode="qa_exploration",
                                 coverage=coverage, attach_coverage=True)
-    env = MaxAndSkipObservation(inner, skip=config.SUBSTEPS_PER_AGENT_STEP)
-    env = GrayscaleObservation(env, keep_dim=False)
-    env = ResizeObservation(env, (84, 84))
-    env = FrameStackObservation(env, 4)
-    env = TimeLimit(env, max_episode_steps=config.QA_EPISODE_MAX_STEPS)
+    env: gym.Env[Any, Any] = TimeLimit(wrap_observation(inner), max_episode_steps=config.QA_EPISODE_MAX_STEPS)
     return env, inner
 
 
-def make_coverage(kind, bootstrap):
+def make_coverage(kind: str, bootstrap: str) -> SpatialCoverage:
     cov = SpatialCoverage(testable_mask=load_testable())
     if kind in ('bootstrap', 'full'):
         cov.load(bootstrap)
-    if kind == 'full':
+    if kind == 'full' and cov.testable is not None:
         cov.visited[cov.testable] = 1
     # A fresh worker's history: empty (see module docstring).
     cov.episode_new_history = []
-    cov._remaining_cached = None
+    cov.invalidate_remaining()
     return cov
 
 
-def restore(cov, bits):
+def restore(cov: SpatialCoverage, bits: np.ndarray) -> None:
     cov.visited[:] = bits
-    cov._remaining_cached = None
-    cov._steps_since_frontier = 10 ** 9     # frontier snapshot is stale
-
-
-def force_complete(lc, reason, credit):
-    lc.phase = EpisodePhase.COMPLETE
-    lc.transition_reason = reason
-    lc.transition_step = lc.agent_steps
-    lc.completion_credit = lc._credit_for(reason) if credit is None else credit
+    cov.invalidate_remaining()
+    cov.invalidate_frontier()     # frontier snapshot is stale
 
 
 # ── one arm ─────────────────────────────────────────────────────────────────
-def _flat(ep_channels):
+def _flat(ep_channels: dict[str, dict[str, float]]) -> np.ndarray:
     from agent_logic import QA_CHANNELS
     return np.array([[ep_channels[p.value][k] for k in QA_CHANNELS]
                      for p in EpisodePhase])            # (2, n_channels)
 
 
-def run_arm(name, spec, bootstrap, seed):
+def run_arm(name: str, spec: ArmSpec, bootstrap: str, seed: int) -> list[Episode]:
     from agent_logic import QA_CHANNELS
     cov = make_coverage(spec['map'], bootstrap)
     bits = cov.visited.copy()
     env, inner = build_env(cov)
     lc = inner.lifecycle
+    assert lc is not None                      # a QA wrapper always has one
     force = spec.get('force')
     if force:
-        lc._check_transition = lambda n_new: None
+        lc.auto_transition = False
     ctl = spec['ctl']
     if isinstance(ctl, Switch):
         ctl.lifecycle = lc
@@ -271,24 +272,24 @@ def run_arm(name, spec, bootstrap, seed):
     # it closed. The policy never sees the phase and the env never reads it,
     # so a trajectory is the same whatever the transition rule is - which is
     # what lets --replay re-run candidate rules on this exact stream.
-    trace = {}
+    trace: dict[str, Any] = {}
     real_observe = lc.observe
 
-    def observe(info, n_new):
+    def observe(info: Info, n_new: int) -> None:
         before_window, before_phase = lc.last_window, lc.phase
         real_observe(info, n_new)
         trace['new'].append(int(n_new))
         rect = info.get('mario_rect')
         trace['pos'].append((rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
                             if rect else trace['pos'][-1] if trace['pos'] else (0, 0))
-        if lc.last_window is not before_window:
-            w = lc.last_window
+        w = lc.last_window
+        if w is not None and w is not before_window:
             trace['windows'].append((lc.substeps, w['new_px'], w['in_transit'],
                                      w['exhausted'], w['is_stuck'],
                                      -1 if w['cells_ahead'] is None else w['cells_ahead']))
         if lc.phase is not before_phase:
             trace['switch_substep'] = lc.substeps
-    lc.observe = observe
+    lc.observe = observe                       # type: ignore[method-assign]  # tracing hook
 
     episodes = []
     for ep in range(spec['n']):
@@ -302,11 +303,14 @@ def run_arm(name, spec, bootstrap, seed):
         covered0 = cov.covered_testable()
         target = lc.target
         prev = _flat(inner.ep_channels)
-        steps_ch, steps_phase, steps_x, steps_r = [], [], [], []
+        steps_ch: list[np.ndarray] = []
+        steps_phase: list[int] = []
+        steps_x: list[int] = []
+        steps_r: list[float] = []
         t, t0 = 0, time.time()
         while True:
             if force and not force.get('pin') and t == force['at']:
-                force_complete(lc, force['reason'], force['credit'])
+                lc.force_complete(force['reason'], force['credit'])
             action = ctl.act(obs, t, info)
             obs, r, term, trunc, info = env.step(action)
             cur = _flat(inner.ep_channels)
@@ -314,7 +318,7 @@ def run_arm(name, spec, bootstrap, seed):
             prev = cur
             steps_phase.append(1 if lc.is_complete else 0)
             steps_x.append(info.get('x_pos', 0))
-            steps_r.append(r)
+            steps_r.append(float(r))
             t += 1
             if term or trunc:
                 break
@@ -329,7 +333,7 @@ def run_arm(name, spec, bootstrap, seed):
             "end": end, "transition": lc.transition_reason,
             "transition_step": lc.transition_step,
             "credit": lc.completion_credit if lc.is_complete else None,
-            "episode_new": int(cov.episode_new), "target": int(target),
+            "episode_new": int(cov.episode_new), "target": int(target or 0),
             "covered_before": covered0, "max_x": int(inner.ep_max_x),
             "flag": bool(info.get('flag_get')), "clip_events": inner.qa_clip_events - clip0,
             "channels": chans, "wall": time.time() - t0,
@@ -370,8 +374,8 @@ EXPLORE_DRIVEN = ('novelty', 'frontier')
 COMPLETE_DRIVEN = ('progress', 'flag', 'time')
 
 
-def _stats(v):
-    v = np.asarray(v, dtype=float)
+def _stats(values: Sequence[float] | np.ndarray) -> str:
+    v = np.asarray(values, dtype=float)
     if not v.size:
         return "n=0"
     return (f"mean {v.mean():8.2f}  median {np.median(v):8.2f}  "
@@ -379,7 +383,7 @@ def _stats(v):
             f"min {v.min():8.2f}  max {v.max():8.2f}  (n={v.size})")
 
 
-def _discounted(x, gamma):
+def _discounted(x: np.ndarray, gamma: float) -> np.ndarray:
     g, out = 0.0, np.empty_like(x, dtype=float)
     for i in range(len(x) - 1, -1, -1):
         g = x[i] + gamma * g
@@ -387,7 +391,7 @@ def _discounted(x, gamma):
     return out
 
 
-def report(run_dir, gamma=config.GAMMA, bucket=512):
+def report(run_dir: str, gamma: float = config.GAMMA, bucket: int = 512) -> None:
     import collections
     import glob
 
@@ -396,7 +400,9 @@ def report(run_dir, gamma=config.GAMMA, bucket=512):
     arms = {}
     for p in sorted(glob.glob(os.path.join(run_dir, "*.pkl"))):
         with open(p, "rb") as fh:
-            arms[os.path.splitext(os.path.basename(p))[0]] = pickle.load(fh)
+            # Only ever this tool's own --out files (see main); never
+            # point --report at pickles from anywhere else.
+            arms[os.path.splitext(os.path.basename(p))[0]] = pickle.load(fh)  # noqa: S301
     short = {'death': 'death', 'novelty': 'nov', 'frontier': 'front',
              'drought': 'drought', 'safety_reset': 'safety',
              'locomotion': 'loco', 'time': 'time', 'progress': 'prog',
@@ -411,14 +417,14 @@ def report(run_dir, gamma=config.GAMMA, bucket=512):
         rets = [e['ret'] for e in eps]
         ends = collections.Counter(e['end'] for e in eps)
         trans = collections.Counter(e['transition'] or 'none' for e in eps)
-        credits = [e['credit'] for e in eps if e['credit'] is not None]
+        arm_credits = [e['credit'] for e in eps if e['credit'] is not None]
         print(f"\n[{arm}] {len(eps)} ep, steps mean {np.mean([e['steps'] for e in eps]):.0f}, "
               f"flag {sum(e['flag'] for e in eps)}/{len(eps)}, "
               f"new px mean {np.mean([e['episode_new'] for e in eps]):,.0f}")
         print(f"   return {_stats(rets)}")
         print(f"   ends {dict(ends)}   transitions {dict(trans)}")
-        if credits:
-            print(f"   credit {_stats(credits)}")
+        if arm_credits:
+            print(f"   credit {_stats(arm_credits)}")
         print(f"      {head}{'total':>9}")
         for ph in ('explore', 'complete'):
             m = np.mean([[e['channels'][ph][k] for k in QA_CHANNELS] for e in eps],
@@ -455,15 +461,17 @@ def report(run_dir, gamma=config.GAMMA, bucket=512):
         # Return-scale pressure: the spread of each group's DISCOUNTED return
         # over the states visited. The critic learns the mean; the spread is
         # what is left for the advantage, i.e. for the policy gradient.
-        g_e, g_c, g_all = [], [], []
+        parts_e: list[np.ndarray] = []
+        parts_c: list[np.ndarray] = []
+        parts_all: list[np.ndarray] = []
         for e in mix:
             sc, ph = e['step_channels'], e['step_phase']
             xe = sc[:, [idx[k] for k in EXPLORE_DRIVEN]].sum(1) * (ph == 0)
             xc = sc[:, [idx[k] for k in COMPLETE_DRIVEN]].sum(1) * (ph == 1)
-            g_e.append(_discounted(xe, gamma))
-            g_c.append(_discounted(xc, gamma))
-            g_all.append(_discounted(sc.sum(1), gamma))
-        g_e, g_c, g_all = (np.concatenate(g) for g in (g_e, g_c, g_all))
+            parts_e.append(_discounted(xe, gamma))
+            parts_c.append(_discounted(xc, gamma))
+            parts_all.append(_discounted(sc.sum(1), gamma))
+        g_e, g_c, g_all = (np.concatenate(g) for g in (parts_e, parts_c, parts_all))
         print(f"\n   discounted-return spread (gamma {gamma}, per agent step), "
               f"{g_e.size:,} states:")
         print(f"     exploration-driven  std {g_e.std():8.3f}")
@@ -477,14 +485,15 @@ def report(run_dir, gamma=config.GAMMA, bucket=512):
         steady = [e for e in mix if e['episode'] >= config.TARGET_MIN_HISTORY]
         ed_s = sum(e['channels']['explore'][k] for e in steady for k in EXPLORE_DRIVEN)
         cd_s = sum(e['channels']['complete'][k] for e in steady for k in COMPLETE_DRIVEN)
-        ge_s, gc_s = [], []
+        parts_ge: list[np.ndarray] = []
+        parts_gc: list[np.ndarray] = []
         for e in steady:
             sc, ph = e['step_channels'], e['step_phase']
-            ge_s.append(_discounted(sc[:, [idx[k] for k in EXPLORE_DRIVEN]].sum(1)
+            parts_ge.append(_discounted(sc[:, [idx[k] for k in EXPLORE_DRIVEN]].sum(1)
                                     * (ph == 0), gamma))
-            gc_s.append(_discounted(sc[:, [idx[k] for k in COMPLETE_DRIVEN]].sum(1)
-                                    * (ph == 1), gamma))
-        ge_s, gc_s = np.concatenate(ge_s), np.concatenate(gc_s)
+            parts_gc.append(_discounted(sc[:, [idx[k] for k in COMPLETE_DRIVEN]].sum(1)
+                                        * (ph == 1), gamma))
+        ge_s, gc_s = np.concatenate(parts_ge), np.concatenate(parts_gc)
         print(f"\n   steady state ({len(steady)} episodes, target informed): "
               f"completion / exploration summed {cd_s / max(ed_s, 1e-9):.3f}, "
               f"spread {gc_s.std() / max(ge_s.std(), 1e-9):.3f}")
@@ -535,7 +544,7 @@ def report(run_dir, gamma=config.GAMMA, bucket=512):
     print("\n" + "=" * 110)
     print("4. TRANSITIONS AND COMPLETION CREDIT, every arm")
     print("=" * 110)
-    by = {}
+    by: dict[str, list[tuple[str, Episode]]] = {}
     for arm, eps in arms.items():
         for e in eps:
             if e['transition']:
@@ -552,7 +561,7 @@ def report(run_dir, gamma=config.GAMMA, bucket=512):
               f"arms {sorted({a for a, _e in rows})}")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--report", default=None, metavar="DIR",

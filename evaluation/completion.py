@@ -38,22 +38,45 @@ it from there; nothing about it is taken from the command line.
 Weights are only ever read. Nothing here calls learn() or save(), or opens a
 checkpoint for writing.
 """
+from __future__ import annotations
+
 import contextlib
 import hashlib
 import json
+import logging
 import math
 import os
 import platform
 import re
 import time
 from collections import Counter
+from collections.abc import Callable, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, cast
 
 import gymnasium as gym
 import numpy as np
 import pygame as pg
 
+from common.fileio import read_json, sha256_of, write_json_atomic
 from exploration import config
 from exploration.lifecycle import EndReason, classify_end
+
+if TYPE_CHECKING:
+    from stable_baselines3 import PPO
+
+    from custom_mario_env import CustomMarioEnv
+
+__all__ = ['BASELINE_PATH', 'RESULTS_DIR', 'EpisodeProbe', 'PolicyActor', 'ProtocolMismatch',
+           'classify', 'compare', 'derive_thresholds', 'evaluate', 'load', 'load_policy',
+           'make_protocol', 'run_episode', 'run_seeds', 'save', 'sha256_of', 'summarize']
+
+_log = logging.getLogger(__name__)
+
+Protocol = dict[str, Any]          # the frozen play protocol (make_protocol)
+Record = dict[str, Any]            # one episode's outcome (run_episode)
+Result = dict[str, Any]            # a whole evaluation (evaluate)
+Log = Callable[[str], None]
+Actor = Callable[[Any, np.random.Generator], int]
 
 PROTOCOL_VERSION = 1
 SPAWN_X = 110                                   # level1.setup_mario: viewport.x + 110
@@ -69,7 +92,7 @@ RESULTS_DIR = os.path.join(ROOT, "evaluation", "results")
 VERDICTS = ("HEALTHY", "WARNING", "REGRESSED")
 
 
-def make_protocol(episodes, seed):
+def make_protocol(episodes: int, seed: int) -> Protocol:
     return {
         'version': PROTOCOL_VERSION,
         'episodes': int(episodes),
@@ -90,35 +113,35 @@ def make_protocol(episodes, seed):
     }
 
 
-def episode_seeds(protocol):
+def episode_seeds(protocol: Protocol) -> list[int]:
     return [protocol['seed'] + i for i in range(protocol['episodes'])]
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # ONE EPISODE
 # ══════════════════════════════════════════════════════════════════════════
-class EpisodeProbe(gym.Wrapper):
+class EpisodeProbe(gym.Wrapper[Any, Any, Any, Any]):
     """Sits directly on the engine, UNDER MaxAndSkip, so it sees every
     substep: MaxAndSkip passes up only the last of four infos, and max-x or
     the flagpole can fall on any of them. Read-only - passes everything
     through untouched."""
 
-    def __init__(self, env):
+    def __init__(self, env: gym.Env[Any, Any]) -> None:
         super().__init__(env)
         self.clear()
 
-    def clear(self):
+    def clear(self) -> None:
         self.substeps = 0
         self.max_x = 0
-        self.flagpole_substep = None
-        self.castle_substep = None
-        self.last_info = {}
+        self.flagpole_substep: int | None = None
+        self.castle_substep: int | None = None
+        self.last_info: dict[str, Any] = {}
 
-    def reset(self, **kwargs):
+    def reset(self, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
         self.clear()
         return self.env.reset(**kwargs)
 
-    def step(self, action):
+    def step(self, action: Any) -> tuple[Any, Any, bool, bool, dict[str, Any]]:
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.substeps += 1
         if info.get('x_pos') is not None:
@@ -130,8 +153,8 @@ class EpisodeProbe(gym.Wrapper):
         self.last_info = info
         return obs, reward, terminated, truncated, info
 
-    def _past_the_pole(self, info):
-        base = self.env.unwrapped
+    def _past_the_pole(self, info: dict[str, Any]) -> bool:
+        base: Any = self.env.unwrapped
         c = base.c_module
         mario = getattr(getattr(base.game, 'state', None), 'mario', None)
         state = getattr(mario, 'state', None)
@@ -140,22 +163,20 @@ class EpisodeProbe(gym.Wrapper):
 
 
 @contextlib.contextmanager
-def protocol_env(base, protocol):
+def protocol_env(base: CustomMarioEnv,
+                 protocol: Protocol) -> Iterator[tuple[gym.Env[Any, Any], EpisodeProbe]]:
     """The protocol's env over `base`, yielding (env, probe). The engine
     settings it needs are put back on exit, so a shared env is left exactly
     as it was found."""
-    from gymnasium.wrappers import (FrameStackObservation, GrayscaleObservation,
-                                    MaxAndSkipObservation, ResizeObservation,
-                                    TimeLimit)
+    from gymnasium.wrappers import TimeLimit
+
+    from custom_mario_env import wrap_observation
     saved = (base.episode_time_units, base.end_on_level_complete)
     base.episode_time_units = protocol['engine_time_units']
     base.end_on_level_complete = protocol['end_on_level_complete']
     try:
         probe = EpisodeProbe(base)
-        env = MaxAndSkipObservation(probe, skip=protocol['substeps_per_agent_step'])
-        env = GrayscaleObservation(env, keep_dim=False)
-        env = ResizeObservation(env, (84, 84))
-        env = FrameStackObservation(env, 4)
+        env = wrap_observation(probe, skip=protocol['substeps_per_agent_step'])
         env = TimeLimit(env, max_episode_steps=protocol['max_agent_steps'])
         yield env, probe
     finally:
@@ -166,28 +187,29 @@ class PolicyActor:
     """Chooses actions from a loaded SB3 policy. Inference only: eval mode,
     no_grad, and nothing that could reach an optimizer."""
 
-    def __init__(self, model, mode='sampled'):
+    def __init__(self, model: PPO, mode: str = 'sampled') -> None:
         if mode not in ('sampled', 'greedy'):
             raise ValueError(f"action mode {mode!r}")
         self.model, self.mode = model, mode
         model.policy.set_training_mode(False)
 
-    def __call__(self, obs, rng):
+    def __call__(self, obs: Any, rng: np.random.Generator) -> int:
         import torch
         with torch.no_grad():
             t, _ = self.model.policy.obs_to_tensor(obs)
-            p = self.model.policy.get_distribution(t).distribution.probs[0]
-            p = p.cpu().numpy().astype(np.float64)
+            dist: Any = self.model.policy.get_distribution(t).distribution
+            p = dist.probs[0].cpu().numpy().astype(np.float64)
         if self.mode == 'greedy':
             return int(np.argmax(p))
         return int(rng.choice(len(p), p=p / p.sum()))
 
 
-def progress_of(max_x):
+def progress_of(max_x: int) -> float:
     return float(np.clip((max_x - SPAWN_X) / (CASTLE_DOOR_X - SPAWN_X), 0.0, 1.0))
 
 
-def run_episode(env, probe, actor, seed, on_reset=None):
+def run_episode(env: gym.Env[Any, Any], probe: EpisodeProbe, actor: Actor, seed: int,
+                on_reset: Callable[[Any], None] | None = None) -> Record:
     """One episode; returns its record. `actor(obs, rng) -> action`.
     `on_reset(base_env)` runs after the reset - a test hook for placing Mario
     or setting the clock, never used by the protocol itself."""
@@ -195,11 +217,11 @@ def run_episode(env, probe, actor, seed, on_reset=None):
     if surface is not None:
         surface.fill((0, 0, 0))
     obs, _ = env.reset()
-    base = env.unwrapped
+    base = cast('CustomMarioEnv', env.unwrapped)
     if on_reset is not None:
         on_reset(base)
     rng = np.random.default_rng(seed)
-    steps, trace = 0, hashlib.sha1()
+    steps, trace = 0, hashlib.sha1(usedforsecurity=False)
     terminated = truncated = False
     while not (terminated or truncated):
         action = actor(obs, rng)
@@ -234,7 +256,7 @@ def run_episode(env, probe, actor, seed, on_reset=None):
 # ══════════════════════════════════════════════════════════════════════════
 # A WHOLE EVALUATION
 # ══════════════════════════════════════════════════════════════════════════
-def load_policy(path):
+def load_policy(path: str) -> PPO:
     """Loads a checkpoint for inference on the CPU, one thread."""
     import torch
     from stable_baselines3 import PPO
@@ -242,15 +264,7 @@ def load_policy(path):
     return PPO.load(path, device='cpu')
 
 
-def sha256_of(path):
-    h = hashlib.sha256()
-    with open(path, 'rb') as fh:
-        for block in iter(lambda: fh.read(1 << 20), b''):
-            h.update(block)
-    return h.hexdigest()
-
-
-def checkpoint_meta(path, model):
+def checkpoint_meta(path: str, model: PPO) -> dict[str, Any]:
     digest = sha256_of(path)
     m = re.search(r'_(\d+)_steps', os.path.basename(path))
     return {
@@ -262,7 +276,9 @@ def checkpoint_meta(path, model):
     }
 
 
-def run_seeds(base, model, protocol, seeds, mode='sampled', on_reset=None, log=None):
+def run_seeds(base: CustomMarioEnv, model: PPO, protocol: Protocol, seeds: Sequence[int],
+              mode: str = 'sampled', on_reset: Callable[[Any], None] | None = None,
+              log: Log | None = None) -> list[Record]:
     actor = PolicyActor(model, mode)
     records = []
     with protocol_env(base, protocol) as (env, probe):
@@ -275,21 +291,22 @@ def run_seeds(base, model, protocol, seeds, mode='sampled', on_reset=None, log=N
     return records
 
 
-_WORKER = {}
+_WORKER: dict[str, Any] = {}
 
 
-def _worker_init(model_path, protocol):
+def _worker_init(model_path: str, protocol: Protocol) -> None:
     from custom_mario_env import CustomMarioEnv
     _WORKER['base'] = CustomMarioEnv()
     _WORKER['model'] = load_policy(model_path)
     _WORKER['protocol'] = protocol
 
 
-def _worker_run(seed):
+def _worker_run(seed: int) -> Record:
     return run_seeds(_WORKER['base'], _WORKER['model'], _WORKER['protocol'], [seed])[0]
 
 
-def evaluate(model_path, protocol, workers=1, base=None, log=print):
+def evaluate(model_path: str, protocol: Protocol, workers: int = 1,
+             base: CustomMarioEnv | None = None, log: Log | None = _log.info) -> Result:
     """Plays the protocol with the checkpoint at `model_path`; returns the
     full result (metadata, per-episode records, summary)."""
     import stable_baselines3
@@ -304,7 +321,7 @@ def evaluate(model_path, protocol, workers=1, base=None, log=print):
             records = []
             for i, rec in enumerate(pool.imap(_worker_run, seeds, chunksize=1)):
                 records.append(rec)
-                if log and (i + 1) % 25 == 0:
+                if log is not None and (i + 1) % 25 == 0:
                     log(f"  {i + 1}/{len(seeds)} episodes")
     else:
         if base is None:
@@ -336,7 +353,7 @@ def evaluate(model_path, protocol, workers=1, base=None, log=print):
 # ══════════════════════════════════════════════════════════════════════════
 # SUMMARY, COMPARISON, VERDICT
 # ══════════════════════════════════════════════════════════════════════════
-def wilson(k, n, z=1.96):
+def wilson(k: int, n: int, z: float = 1.96) -> list[float]:
     """95% Wilson interval for k successes in n (a list: it round-trips JSON)."""
     if n == 0:
         return [0.0, 0.0]
@@ -347,7 +364,7 @@ def wilson(k, n, z=1.96):
     return [round(centre - half, 4), round(centre + half, 4)]
 
 
-def _stats(values):
+def _stats(values: Sequence[float]) -> dict[str, float] | None:
     if not values:
         return None
     a = np.asarray(values, dtype=float)
@@ -356,7 +373,7 @@ def _stats(values):
             'min': float(a.min()), 'max': float(a.max())}
 
 
-def summarize(records):
+def summarize(records: Sequence[Record]) -> dict[str, Any]:
     n = len(records)
     done = [r for r in records if r['end'] == EndReason.LEVEL_COMPLETE]
     failed = [r for r in records if r['end'] != EndReason.LEVEL_COMPLETE]
@@ -382,11 +399,12 @@ class ProtocolMismatch(ValueError):
     """Two results that were not played under the same protocol."""
 
 
-def _protocol_key(protocol):
+def _protocol_key(protocol: Protocol) -> str:
     return json.dumps(protocol, sort_keys=True)
 
 
-def classify(candidate_summary, thresholds):
+def classify(candidate_summary: dict[str, Any],
+             thresholds: dict[str, Any]) -> tuple[str, list[str]]:
     """HEALTHY / WARNING / REGRESSED from a summary and the baseline's
     measured thresholds. Completion rate decides; mean progress - the
     fallback for runs that do not finish - can only make it worse. Coverage
@@ -411,7 +429,7 @@ def classify(candidate_summary, thresholds):
     return verdict, reasons
 
 
-def compare(candidate, baseline):
+def compare(candidate: Result, baseline: Result) -> dict[str, Any]:
     """The candidate result against the baseline file. Refuses outright if
     the two were not played under the identical protocol."""
     if _protocol_key(candidate['protocol']) != _protocol_key(baseline['protocol']):
@@ -436,7 +454,8 @@ def compare(candidate, baseline):
     }
 
 
-def derive_thresholds(records, z_warning, z_regressed, rounds=20_000, seed=0):
+def derive_thresholds(records: Sequence[Record], z_warning: float, z_regressed: float,
+                      rounds: int = 20_000, seed: int = 0) -> dict[str, Any]:
     """Thresholds from the baseline's own spread, not picked by hand.
 
     For each metric, the no-change noise of the protocol is the spread of
@@ -450,7 +469,7 @@ def derive_thresholds(records, z_warning, z_regressed, rounds=20_000, seed=0):
     n = len(records)
     done = np.array([r['end'] == EndReason.LEVEL_COMPLETE for r in records], float)
     prog = np.array([r['progress'] for r in records], float)
-    out = {}
+    out: dict[str, Any] = {}
     for name, v in (('completion_rate', done), ('mean_progress', prog)):
         a = v[rng.integers(0, n, (rounds, n))].mean(1)
         b = v[rng.integers(0, n, (rounds, n))].mean(1)
@@ -467,14 +486,12 @@ def derive_thresholds(records, z_warning, z_regressed, rounds=20_000, seed=0):
     return out
 
 
-def save(result, path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as fh:
-        json.dump(result, fh, indent=1)
-    os.replace(tmp, path)
+def save(result: Result, path: str) -> None:
+    """Writes a result (or the baseline) atomically."""
+    write_json_atomic(result, path)
 
 
-def load(path):
-    with open(path, encoding='utf-8') as fh:
-        return json.load(fh)
+def load(path: str) -> Result:
+    """Reads a result, the baseline or a verification record."""
+    loaded: Result = read_json(path)
+    return loaded

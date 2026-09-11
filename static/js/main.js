@@ -3,10 +3,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const startBtn = document.getElementById('start-btn');
     const videoFeed = document.getElementById('video-feed');
     const logTerminal = document.getElementById('log-terminal');
-    
+
     const stopBtn = document.getElementById('stop-btn');
     const resetBtn = document.getElementById('reset-btn');
-    
+
     const MAX_LOG_LINES = 200;
     const MAX_BUG_LINES = 100;   // the log terminal is capped; this was not,
                                  // so a long session could grow it unbounded
@@ -16,6 +16,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                   // revoked - otherwise each frame leaks
                                   // browser memory indefinitely
 
+    // Blanks the video panel and releases the last frame's memory. Shared by
+    // Reset and by a reconnect, which must both leave no stale frame behind.
+    function clearFrame() {
+        videoFeed.removeAttribute('src');
+        if (currentFrameUrl) {
+            URL.revokeObjectURL(currentFrameUrl);
+            currentFrameUrl = null;
+        }
+    }
+
     startBtn.addEventListener('click', () => {
         isTesting = true;
         socket.emit('start_testing');
@@ -23,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stopBtn.disabled = false;
         resetBtn.disabled = false;
         startBtn.textContent = 'Testing...';
-        
+
         // Looked up by id rather than by searching innerHTML for the literal
         // text 'start testing...'. The old check broke silently if the
         // wording changed, and re-serialised the whole panel on every click.
@@ -74,18 +84,14 @@ document.addEventListener('DOMContentLoaded', () => {
         isTesting = false;
         socket.emit('stop_testing');
         socket.emit('reset_game');
-        
+
         logTerminal.replaceChildren(makePlaceholder('p', 'log-placeholder'));
         const bugList = document.getElementById('bug-list');
         if (bugList) {
             bugList.replaceChildren(makePlaceholder('li', 'bug-placeholder'));
         }
-        
-        videoFeed.removeAttribute('src');
-        if (currentFrameUrl) {
-            URL.revokeObjectURL(currentFrameUrl);
-            currentFrameUrl = null;
-        }
+
+        clearFrame();
 
         startBtn.disabled = false;
         stopBtn.disabled = true;
@@ -115,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('agent_log', (data) => {
         if (!isTesting) return;
-        
+
         // Handle Bug Tracking UI
         if (data.log && data.log.includes('🚨 BUG FOUND:')) {
             const bugList = document.getElementById('bug-list');
@@ -129,7 +135,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     placeholder.remove();
                 }
 
-                const stepMatch = data.log.match(/Step (\d+):/);
+                // The server sends "Step N: 🚨 BUG FOUND: <what happened>".
+                const stepMatch = data.log.match(/^Step (\d+):/);
                 const bugText = data.log.split('🚨 BUG FOUND: ')[1] || data.log;
 
                 // Built with textContent, not innerHTML. These strings are
@@ -155,12 +162,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = document.createElement('p');
         p.textContent = data.log;
         logTerminal.appendChild(p);
-        
+
         // Cap the log terminal
         while (logTerminal.children.length > MAX_LOG_LINES) {
             logTerminal.removeChild(logTerminal.firstChild);
         }
-        
+
         // Auto-scroll
         logTerminal.scrollTop = logTerminal.scrollHeight;
     });
@@ -199,11 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
             note('— reconnected, press START TESTING to resume —');
             setIdleUI();
             resetBtn.disabled = true;
-            videoFeed.removeAttribute('src');
-            if (currentFrameUrl) {
-                URL.revokeObjectURL(currentFrameUrl);
-                currentFrameUrl = null;
-            }
+            clearFrame();
         }
         hasConnectedBefore = true;
     });

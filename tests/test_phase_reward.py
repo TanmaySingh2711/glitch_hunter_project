@@ -21,8 +21,7 @@ import pytest
 from agent_logic import GlitchHunterWrapper
 from exploration import config
 from exploration.coverage import SpatialCoverage
-from exploration.lifecycle import (EpisodeLifecycle, EpisodePhase,
-                                   Transition)
+from exploration.lifecycle import EpisodeLifecycle, EpisodePhase, Transition
 
 EMPTY = np.zeros((config.GRID_H, config.GRID_W), dtype=bool)
 FULL = np.ones((config.GRID_H, config.GRID_W), dtype=bool)
@@ -43,7 +42,7 @@ class Rig:
         self.cov = SpatialCoverage(testable_mask=mask)
         self.w = GlitchHunterWrapper(env, reward_mode="qa_exploration",
                                      coverage=self.cov)
-        self.w.lifecycle._check_transition = lambda n_new: None
+        self.w.lifecycle.auto_transition = False
         self.obs = np.zeros(env.observation_space.shape, dtype=np.uint8)
         self.w.reset()
 
@@ -284,7 +283,7 @@ def test_complete_finishing_beats_dying_and_pays_usefully(empty):
     assert finished >= useful - 1e-6, f"finishing from mid-level paid only {finished:.1f}"
 
 
-@pytest.mark.parametrize("phase,credit,flag", [
+@pytest.mark.parametrize(('phase', 'credit', 'flag'), [
     ('explore', 1.0, config.EXPLORE_FLAG_REWARD),
     ('complete', 1.0, config.COMPLETE_FLAG_REWARD),
     ('complete', 0.5, (config.EXPLORE_FLAG_REWARD + config.COMPLETE_FLAG_REWARD) / 2),
@@ -367,7 +366,7 @@ class _Cov:
         return True
 
 
-@pytest.mark.parametrize("reason,new,credit", [
+@pytest.mark.parametrize(('reason', 'new', 'credit'), [
     (Transition.TARGET_MET, 12_000, 1.0),
     (Transition.NOTHING_AHEAD, 0, 1.0),       # nothing left to find: fully earned
     (Transition.YIELD_EXHAUSTED, 0, 0.0),     # idled into it: nothing earned
@@ -492,7 +491,7 @@ def test_phase_reward_balance_holds():
     config.assert_phase_reward_balance()
 
 
-@pytest.mark.parametrize("name,value", [
+@pytest.mark.parametrize(('name', 'value'), [
     ("COMPLETE_FLAG_REWARD", 500.0),          # the legacy flag, restored
     ("EXPLORE_TIME_PENALTY", 0.005),          # the old flat time tax
     ("COMPLETE_NOVELTY_MULT", 1.0),           # novelty fighting the finish

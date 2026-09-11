@@ -31,38 +31,61 @@ suspended generator, so nothing about the episode, the policy or its
 telemetry is discarded, and the dashboard writes no checkpoint, coverage or
 lifecycle file at all.
 """
+from __future__ import annotations
+
+import logging
 import queue
 import threading
 import time
-import traceback
+from collections.abc import Callable, Generator
+from typing import Any, Protocol
 
 THREAD_NAME = "game-window"
 IDLE_PUMP_S = 0.05          # event-pump period while paused: keeps the window responsive
 TARGET_FRAME_S = 1.0 / 60.0
 
+_log = logging.getLogger(__name__)
+
+Emit = Callable[..., Any]
+Command = str | threading.Event
+Session = Generator[dict[str, Any], None, None]
+
+
+class Backend(Protocol):
+    """What the service drives (dashboard_backend.DashboardBackend in the
+    app, a recording fake in tests/test_dashboard_control.py)."""
+
+    def preload(self) -> None: ...
+    def open_window(self) -> str: ...
+    def hide_window(self) -> None: ...
+    def close_window(self) -> None: ...
+    def poll_close_request(self) -> bool: ...
+    def new_session(self) -> Session: ...
+    def stop_audio(self) -> None: ...
+
 
 class GameWindowService:
-    """`backend` does the real work (see agent_logic.DashboardBackend):
-        preload(), open_window() -> str, hide_window(), close_window(),
-        poll_close_request() -> bool, new_session() -> iterator, stop_audio()
-    `emit(event, payload)` talks to the browser."""
+    """`backend` does the real work (see Backend above); `emit(event,
+    payload)` talks to the browser; `log` receives the service's own status
+    lines (the module logger by default)."""
 
-    def __init__(self, backend, emit, log=print):
+    def __init__(self, backend: Backend, emit: Emit,
+                 log: Callable[[str], None] = _log.info) -> None:
         self.backend = backend
         self.emit = emit
         self.log = log
-        self._commands = queue.Queue()
-        self._thread = None
+        self._commands: queue.Queue[Command] = queue.Queue()
+        self._thread: threading.Thread | None = None
         self._ready = threading.Event()
-        self._preload_error = None
+        self._preload_error: BaseException | None = None
         # Read from other threads (healthz, tests); written only by the game thread.
         self.testing = False
-        self.session = None
+        self.session: Session | None = None
         self.steps = 0
-        self.last_pause_reason = None
+        self.last_pause_reason: str | None = None
 
     # ── called from any thread ────────────────────────────────────────────
-    def start(self, timeout=None):
+    def start(self, timeout: float | None = None) -> None:
         """Starts the game thread and waits for its pre-load. Idempotent."""
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name=THREAD_NAME, daemon=True)
@@ -72,38 +95,38 @@ class GameWindowService:
         if self._preload_error is not None:
             raise RuntimeError("pre-load failed") from self._preload_error
 
-    def start_testing(self):
+    def start_testing(self) -> None:
         self._commands.put('start')
 
-    def stop_testing(self):
+    def stop_testing(self) -> None:
         self._commands.put('stop')
 
-    def reset(self):
+    def reset(self) -> None:
         self._commands.put('reset')
 
-    def client_connected(self):
+    def client_connected(self) -> None:
         self._commands.put('connect')
 
-    def client_disconnected(self):
+    def client_disconnected(self) -> None:
         self._commands.put('disconnect')
 
-    def shutdown(self, timeout=5.0):
+    def shutdown(self, timeout: float = 5.0) -> None:
         self._commands.put('shutdown')
         if self._thread is not None:
             self._thread.join(timeout)
 
-    def wait_idle(self, timeout=5.0):
+    def wait_idle(self, timeout: float = 5.0) -> bool:
         """Blocks until every command posted so far has been handled."""
         done = threading.Event()
         self._commands.put(done)
         return done.wait(timeout)
 
     @property
-    def alive(self):
+    def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
     # ── the game thread ───────────────────────────────────────────────────
-    def _run(self):
+    def _run(self) -> None:
         try:
             self.backend.preload()
         except BaseException as exc:
@@ -136,7 +159,7 @@ class GameWindowService:
                 next_step_at = t0 + 2 * max(time.monotonic() - t0, TARGET_FRAME_S)
             self._check_close_button()
 
-    def _handle(self, cmd):
+    def _handle(self, cmd: str) -> None:
         if cmd == 'start':
             self.log(">>> START_TESTING received!")
             try:
@@ -146,7 +169,7 @@ class GameWindowService:
                 self.testing = True
                 self.last_pause_reason = None
             except Exception:
-                traceback.print_exc()
+                _log.exception("could not start testing")
                 self._pause('error', notify=True)
         elif cmd in ('stop', 'connect', 'disconnect'):
             self._pause(cmd)
@@ -155,28 +178,31 @@ class GameWindowService:
             self._close_session()
             self.backend.close_window()
 
-    def _pause(self, reason, notify=False):
+    def _pause(self, reason: str, notify: bool = False) -> None:
         """Stops stepping. Touches nothing else - not the window, not the
         session. `notify` tells the browser, for pauses it did not ask for."""
         self.testing = False
         self.last_pause_reason = reason
         try:
             self.backend.stop_audio()
-        except Exception:
-            pass
+        except Exception:                 # silence is best-effort; the pause is not
+            _log.debug("stop_audio failed", exc_info=True)
         if notify:
             self.emit('testing_paused', {'reason': reason})
 
-    def _close_session(self):
+    def _close_session(self) -> None:
         if self.session is not None:
             try:
                 self.session.close()
-            except Exception:
-                pass
+            except Exception:             # a session that fails to close is still gone
+                _log.debug("session close failed", exc_info=True)
             self.session = None
             self.steps = 0
 
-    def _step(self):
+    def _step(self) -> None:
+        if self.session is None:          # reset between the check and the step
+            self._pause('session_ended')
+            return
         try:
             item = next(self.session)
         except StopIteration:
@@ -184,8 +210,7 @@ class GameWindowService:
             self._pause('session_ended', notify=True)
             return
         except Exception as exc:
-            self.log(f"Error in the game loop: {exc}")
-            traceback.print_exc()
+            _log.exception("Error in the game loop: %s", exc)
             self._pause('error', notify=True)
             return
         self.steps += 1
@@ -193,12 +218,13 @@ class GameWindowService:
         if item.get('log'):
             self.emit('agent_log', {'log': item['log']})
 
-    def _check_close_button(self):
+    def _check_close_button(self) -> None:
         """Pumps the window's events - so it stays responsive while paused -
         and honours its X button: hide, pause, keep the session."""
         try:
             closing = self.backend.poll_close_request()
-        except Exception:
+        except Exception:                 # no window to poll: nothing to close
+            _log.debug("close-button poll failed", exc_info=True)
             closing = False
         if not closing:
             return

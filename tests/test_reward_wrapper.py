@@ -17,17 +17,26 @@ from agent_logic import GlitchHunterWrapper
 
 
 def test_full_training_wrapper_stack_builds_and_steps(env):
-    """The exact stack train_agent.py uses. Observation shape feeds straight
-    into the CNN policy, so a change here silently invalidates the
+    """The exact stack train_agent.py uses (custom_mario_env.wrap_observation,
+    the one definition every consumer shares). Observation shape feeds
+    straight into the CNN policy, so a change here silently invalidates the
     checkpoint."""
-    from gymnasium.wrappers import (MaxAndSkipObservation, GrayscaleObservation,
-                                    ResizeObservation, FrameStackObservation,
-                                    TimeLimit)
-    e = GlitchHunterWrapper(env, reward_mode="legacy_completion")
-    e = MaxAndSkipObservation(e, skip=4)
-    e = GrayscaleObservation(e, keep_dim=False)
-    e = ResizeObservation(e, (84, 84))
-    e = FrameStackObservation(e, 4)
+    from gymnasium.wrappers import (
+        FrameStackObservation,
+        GrayscaleObservation,
+        ResizeObservation,
+        TimeLimit,
+    )
+
+    from custom_mario_env import SkipObservation, wrap_observation
+    e = wrap_observation(GlitchHunterWrapper(env, reward_mode="legacy_completion"))
+    chain, layer = [], e
+    while layer is not env:
+        chain.append(type(layer))
+        layer = layer.env
+    assert chain == [FrameStackObservation, ResizeObservation, GrayscaleObservation,
+                     SkipObservation, GlitchHunterWrapper]
+    assert e.env.env.env._skip == 4
     e = TimeLimit(e, max_episode_steps=4000)
 
     obs, _ = e.reset()

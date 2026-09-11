@@ -133,7 +133,7 @@ def test_the_evaluation_env_is_the_bare_engine(env):
         assert env.episode_time_units == config.QA_EPISODE_TIME_UNITS
         assert env.end_on_level_complete is True
     assert layers == ['TimeLimit', 'FrameStackObservation', 'ResizeObservation',
-                      'GrayscaleObservation', 'MaxAndSkipObservation', 'EpisodeProbe']
+                      'GrayscaleObservation', 'SkipObservation', 'EpisodeProbe']
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -148,7 +148,7 @@ def _summary(rate, progress, **extra):
             'max_x': {'median': 5000.0}, **extra}
 
 
-@pytest.mark.parametrize("rate,progress,want", [
+@pytest.mark.parametrize(("rate", "progress", "want"), [
     (0.46, 0.72, 'HEALTHY'),
     (0.40, 0.65, 'HEALTHY'),          # exactly on a line is not below it
     (0.39, 0.72, 'WARNING'),

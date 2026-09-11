@@ -1,30 +1,104 @@
+"""The Mario clone as a Gymnasium environment, plus the agent's view of it.
+
+CustomMarioEnv drives mario_clone/ one 60 fps frame per step() with
+synthetic key presses, and reports what happened in the info dict: Mario's
+world-space collider, velocity, score, powerups, death, the engine clock,
+and any GLITCH it observed. wrap_observation() is the one observation chain
+every consumer (training, the dashboard, the tools, the evaluator) puts on
+top of it.
+"""
+from __future__ import annotations
+
+import gc
 import os
 import sys
-import gymnasium as gym
-from gymnasium import spaces
-import numpy as np
+from typing import Any
 
+import gymnasium as gym
+import numpy as np
 import pygame as pg
+from gymnasium import spaces
+from gymnasium.wrappers import (
+    FrameStackObservation,
+    GrayscaleObservation,
+    MaxAndSkipObservation,
+    ResizeObservation,
+)
 
 import game_window
+from exploration import config
 
 # Disable audio to prevent sound spam during training
 os.environ["SDL_AUDIODRIVER"] = "dummy"
 
 # How many substeps a glitch alert stays attached to info before expiring.
 # Must match the `skip` passed to MaxAndSkipObservation (see the delivery
-# note in CustomMarioEnv._detect_glitches for why this coupling exists).
-GLITCH_ALERT_TTL = 4
+# note in CustomMarioEnv._detect_glitches for why this coupling exists) -
+# so it IS that skip, from the one place it is defined.
+GLITCH_ALERT_TTL = config.SUBSTEPS_PER_AGENT_STEP
+
+# ─── THE AGENT'S OBSERVATION ───
+# Every agent decision spans SUBSTEPS_PER_AGENT_STEP engine frames
+# (MaxAndSkipObservation, which also SUMS their rewards), seen as the last
+# FRAME_STACK frames in grayscale at OBS_SIZE. The trained checkpoints'
+# network input is exactly this shape, so it is defined once, here.
+OBS_SIZE = (84, 84)
+FRAME_STACK = 4
+
+
+def wrap_observation(env: gym.Env[Any, Any],
+                     skip: int = config.SUBSTEPS_PER_AGENT_STEP) -> gym.Env[Any, Any]:
+    """Skip(skip) > Grayscale > Resize(84x84) > FrameStack(4) over `env`.
+
+    `env` is whatever sits directly on the engine - GlitchHunterWrapper in
+    training and the dashboard, the evaluator's read-only probe in
+    evaluation/completion.py. Episode limits (TimeLimit) and SB3's Monitor
+    are left to the caller, because they differ between those uses. The
+    skip is SkipObservation (below): MaxAndSkipObservation's exact output,
+    without rendering the frames it throws away.
+    """
+    wrapped: gym.Env[Any, Any] = SkipObservation(env, skip=skip)
+    wrapped = GrayscaleObservation(wrapped, keep_dim=False)
+    wrapped = ResizeObservation(wrapped, OBS_SIZE)
+    return FrameStackObservation(wrapped, FRAME_STACK)
+
 
 class FakeKeys:
-    def __init__(self):
-        self.keys = {}
-    def __getitem__(self, key):
+    """Stands in for pygame.key.get_pressed(): the keys the agent is holding."""
+
+    def __init__(self) -> None:
+        self.keys: dict[int, bool] = {}
+
+    def __getitem__(self, key: int) -> bool:
         return self.keys.get(key, False)
-    def update(self, new_keys):
+
+    def update(self, new_keys: dict[int, bool]) -> None:
         self.keys = new_keys
 
-class CustomMarioEnv(gym.Env):
+
+# Which keys each of the 10 discrete actions holds down (see ACTION SPACE).
+_RIGHT_ACTIONS = frozenset((1, 2, 3, 4))
+_LEFT_ACTIONS = frozenset((6, 8, 9))
+_JUMP_ACTIONS = frozenset((2, 4, 5, 9))
+_SPRINT_ACTIONS = frozenset((3, 4, 8))
+_CROUCH_ACTION = 7
+
+# The info dict step() reports when the engine has no Mario to read (see the
+# AttributeError fallback in step()).
+UNKNOWN_STATE_INFO: dict[str, Any] = {
+    'x_pos': 0, 'y_pos': 0, 'mario_rect': None, 'viewport_x': 0, 'x_vel': 0.0,
+    'on_ground': True, 'score': 0, 'coins': 0, 'status': 'small', 'flag_get': False,
+    'powerup_active_count': 0, 'nearest_powerup_dx': None, 'death_cause': None,
+    'is_dead': False, 'time_left': None, 'hud_time': None,
+}
+
+# Glitch thresholds, each ~2x outside the measured envelope of normal play
+# (see GLITCH DETECTION below for the measurement).
+ABOVE_WORLD_Y = -200
+MAX_PLAUSIBLE_X_VEL = 25.0
+
+
+class CustomMarioEnv(gym.Env[np.ndarray, int]):
     # No `metadata = {"render_modes": ...}` / `render_mode` here on purpose.
     # This env never goes through Gymnasium's render() protocol: it always
     # owns a real on-screen pygame window, and frames are pulled directly
@@ -32,9 +106,8 @@ class CustomMarioEnv(gym.Env):
     # stream). Declaring a render mode without implementing render() would
     # advertise an API this class does not actually support.
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-
 
         # ═══════════════════════════════════════════════════════════════════
         # ACTION SPACE (10 discrete actions)
@@ -68,10 +141,10 @@ class CustomMarioEnv(gym.Env):
 
         # Per-episode glitch-detection state (see _detect_glitches below).
         # Cleared in reset() so each episode reports a given kind at most once.
-        self._reported_glitches = set()
+        self._reported_glitches: set[str] = set()
         self._last_score = 0
         self._last_coins = 0
-        self._pending_glitch = None
+        self._pending_glitch: str | None = None
         self._pending_ttl = 0
 
         # ─── EPISODE LIFECYCLE OVERRIDES (QA mode only) ───
@@ -84,7 +157,7 @@ class CustomMarioEnv(gym.Env):
         #   episode_time_units      None -> the engine's own 401
         #   end_on_level_complete   end at the castle door, not after the
         #                           time-to-score countdown
-        self.episode_time_units = None
+        self.episode_time_units: int | None = None
         self.end_on_level_complete = False
 
         # Load the Pygame clone safely using absolute paths so SubprocVecEnv workers don't crash
@@ -105,18 +178,17 @@ class CustomMarioEnv(gym.Env):
         game_window.request_centered_creation()
 
         try:
-            from data import setup, tools, constants as c
+            from data import constants as c
+            from data import setup, tools
             from data.states import level1
 
-            # Store mario clone directory
-            self.tools_module = tools
-            self.setup_module = setup
-            self.c_module = c
+            # The clone's modules, kept so reset() never re-imports them.
+            self.tools_module: Any = tools
+            self.setup_module: Any = setup
+            self.c_module: Any = c
 
-            self.game = tools.Control(setup.ORIGINAL_CAPTION)
-            state_dict = {
-                          c.LEVEL1: level1.Level1()
-            }
+            self.game: Any = tools.Control(setup.ORIGINAL_CAPTION)
+            state_dict = {c.LEVEL1: level1.Level1()}
             self.game.setup_states(state_dict, c.LEVEL1)  # Skip straight to level 1!
             self.fake_time = 0.0
         finally:
@@ -127,29 +199,22 @@ class CustomMarioEnv(gym.Env):
             game_window.center_on_current_display()
         # Set by hide_window(): the OS window exists but is off screen.
         self._window_hidden = False
+        # False while SkipObservation is on a substep whose frame it will
+        # discard: step() then skips the capture and returns a blank frame.
+        # Always True outside a skip, so a bare step() is unchanged.
+        self.render_observation = True
+        self._blank_obs = np.zeros(self.observation_space.shape, dtype=np.uint8)
 
-    def step(self, action):
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         pg.event.pump()
-        keys = {
-            pg.K_RIGHT: False,
-            pg.K_LEFT: False,
-            pg.K_a: False, # Jump
-            pg.K_s: False, # Sprint
-            pg.K_DOWN: False # Crouch
-        }
-
-        if action in [1, 2, 3, 4]:
-            keys[pg.K_RIGHT] = True
-        if action in [6, 8, 9]:
-            keys[pg.K_LEFT] = True
-        if action in [2, 4, 5, 9]:
-            keys[pg.K_a] = True          # Jump
-        if action in [3, 4, 8]:
-            keys[pg.K_s] = True          # Sprint
-        if action == 7:
-            keys[pg.K_DOWN] = True
-
-        self.fake_keys.update(keys)
+        action = int(action)
+        self.fake_keys.update({
+            pg.K_RIGHT: action in _RIGHT_ACTIONS,
+            pg.K_LEFT: action in _LEFT_ACTIONS,
+            pg.K_a: action in _JUMP_ACTIONS,           # Jump
+            pg.K_s: action in _SPRINT_ACTIONS,         # Sprint
+            pg.K_DOWN: action == _CROUCH_ACTION,       # Crouch
+        })
         self.game.keys = self.fake_keys
 
         # ═══════════════════════════════════════════════════════════════════
@@ -188,11 +253,11 @@ class CustomMarioEnv(gym.Env):
             pg.display.update()
 
 
-        obs = self._fast_obs()
+        obs = self._fast_obs() if self.render_observation else self._blank_obs
 
         reward = 0.0
         done = False
-        info = {}
+        info: dict[str, Any] = {}
 
         try:
             mario = self.game.state.mario
@@ -299,23 +364,11 @@ class CustomMarioEnv(gym.Env):
                 done = True
 
         except AttributeError:
-            info['x_pos'] = 0
-            info['y_pos'] = 0
-            info['mario_rect'] = None
-            info['viewport_x'] = 0
-            info['x_vel'] = 0.0
-            info['on_ground'] = True
-            info['score'] = 0
-            info['coins'] = 0
-            info['status'] = 'small'
-            info['flag_get'] = False
-            info['powerup_active_count'] = 0
-            info['nearest_powerup_dx'] = None
-            info['death_cause'] = None
-            info['is_dead'] = False
-            info['time_left'] = None
-            info['hud_time'] = None
-            done = self.game.state.done
+            # The level state is mid-teardown and Mario is not there to read.
+            # Report "unknown" (mario_rect None - coverage records nothing),
+            # never a guessed position.
+            info.update(UNKNOWN_STATE_INFO)
+            done = bool(self.game.state.done)
 
         self._detect_glitches(info)
         return obs, reward, done, False, info
@@ -338,7 +391,7 @@ class CustomMarioEnv(gym.Env):
     # so these are deliberately tuned to stay silent during normal play and
     # only speak up for things the engine genuinely should not permit.
     # ═══════════════════════════════════════════════════════════════════
-    def _detect_glitches(self, info):
+    def _detect_glitches(self, info: dict[str, Any]) -> None:
         # ─── DELIVERY (why this isn't just `info['glitch_alert'] = msg`) ───
         # This env is wrapped in MaxAndSkipObservation(skip=4), which calls
         # step() four times per agent decision and returns ONLY the last
@@ -359,7 +412,7 @@ class CustomMarioEnv(gym.Env):
         # Reported at most once per episode per kind: without this, a stuck
         # out-of-bounds Mario would emit the same alert every single frame
         # and bury the panel in duplicates.
-        def report(kind, message):
+        def report(kind: str, message: str) -> None:
             if kind not in self._reported_glitches:
                 self._reported_glitches.add(kind)
                 self._pending_glitch = message
@@ -382,13 +435,13 @@ class CustomMarioEnv(gym.Env):
                    f"the pit-death check did not fire.")
 
         # 2. Far above the level ceiling. Normal jump arcs peaked at y=-29.
-        if y < -200:
+        if y < ABOVE_WORLD_Y:
             report('above_world',
                    f"Mario clipped far above the level (y={y}).")
 
         # 3. Impossible horizontal speed. Fastest observed sprint was 13.2.
         x_vel = info.get('x_vel', 0.0)
-        if abs(x_vel) > 25.0:
+        if abs(x_vel) > MAX_PLAUSIBLE_X_VEL:
             report('speed',
                    f"Impossible horizontal speed (x_vel={x_vel:.1f}); "
                    f"the engine should cap a sprint far below this.")
@@ -408,7 +461,8 @@ class CustomMarioEnv(gym.Env):
         self._last_score = score
         self._last_coins = coins
 
-    def reset(self, seed=None, options=None):
+    def reset(self, *, seed: int | None = None,
+              options: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         # `options` is unused but required: this is Gymnasium's reset()
         # signature, and wrappers call it with keyword arguments.
         super().reset(seed=seed)
@@ -436,6 +490,13 @@ class CustomMarioEnv(gym.Env):
             self.c_module.LEVEL1: level1.Level1()
         }
         self.game.setup_states(state_dict, self.c_module.LEVEL1)
+        # Free the level just replaced NOW. Its sprites and groups reference
+        # each other, so it is cyclic garbage that only a full collection
+        # reclaims - and Python runs those rarely, so dead levels piled up.
+        # Measured, one QA env over 30,000 agent steps: peak private memory
+        # 688 -> 489 MB, mean 449 -> 331 MB, run time unchanged (one
+        # collection per episode, and episodes are thousands of steps long).
+        gc.collect()
 
         persist_data = {
             self.c_module.COIN_TOTAL: 0,
@@ -478,7 +539,7 @@ class CustomMarioEnv(gym.Env):
         obs = self._fast_obs()
         return obs, {}
 
-    def hold_clock(self):
+    def hold_clock(self) -> int:
         """Keeps the engine clock from running out; returns the units added.
 
         QA mode only (GlitchHunterWrapper calls it before every substep - see
@@ -535,12 +596,12 @@ class CustomMarioEnv(gym.Env):
     # and CLOSED (close_window: destroyed). open_window() centres the window
     # when it creates or re-shows it, and never re-centres one already open.
     # ═══════════════════════════════════════════════════════════════════
-    def window_state(self):
+    def window_state(self) -> str:
         if pg.display.get_surface() is None:
             return 'closed'
         return 'hidden' if self._window_hidden else 'open'
 
-    def open_window(self):
+    def open_window(self) -> str:
         """Makes the game window visible and returns what it had to do:
         'created' (it was closed), 'shown' (it was hidden) or 'focused' (it
         was already open - only restored if minimised, never moved)."""
@@ -570,14 +631,14 @@ class CustomMarioEnv(gym.Env):
         game_window.bring_to_front()
         return {'closed': 'created', 'hidden': 'shown'}.get(state, 'focused')
 
-    def hide_window(self):
+    def hide_window(self) -> None:
         """Takes the window off screen WITHOUT destroying it: the game state,
         the frame on it and every Surface survive, so open_window() shows the
         episode exactly where it was."""
         if pg.display.get_surface() is not None and game_window.hide():
             self._window_hidden = True
 
-    def close_window(self):
+    def close_window(self) -> None:
         """Destroys the OS window. Safe to call even if already closed.
         The underlying game/model state is untouched - only the display -
         so the next open_window() + reset() resumes cleanly."""
@@ -585,7 +646,7 @@ class CustomMarioEnv(gym.Env):
             pg.display.quit()
         self._window_hidden = False
 
-    def poll_close_request(self):
+    def poll_close_request(self) -> bool:
         """Drains the window's event queue; True if the user clicked its X
         (or pressed Alt+F4). Nothing else in this project reads pygame
         events, so draining them all is safe - and keeps the queue from
@@ -598,7 +659,7 @@ class CustomMarioEnv(gym.Env):
                 closing = True
         return closing
 
-    def _fast_obs(self):
+    def _fast_obs(self) -> np.ndarray:
         # ═══════════════════════════════════════════════════════════════
         # Builds the (240, 256, 3) observation step()/reset() return to the
         # agent. This used to capture the frame at full size and then resize
@@ -617,23 +678,69 @@ class CustomMarioEnv(gym.Env):
         # to the old cv2.INTER_NEAREST path for this exact scale ratio (no
         # behavior change to the model's input).
         # ═══════════════════════════════════════════════════════════════
-        surface = pg.display.get_surface()
+        surface: pg.Surface | None = pg.display.get_surface()
         if surface is None:
             return np.zeros((240, 256, 3), dtype=np.uint8)
         small_surface = pg.transform.scale(surface, (256, 240))
         view = pg.surfarray.array3d(small_surface)
         return view.transpose([1, 0, 2])
 
-    def render_scaled(self, size):
+    def render_scaled(self, size: tuple[int, int]) -> np.ndarray:
         """Returns the current frame as a numpy array, scaled to `size`
         (width, height) BEFORE the numpy conversion via pg.transform.scale -
         the same technique _fast_obs() uses, see that method's comment for
         why this matters. Used by the dashboard's streaming path
         (agent_logic.py), which only needs display-quality output at well
         under the window's native 800x600 resolution."""
-        surface = pg.display.get_surface()
+        surface: pg.Surface | None = pg.display.get_surface()
         if surface is None:
             return np.zeros((size[1], size[0], 3), dtype=np.uint8)
         small_surface = pg.transform.scale(surface, size)
         view = pg.surfarray.array3d(small_surface)
         return view.transpose([1, 0, 2])
+
+
+class SkipObservation(MaxAndSkipObservation[Any, Any, Any]):
+    """MaxAndSkipObservation that only renders the frames it keeps.
+
+    The parent repeats the action for `skip` engine frames and max-pools the
+    LAST TWO observations; the first skip-2 are computed and thrown away.
+    Capturing and downscaling a frame (_fast_obs, ~0.6 ms) is the largest
+    first-party cost in a substep, so this tells the engine, through
+    render_observation, which substeps' frames will actually be read.
+    Measured on the QA training stack, headless, 3 x 1,500 agent steps:
+    8.85 -> 7.68 ms per agent step: 13% less time, 15% more rollout
+    throughput per worker (tools/benchmark_step.py).
+
+    Identical output by construction: the frames that ARE rendered are
+    rendered exactly as before, the max-pool and the reward sum are the
+    parent's own arithmetic, and an episode ending on a skipped substep
+    returns the same stale buffer the parent would have (it only ever writes
+    the buffer on the last two substeps). tests/test_env.py pins it against
+    the plain MaxAndSkipObservation, frame for frame.
+    """
+
+    def step(self, action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        # Duck-typed: any engine exposing the flag opts in; anything else is
+        # stepped exactly like MaxAndSkipObservation would.
+        base: Any = self.env.unwrapped
+        engine = base if hasattr(base, "render_observation") else None
+        total_reward = 0.0
+        terminated = truncated = False
+        info: dict[str, Any] = {}
+        try:
+            for i in range(self._skip):
+                if engine is not None:
+                    engine.render_observation = i >= self._skip - 2
+                obs, reward, terminated, truncated, info = self.env.step(action)
+                if i == self._skip - 2:
+                    self._obs_buffer[0] = obs
+                if i == self._skip - 1:
+                    self._obs_buffer[1] = obs
+                total_reward += float(reward)
+                if terminated or truncated:
+                    break
+        finally:
+            if engine is not None:
+                engine.render_observation = True
+        return np.max(self._obs_buffer, axis=0), total_reward, terminated, truncated, info

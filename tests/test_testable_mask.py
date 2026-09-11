@@ -24,7 +24,13 @@ PADDED_GRID = 9600 * 1024
 
 @pytest.fixture(scope="module")
 def masks():
-    solid, testable, meta = reachability.load_masks()
+    """The built mask bundle. Git-ignored (tools/build_reachability.py makes
+    it), so a fresh clone or CI skips these; the slow clean-rebuild test below
+    still checks the denominator from the live geometry there."""
+    try:
+        solid, testable, meta = reachability.load_masks()
+    except FileNotFoundError:
+        pytest.skip(f"{config.REACHABLE_MASK_PATH} is not in this checkout")
     return solid, testable, meta
 
 
@@ -109,7 +115,7 @@ def test_normal_engine_behaviour_is_not_called_a_glitch(masks):
     all 9,687 bootstrap out-of-mask pixels as anomalies, when every one of
     them was documented, normal behaviour of this engine.
     """
-    from exploration import reachability as R
+    from exploration import reachability as reach
     _solid, testable, _meta = masks
     cov = SpatialCoverage(testable_mask=testable)
     cov.begin_episode()
@@ -123,9 +129,9 @@ def test_normal_engine_behaviour_is_not_called_a_glitch(masks):
         f"to prevent")
     assert b['expected']['jump_arc'] > 0
     # And the class map must agree with the mask about what is testable.
-    cm = R.load_class_map()
-    assert not (testable & (cm != R.CLS_TESTABLE)).any()
-    assert not (~testable & (cm == R.CLS_TESTABLE)).any()
+    cm = reach.load_class_map()
+    assert not (testable & (cm != reach.CLS_TESTABLE)).any()
+    assert not (~testable & (cm == reach.CLS_TESTABLE)).any()
 
 
 def test_genuinely_impossible_pixels_are_still_anomalous(masks):
@@ -157,7 +163,7 @@ def test_consistency_assertion_catches_an_impossible_state(masks):
     cov = SpatialCoverage(testable_mask=testable)
     cov.testable_total = 10          # deliberately impossible
     cov.visited[:] = 1
-    cov._remaining_cached = None
+    cov.invalidate_remaining()
     with pytest.raises(AssertionError):
         cov.assert_consistent()
 

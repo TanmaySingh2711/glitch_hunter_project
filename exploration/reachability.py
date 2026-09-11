@@ -66,8 +66,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+from typing import Any
 
 import numpy as np
+
+Mask = np.ndarray                  # 2-D bool array, (rows, cols)
+Stats = dict[str, Any]
 
 from . import config
 
@@ -78,7 +82,7 @@ from . import config
 # via a cumulative sum. Used for morphological dilation, the sliding-window
 # minimum of the ceiling, and the anchor -> pixel expansion.
 # ══════════════════════════════════════════════════════════════════════════
-def _window_any(mask, lo, hi, axis):
+def _window_any(mask: Mask, lo: int, hi: int, axis: int) -> Mask:
     """out[i] = any(mask[i+lo : i+hi+1]) along `axis`, clipped at the edges."""
     n = mask.shape[axis]
     pad_lo, pad_hi = max(0, -lo), max(0, hi)
@@ -96,7 +100,7 @@ def _window_any(mask, lo, hi, axis):
     return (hi_c - lo_c) > 0
 
 
-def _summed_area(mask):
+def _summed_area(mask: Mask) -> np.ndarray:
     """Integral image with a zero-padded first row/column."""
     sat = np.zeros((mask.shape[0] + 1, mask.shape[1] + 1), dtype=np.int64)
     sat[1:, 1:] = np.cumsum(np.cumsum(mask, axis=0, dtype=np.int64),
@@ -104,7 +108,7 @@ def _summed_area(mask):
     return sat
 
 
-def mask_fingerprint(mask) -> str:
+def mask_fingerprint(mask: Mask) -> str:
     """SHA-256 of the packed mask. Identifies WHICH denominator a coverage
     file was recorded against, so a state built on the retired 7,606,986
     mask cannot silently load as if it were compatible."""
@@ -114,7 +118,8 @@ def mask_fingerprint(mask) -> str:
 # ══════════════════════════════════════════════════════════════════════════
 # GEOMETRY
 # ══════════════════════════════════════════════════════════════════════════
-def rasterize_solids(level_state, *, x0=0, y0=0, w=None, h=None):
+def rasterize_solids(level_state: Any, *, x0: int = 0, y0: int = 0,
+                     w: int | None = None, h: int | None = None) -> tuple[Mask, int]:
     """Burns every collider group into a mask, in WORLD coordinates.
 
     `level_state` is a live `Level1`. The groups are read from outside rather
@@ -142,7 +147,8 @@ def rasterize_solids(level_state, *, x0=0, y0=0, w=None, h=None):
     return solid, n_rects
 
 
-def anchor_grids(solid, mario_w=None, mario_h=None):
+def anchor_grids(solid: Mask, mario_w: int | None = None,
+                 mario_h: int | None = None) -> tuple[Mask, Mask]:
     """Valid and standable anchor sets, in WORLD coordinates.
 
     An ANCHOR is a top-left placement of Mario's collider. It is VALID when
@@ -174,7 +180,8 @@ def anchor_grids(solid, mario_w=None, mario_h=None):
     return valid, standable
 
 
-def anchors_to_pixels(anchors, mario_w=None, mario_h=None):
+def anchors_to_pixels(anchors: Mask, mario_w: int | None = None,
+                      mario_h: int | None = None) -> Mask:
     """Every world pixel covered by some anchor in the set."""
     mario_w = config.MARIO_SMALL_W if mario_w is None else mario_w
     mario_h = config.MARIO_SMALL_H if mario_h is None else mario_h
@@ -189,7 +196,8 @@ def anchors_to_pixels(anchors, mario_w=None, mario_h=None):
 # ══════════════════════════════════════════════════════════════════════════
 # METHOD A — geometric openness. INFORMATIONAL ONLY.
 # ══════════════════════════════════════════════════════════════════════════
-def method_a(solid, mario_w=None, mario_h=None):
+def method_a(solid: Mask, mario_w: int | None = None,
+             mario_h: int | None = None) -> tuple[Mask, Stats]:
     """"A box fits here." No gravity, no jump limit. Over-counts."""
     valid, _standable = anchor_grids(solid, mario_w, mario_h)
     px = anchors_to_pixels(valid, mario_w, mario_h)
@@ -202,7 +210,7 @@ def method_a(solid, mario_w=None, mario_h=None):
 NO_CEILING = np.int32(1 << 20)      # sentinel: no standable ground in reach
 
 
-def column_ceiling(standable):
+def column_ceiling(standable: Mask) -> np.ndarray:
     """Per anchor-column, the highest anchor y a jump can reach. UNCLAMPED.
 
     Deliberately not clipped at y = 0. Mario's collider legitimately rises
@@ -226,7 +234,8 @@ def column_ceiling(standable):
     return win.min(axis=1) - config.JUMP_RISE_PX
 
 
-def method_b(solid, mario_w=None, mario_h=None):
+def method_b(solid: Mask, mario_w: int | None = None,
+             mario_h: int | None = None) -> tuple[Mask, Stats]:
     """Adds the reachable-altitude constraint to Method A.
 
     Per world column, find the highest STANDABLE anchor within
@@ -254,7 +263,7 @@ def method_b(solid, mario_w=None, mario_h=None):
 # ══════════════════════════════════════════════════════════════════════════
 # METHOD C — connectivity BFS. The adopted method.
 # ══════════════════════════════════════════════════════════════════════════
-def _shift(mask, dy, dx):
+def _shift(mask: Mask, dy: int, dx: int) -> Mask:
     out = np.zeros_like(mask)
     ys = slice(max(0, dy), mask.shape[0] + min(0, dy))
     xs = slice(max(0, dx), mask.shape[1] + min(0, dx))
@@ -264,7 +273,7 @@ def _shift(mask, dy, dx):
     return out
 
 
-def _propagate(seed, passable, dy, dx, steps):
+def _propagate(seed: Mask, passable: Mask, dy: int, dx: int, steps: int) -> Mask:
     """Flood `seed` in one direction through `passable`, up to `steps` cells.
 
     Stepwise rather than a single dilation ON PURPOSE: propagating one cell
@@ -281,8 +290,9 @@ def _propagate(seed, passable, dy, dx, steps):
     return cur
 
 
-def method_c(solid, spawn_xy, mario_w=None, mario_h=None, coarse=None,
-             max_iters=60):
+def method_c(solid: Mask, spawn_xy: tuple[int, int], mario_w: int | None = None,
+             mario_h: int | None = None, coarse: int | None = None,
+             max_iters: int = 60) -> tuple[Mask, Stats]:
     """Everything in Method B, plus reachability from the spawn point.
 
     Runs on a `coarse`-px anchor lattice; a coarse cell is open if ANY fine
@@ -421,14 +431,14 @@ ANOMALOUS_CLASSES = (CLS_IMPOSSIBLE_SKY, CLS_FLOOR_CLIP, CLS_DEEP_PENETRATION,
                      CLS_OUTSIDE_LEVEL, CLS_UNREACHABLE_ALT)
 
 
-def _dilate(mask, radius):
+def _dilate(mask: Mask, radius: int) -> Mask:
     """Chessboard dilation by `radius`, via two 1-D window passes."""
     out = _window_any(mask, -radius, radius, axis=0)
     return _window_any(out, -radius, radius, axis=1)
 
 
-def classify_noncoverage(solid_world, testable_world, b_world,
-                         mario_w=None, mario_h=None):
+def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
+                         mario_w: int | None = None, mario_h: int | None = None) -> np.ndarray:
     """Assigns every PADDED-GRID pixel a class code. Built once, with the mask.
 
     Computed at build time rather than per-query so the taxonomy is versioned
@@ -506,9 +516,10 @@ def classify_noncoverage(solid_world, testable_world, b_world,
     return cls
 
 
-def _erode_tol(solid, tol):
+def _erode_tol(solid: Mask, tol: int) -> Mask:
     """Solid pixels deeper than `tol` from any free pixel (chessboard)."""
-    return ~_dilate(~solid, tol) & solid
+    deep: Mask = ~_dilate(~solid, tol) & solid
+    return deep
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -522,7 +533,8 @@ class ReconciliationError(RuntimeError):
     """The three methods disagree in a way that means a bug, not a result."""
 
 
-def build_testable(level_state, spawn_xy, tolerance=0.05):
+def build_testable(level_state: Any, spawn_xy: tuple[int, int],
+                   tolerance: float = 0.05) -> tuple[Mask, Mask, np.ndarray, Stats]:
     """Runs all three methods, reconciles them, and returns the adopted mask.
 
     Adoption rule, from the brief and enforced here:
@@ -613,7 +625,7 @@ def build_testable(level_state, spawn_xy, tolerance=0.05):
 # ══════════════════════════════════════════════════════════════════════════
 # PERSISTENCE
 # ══════════════════════════════════════════════════════════════════════════
-def _embed_in_grid(world_mask):
+def _embed_in_grid(world_mask: Mask) -> Mask:
     """Place a world-sized mask into the padded coverage grid.
 
     The coverage bitmap is padded (see config.GRID_*) so out-of-world
@@ -628,7 +640,8 @@ def _embed_in_grid(world_mask):
     return out
 
 
-def save_masks(path, solid_world, testable_world, class_map, stats):
+def save_masks(path: str, solid_world: Mask, testable_world: Mask,
+               class_map: np.ndarray, stats: Stats) -> None:
     """Writes the mask bundle atomically.
 
     Atomic because a half-written mask sitting next to a good model
@@ -670,7 +683,7 @@ def save_masks(path, solid_world, testable_world, class_map, stats):
     os.replace(tmp + '.npz', path)
 
 
-def load_masks(path=None):
+def load_masks(path: str | None = None) -> tuple[Mask, Mask, Stats]:
     """Loads the mask bundle, refusing anything that does not match config.
 
     Refuses rather than adapts: a mask built for a different grid or a
@@ -682,8 +695,14 @@ def load_masks(path=None):
         raise FileNotFoundError(
             f"{path} not found - run `python tools/build_reachability.py` first."
         )
-    d = np.load(path)
+    # Closed on the way out: an open .npz holds a Windows file lock on the very
+    # path tools/build_reachability.py atomically replaces.
+    with np.load(path, allow_pickle=False) as d:
+        return _parse_mask_bundle(d, path)
 
+
+def _parse_mask_bundle(d: Any, path: str) -> tuple[Mask, Mask, Stats]:
+    """load_masks() on an open NpzFile: every check, then the two masks."""
     if 'testable_packed' not in d:
         raise ReachabilityMismatch(
             f"{path} predates the testable-mask correction (it stores the "
@@ -728,10 +747,10 @@ def load_masks(path=None):
     return solid, testable, meta
 
 
-_CLASS_MAP_CACHE = None
+_CLASS_MAP_CACHE: np.ndarray | None = None
 
 
-def load_class_map(path=None):
+def load_class_map(path: str | None = None) -> np.ndarray:
     """The noncoverage taxonomy grid. Cached; loaded only when reporting.
 
     Deliberately NOT held by SpatialCoverage: it is 9.8 MB and every
@@ -742,13 +761,12 @@ def load_class_map(path=None):
     global _CLASS_MAP_CACHE
     if _CLASS_MAP_CACHE is None:
         path = config.REACHABLE_MASK_PATH if path is None else path
-        d = np.load(path)
-        if 'class_map' not in d:
-            raise ReachabilityMismatch(
-                f"{path} has no noncoverage class map. Rebuild with "
-                f"tools/build_reachability.py.")
-        cm = d['class_map']
-        d.close()
+        with np.load(path, allow_pickle=False) as d:
+            if 'class_map' not in d:
+                raise ReachabilityMismatch(
+                    f"{path} has no noncoverage class map. Rebuild with "
+                    f"tools/build_reachability.py.")
+            cm = d['class_map']
         if cm.shape != (config.GRID_H, config.GRID_W):
             raise ReachabilityMismatch(
                 f"class_map shape {cm.shape}, expected "

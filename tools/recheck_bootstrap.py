@@ -17,14 +17,16 @@ the evidence to make the numbers tidy would be the wrong trade.
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import sys
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.cli import prepare_tool
+
+ROOT = prepare_tool(headless=False)
 
 import numpy as np
 
@@ -32,7 +34,9 @@ from exploration import config
 from exploration.coverage import SpatialCoverage, load_testable
 
 
-def main():
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    ap.parse_args(argv)
     path = config.BOOTSTRAP_COVERAGE
     if not os.path.exists(path):
         raise SystemExit(

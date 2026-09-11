@@ -54,7 +54,7 @@ def _full(mask, missing=0):
     if missing:
         ys, xs = np.nonzero(mask)
         cov.visited[ys[:missing], xs[:missing]] = 0
-    cov._remaining_cached = None
+    cov.invalidate_remaining()
     return cov
 
 
@@ -150,7 +150,7 @@ def test_coverage_growth_is_appended_across_restarts(mask, tmp_path):
     _report(cb, 6_400_008, dones=[True, False, True])
     ys, xs = np.nonzero(mask)
     cov.visited[ys[:1_000], xs[:1_000]] = 1              # 1,000 new pixels
-    cov._remaining_cached = None
+    cov.invalidate_remaining()
     _report(cb, 6_410_008)
 
     # A restart: a new callback appends to the same file, never rewrites it.
@@ -276,7 +276,7 @@ def test_a_healthy_completion_becomes_the_final_brain(snapshot, tmp_path):
         _verify(snapshot, tmp_path)
 
 
-@pytest.mark.parametrize("retention,verdict", [('WARNING', lv.NEEDS_REVIEW),
+@pytest.mark.parametrize(("retention", "verdict"), [('WARNING', lv.NEEDS_REVIEW),
                                                ('REGRESSED', lv.REJECTED)])
 def test_lost_completion_ability_is_not_a_final_brain(snapshot, tmp_path, retention, verdict):
     rec = _verify(snapshot, tmp_path, verdict=retention)

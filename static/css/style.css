@@ -278,11 +278,11 @@ select:focus {
         grid-template-columns: 1fr;
         height: auto;
     }
-    
+
     .video-panel {
         order: -1;
     }
-    
+
     #log-terminal {
         min-height: 300px;
     }

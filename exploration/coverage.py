@@ -29,14 +29,18 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import logging
 import math
 import os
 import uuid
-from typing import Protocol, runtime_checkable
+from types import ModuleType
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
 from . import config
+
+_log = logging.getLogger(__name__)
 
 # ── shared control slots ──────────────────────────────────────────────────
 # A tiny float64 block that lives beside the coverage bitmap. Workers are
@@ -50,7 +54,7 @@ CTRL_NOVELTY_MULT = 0
 CTRL_SLOTS = 8
 
 
-def make_shm_names(tag=None):
+def make_shm_names(tag: str | None = None) -> dict[str, str]:
     """Unique names for one training run's shared blocks.
 
     The NAME is the only thing that survives cloudpickling into a
@@ -94,11 +98,11 @@ class CoverageChannel(Protocol):
 
     name: str
 
-    def record(self, obs: dict) -> int: ...
+    def record(self, obs: dict[str, Any]) -> int: ...
     def covered_testable(self) -> int: ...
     def remaining(self) -> int | None: ...
-    def state_dict(self) -> dict: ...
-    def load_state_dict(self, d: dict) -> None: ...
+    def state_dict(self) -> dict[str, Any]: ...
+    def load_state_dict(self, d: dict[str, Any]) -> None: ...
 
 
 def _config_hash() -> str:
@@ -146,15 +150,22 @@ class SpatialCoverage:
 
     name = "spatial"
 
-    def __init__(self, testable_mask=None, shm_names=None, grid=None,
-                 create_shared=False):
-        self.x0, self.y0, self.w, self.h = grid or (
-            config.GRID_X0, config.GRID_Y0, config.GRID_W, config.GRID_H)
+    def __init__(self, testable_mask: np.ndarray | None = None,
+                 shm_names: dict[str, str] | None = None,
+                 grid: tuple[int, int, int, int] | None = None,
+                 create_shared: bool = False) -> None:
+        x0, y0, w, h = grid or (config.GRID_X0, config.GRID_Y0, config.GRID_W, config.GRID_H)
+        self.x0, self.y0, self.w, self.h = int(x0), int(y0), int(w), int(h)
 
-        self._shm = []
-        self._owns_shm = create_shared
-        self.control = None
+        self._shm: list[Any] = []
+        self.control: np.ndarray | None = None
+        # A local instance's own escalation (set_novelty_mult); None follows
+        # config. Kept here rather than written into the config module, which
+        # every other instance in the process would then silently share.
+        self._local_novelty_mult: float | None = None
         self.shm_names = dict(shm_names) if shm_names else None
+        self.visited: np.ndarray
+        self.visit_count: np.ndarray | None
 
         if shm_names:
             self._attach_shared(shm_names, create=create_shared)
@@ -165,11 +176,11 @@ class SpatialCoverage:
                 if config.TRACK_VISIT_COUNTS else None)
 
         self.testable = testable_mask
-        self.testable_total = (int(testable_mask.sum())
-                               if testable_mask is not None else None)
+        self.testable_total: int | None = (int(testable_mask.sum())
+                                           if testable_mask is not None else None)
 
         # Per-episode state
-        self.prev_rect = None
+        self.prev_rect: tuple[int, int, int, int] | None = None
         self.episode_new = 0
         self.steps_since_new_pixel = 0
         self.oob_events = 0
@@ -178,7 +189,7 @@ class SpatialCoverage:
         # potential function below is piecewise policy-invariant.
         self._frontier_cells = np.zeros((0, 2), dtype=np.int64)
         self._steps_since_frontier = 10 ** 9
-        self._remaining_cached = None
+        self._remaining_cached: int | None = None
         # Bumped on every real refresh. The reward wrapper watches this and
         # SKIPS the shaping delta on the step a refresh lands: Phi changed
         # because the map moved, not because the agent did, and paying for
@@ -187,15 +198,15 @@ class SpatialCoverage:
 
         # Ring buffer of recent per-episode new-pixel counts, driving the
         # adaptive target.
-        self.episode_new_history = []
+        self.episode_new_history: list[float] = []
 
-        self._lock = None
+        self._lock: Any = None
         if config.STRICT_COVERAGE_LOCK:
             import multiprocessing
             self._lock = multiprocessing.Manager().Lock()
 
     # ── shared-memory plumbing ────────────────────────────────────────────
-    def _attach_shared(self, names, create=False):
+    def _attach_shared(self, names: dict[str, str], create: bool = False) -> None:
         from multiprocessing import shared_memory
 
         n_px = self.w * self.h
@@ -216,7 +227,8 @@ class SpatialCoverage:
             if create:
                 self.control[CTRL_NOVELTY_MULT] = config.NOVELTY_WEIGHT_MULT
 
-    def _map(self, shared_memory, name, nbytes, dtype, create, shape):
+    def _map(self, shared_memory: ModuleType, name: str, nbytes: int, dtype: Any,
+             create: bool, shape: tuple[int, ...]) -> np.ndarray:
         if create:
             try:
                 shm = shared_memory.SharedMemory(name=name, create=True,
@@ -236,30 +248,34 @@ class SpatialCoverage:
     def novelty_mult(self) -> float:
         """The live novelty multiplier, read from shared memory if present.
 
-        Falls back to the static config value for local (test / dashboard)
-        instances, so call sites never branch on the backing mode.
+        A local (test / dashboard) instance returns its own escalation if one
+        was set, else the static config value, so call sites never branch on
+        the backing mode.
         """
         if self.control is not None:
             return float(self.control[CTRL_NOVELTY_MULT])
+        if self._local_novelty_mult is not None:
+            return self._local_novelty_mult
         return float(config.NOVELTY_WEIGHT_MULT)
 
     def set_novelty_mult(self, value: float) -> None:
-        """PARENT ONLY. Escalates the novelty multiplier for every worker."""
+        """PARENT ONLY. Escalates the novelty multiplier for every worker
+        (through shared memory), or for this local instance alone."""
         value = float(min(config.NOVELTY_MULT_MAX, max(1.0, value)))
         if self.control is not None:
             self.control[CTRL_NOVELTY_MULT] = value
         else:
-            config.NOVELTY_WEIGHT_MULT = value
+            self._local_novelty_mult = value
 
-    def close(self):
+    def close(self) -> None:
         """Detach from shared memory. Workers call this; they never unlink."""
         for shm in self._shm:
             try:
                 shm.close()
-            except Exception:
-                pass
+            except Exception:             # already closed, or never fully attached
+                _log.debug("shared-memory close failed", exc_info=True)
 
-    def unlink(self):
+    def unlink(self) -> None:
         """Destroy the shared blocks. PARENT ONLY, at shutdown.
 
         Unlinking from a worker would pull the grid out from under every other
@@ -268,11 +284,11 @@ class SpatialCoverage:
         for shm in self._shm:
             try:
                 shm.unlink()
-            except Exception:
-                pass
+            except Exception:             # already gone (Windows frees on last close)
+                _log.debug("shared-memory unlink failed", exc_info=True)
 
     # ── recording ─────────────────────────────────────────────────────────
-    def begin_episode(self):
+    def begin_episode(self) -> None:
         """Resets per-episode state, keeping the persistent bitmap.
 
         prev_rect is cleared so the spawn teleport is NOT swept. Without this
@@ -287,7 +303,7 @@ class SpatialCoverage:
         self.episode_new = 0
         self.steps_since_new_pixel = 0
 
-    def record(self, obs: dict) -> int:
+    def record(self, obs: dict[str, Any]) -> int:
         """Marks the swept region and returns how many pixels were new.
 
         `obs` carries prev/cur rects plus velocity and contact state. Only the
@@ -342,7 +358,7 @@ class SpatialCoverage:
             self._remaining_cached = None
         return n_new
 
-    def _mark(self, gy0, gy1, gx0, gx1):
+    def _mark(self, gy0: int, gy1: int, gx0: int, gx1: int) -> int:
         """Marks the swept box; returns newly-claimed TESTABLE pixels.
 
         The bitmap records everything the collider touched, because that is
@@ -368,6 +384,18 @@ class SpatialCoverage:
             np.minimum(cnt, 65534, out=cnt)
             cnt += 1
         return n_new
+
+    # ── direct bitmap edits (tools and tests) ─────────────────────────────
+    def invalidate_remaining(self) -> None:
+        """Forget the cached remaining() count. Call after writing `visited`
+        directly - restoring a saved map, filling one in a test - since the
+        cache describes the bitmap as it was."""
+        self._remaining_cached = None
+
+    def invalidate_frontier(self) -> None:
+        """Make the next refresh_frontier() rebuild the snapshot, which was
+        taken from the bitmap as it was before a direct edit."""
+        self._steps_since_frontier = 10 ** 9
 
     # ── metrics ───────────────────────────────────────────────────────────
     def total_unique(self) -> int:
@@ -405,7 +433,7 @@ class SpatialCoverage:
             return 0
         return int(np.count_nonzero(self.visited & ~self.testable))
 
-    def _class_counts(self) -> dict:
+    def _class_counts(self) -> dict[str, int]:
         """Visited-pixel counts per noncoverage class. Lazy: loads the map."""
         from . import reachability
         cm = reachability.load_class_map()
@@ -431,33 +459,9 @@ class SpatialCoverage:
         return sum(counts[reachability.CLASS_NAMES[c]]
                    for c in reachability.ANOMALOUS_CLASSES)
 
-    def expected_noncoverage_px(self) -> int:
-        """Noncoverage explained by documented, normal engine behaviour."""
-        if self.testable is None:
-            return 0
-        from . import reachability
-        counts = self._class_counts()
-        return sum(counts[reachability.CLASS_NAMES[c]]
-                   for c in reachability.EXPECTED_CLASSES)
-
-    def model_gap_px(self) -> int:
-        """Reached, at a legal altitude, but Method C's BFS never found it.
-
-        Not a game bug and not coverage: a shortfall in MY reachability
-        model. Reported on its own so it can be acted on honestly - a
-        non-zero value here means the denominator is slightly too small and
-        the BFS needs revisiting, not that Mario did something wrong.
-        """
-        if self.testable is None:
-            return 0
-        from . import reachability
-        counts = self._class_counts()
-        return sum(counts[reachability.CLASS_NAMES[c]]
-                   for c in reachability.MODEL_GAP_CLASSES)
-
     def remaining(self) -> int | None:
         """Testable pixels not yet covered. Exactly total - covered."""
-        if self.testable is None:
+        if self.testable_total is None:
             return None
         if self._remaining_cached is None:
             self._remaining_cached = self.testable_total - self.covered_testable()
@@ -473,7 +477,7 @@ class SpatialCoverage:
             return 0.0
         return 100.0 * self.covered_testable() / self.testable_total
 
-    def noncoverage_breakdown(self) -> dict:
+    def noncoverage_breakdown(self) -> dict[str, Any]:
         """The full split of out-of-mask pixels by cause.
 
         Three groups, and the distinction between them is the whole point:
@@ -481,18 +485,20 @@ class SpatialCoverage:
           expected   proven-normal engine behaviour. NOT glitch evidence, and
                      must never be reported as such.
           model_gap  reached at a legal altitude the BFS did not find. A
-                     shortfall in the reachability model, not in the game.
+                     shortfall in the reachability model, not in the game:
+                     non-zero means the denominator is slightly too small and
+                     the BFS needs revisiting, not that Mario did anything wrong.
           anomalous  genuinely impossible. This, and only this, is what the
                      glitch system should act on.
         """
         if self.testable is None:
             return {}
-        from . import reachability as R
+        from . import reachability as reach
         counts = self._class_counts()
-        group = {g: {R.CLASS_NAMES[c]: counts[R.CLASS_NAMES[c]] for c in cs}
-                 for g, cs in (('expected', R.EXPECTED_CLASSES),
-                               ('model_gap', R.MODEL_GAP_CLASSES),
-                               ('anomalous', R.ANOMALOUS_CLASSES))}
+        group = {g: {reach.CLASS_NAMES[c]: counts[reach.CLASS_NAMES[c]] for c in cs}
+                 for g, cs in (('expected', reach.EXPECTED_CLASSES),
+                               ('model_gap', reach.MODEL_GAP_CLASSES),
+                               ('anomalous', reach.ANOMALOUS_CLASSES))}
         out = {'total': self.noncoverage_px(), **group}
         for g in ('expected', 'model_gap', 'anomalous'):
             out[g + '_total'] = sum(group[g].values())
@@ -504,7 +510,7 @@ class SpatialCoverage:
         These are the exact failures that let an impossible denominator ship
         last time, so they are checked rather than trusted.
         """
-        if self.testable is None:
+        if self.testable_total is None:
             return
         covered = self.covered_testable()
         if covered > self.testable_total:
@@ -534,7 +540,7 @@ class SpatialCoverage:
                 f"bitmap")
 
     # ── frontier ──────────────────────────────────────────────────────────
-    def refresh_frontier(self, viewport_x=0, force=False):
+    def refresh_frontier(self, viewport_x: int = 0, force: bool = False) -> None:
         """Rebuilds the coarse frontier snapshot.
 
         Cells are 40x40 and a cell qualifies if it holds any reachable pixel
@@ -553,7 +559,7 @@ class SpatialCoverage:
         self.frontier_version += 1
         self._frontier_cells = self._frontier_centres(viewport_x)
 
-    def _frontier_centres(self, viewport_x):
+    def _frontier_centres(self, viewport_x: int) -> np.ndarray:
         """World-space centres of unexplored testable cells ahead of the camera.
 
         Computed fresh from the live bitmap every call. refresh_frontier()
@@ -578,7 +584,7 @@ class SpatialCoverage:
         return np.stack([world_cx[ahead], world_cy[ahead]],
                         axis=1).astype(np.int64)
 
-    def frontier_query(self, viewport_x, points):
+    def frontier_query(self, viewport_x: int, points: Any) -> tuple[int, np.ndarray]:
         """(cells ahead of the camera, nearest-cell distance per point).
 
         READ-ONLY, and deliberately independent of the PBRS snapshot. That
@@ -600,7 +606,7 @@ class SpatialCoverage:
         d = cells[None, :, :].astype(np.float64) - pts[:, None, :]
         return int(cells.shape[0]), np.sqrt((d ** 2).sum(axis=2)).min(axis=1)
 
-    def phi(self, x, y) -> float:
+    def phi(self, x: float, y: float) -> float:
         """Potential for frontier shaping: -min(dist, cap) / cap.
 
         Ng/Harada/Russell potential-based shaping. Returns 0 when no reachable
@@ -681,7 +687,7 @@ class SpatialCoverage:
         return (config.NOVELTY_WEIGHT * self.novelty_mult) * self.novelty_shape(n_new)
 
     # ── persistence ───────────────────────────────────────────────────────
-    def state_dict(self, model_timesteps=0) -> dict:
+    def state_dict(self, model_timesteps: int = 0) -> dict[str, Any]:
         d = {
             'visited_packed': np.packbits(self.visited),
             'total_covered': np.int64(self.total_unique()),
@@ -706,7 +712,7 @@ class SpatialCoverage:
             d['visit_counts'] = self.visit_count
         return d
 
-    def save(self, path, model_timesteps=0):
+    def save(self, path: str, model_timesteps: int = 0) -> None:
         """Writes atomically.
 
         A half-written coverage file sitting next to a good model zip is the
@@ -718,7 +724,7 @@ class SpatialCoverage:
         np.savez_compressed(tmp, **self.state_dict(model_timesteps))
         os.replace(tmp + '.npz', path)
 
-    def load_state_dict(self, d: dict) -> None:
+    def load_state_dict(self, d: Any) -> None:
         found = int(d['format_version'])
         if found != config.COVERAGE_FORMAT_VERSION:
             raise CoverageFormatMismatch(
@@ -752,7 +758,7 @@ class SpatialCoverage:
         self.episode_new_history = [float(v) for v in d['episode_new_history']]
         self._remaining_cached = None
 
-    def load(self, path, model=None, allow_mismatch=False):
+    def load(self, path: str, model: Any = None, allow_mismatch: bool = False) -> SpatialCoverage:
         """Loads coverage, refusing anything that does not match the model.
 
         A coverage file paired with the wrong checkpoint silently corrupts
@@ -783,7 +789,7 @@ class SpatialCoverage:
                       'model_timesteps', 'config_hash', 'oob_events',
                       'episode_new_history')
 
-    def load_verified(self, path, expected_timesteps):
+    def load_verified(self, path: str, expected_timesteps: int) -> SpatialCoverage:
         """Campaign resume: load(), plus every check the cumulative count
         depends on. Refuses - it never repairs, and never falls back to an
         empty map - because a silently reset or mis-scaled map looks exactly
@@ -858,7 +864,7 @@ class SpatialCoverage:
 
 
 # ── construction helpers ──────────────────────────────────────────────────
-def load_testable():
+def load_testable() -> np.ndarray | None:
     """The TESTABLE mask from exploration_data/, or None if not built yet.
 
     Returns None rather than raising so the dashboard and the reward wrapper
@@ -872,16 +878,18 @@ def load_testable():
         _solid, testable, _meta = reachability.load_masks()
     except (FileNotFoundError, reachability.ReachabilityMismatch):
         return None
-    return testable
+    return np.asarray(testable, dtype=bool)
 
 
-def open_shared(shm_names, testable_mask=None, create=False):
+def open_shared(shm_names: dict[str, str], testable_mask: np.ndarray | None = None,
+                create: bool = False) -> SpatialCoverage:
     """Attach (or, in the parent, create) a shared-memory SpatialCoverage."""
     return SpatialCoverage(testable_mask=testable_mask,
                            shm_names=shm_names, create_shared=create)
 
 
-def create_shared(testable_mask=None, tag=None):
+def create_shared(testable_mask: np.ndarray | None = None,
+                  tag: str | None = None) -> tuple[SpatialCoverage, dict[str, str]]:
     """PARENT ONLY: allocate the shared blocks before SubprocVecEnv starts.
 
     Returns (coverage, shm_names). Hand `shm_names` to the workers - it is

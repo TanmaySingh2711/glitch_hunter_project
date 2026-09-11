@@ -14,42 +14,41 @@ states recorded against a different denominator cannot silently load.
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
-
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from common.cli import prepare_tool
+
+ROOT = prepare_tool()
+
 from exploration import config, reachability
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), "exploration", "config.py")
+CONFIG_PATH = os.path.join(ROOT, "exploration", "config.py")
 
 
-def write_config(stats, fingerprint):
+def write_config(stats: dict[str, Any], fingerprint: str) -> None:
     """Records the adopted denominator and its provenance in config.py."""
     with open(CONFIG_PATH, encoding="utf-8") as fh:
         src = fh.read()
     block = "\n".join([
         "# ─── ADOPTED BY tools/build_reachability.py ───",
-        f"#   world raster        = {stats['world_raster_px']:,}"
-        f"   (9087 x 600, informational only - NEVER a denominator)",
-        f"#   solid px            = {stats['solid_px']:,}"
-        f"   ({stats['n_solid_rects']} collider rects)",
+        (f"#   world raster        = {stats['world_raster_px']:,}"
+        f"   (9087 x 600, informational only - NEVER a denominator)"),
+        (f"#   solid px            = {stats['solid_px']:,}"
+        f"   ({stats['n_solid_rects']} collider rects)"),
         f"#   valid anchors       = {stats['valid_anchors']:,}",
         f"#   standable anchors   = {stats['standable_anchors']:,}",
         "#",
-        f"#   Method A (geometric)  = {stats['method_a_px']:,}"
-        f"   informational; no gravity, no jump limit",
+        (f"#   Method A (geometric)  = {stats['method_a_px']:,}"
+        f"   informational; no gravity, no jump limit"),
         f"#   Method B (jump env.)  = {stats['method_b_px']:,}",
-        f"#   Method C (BFS)        = {stats['method_c_px']:,}"
-        f"   <- ADOPTED",
+        (f"#   Method C (BFS)        = {stats['method_c_px']:,}"
+        f"   <- ADOPTED"),
         f"#   B vs C delta          = {stats['bc_delta_pct']:.2f}%",
         "#",
         "# Coverage percentage is ALWAYS covered_testable / TESTABLE_TOTAL.",
@@ -64,15 +63,19 @@ def write_config(stats, fingerprint):
     # FIRST. Doing it afterwards deleted the very lines the new block had
     # just written, because those assignments live inside the block.
     src = re.sub(r"^# ─── ADOPTED BY tools/build_reachability\.py "
-                 r"───\n(?:#.*\n)*", "", src, flags=re.M)
-    src = re.sub(r"^TESTABLE_FINGERPRINT = .*\n", "", src, flags=re.M)
-    src = re.sub(r"^ADOPTED_METHOD = .*\n", "", src, flags=re.M)
-    src = re.sub(r"^TESTABLE_TOTAL = .*$", block, src, count=1, flags=re.M)
+                 r"───\n(?:#.*\n)*", "", src, flags=re.MULTILINE)
+    src = re.sub(r"^TESTABLE_FINGERPRINT = .*\n", "", src, flags=re.MULTILINE)
+    src = re.sub(r"^ADOPTED_METHOD = .*\n", "", src, flags=re.MULTILINE)
+    src = re.sub(r"^TESTABLE_TOTAL = .*$", block, src, count=1, flags=re.MULTILINE)
     with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
         fh.write(src)
 
 
-def main():
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    ap.add_argument("--dry-run", action="store_true",
+                    help="build and reconcile the mask, print the result, write nothing")
+    args = ap.parse_args(argv)
     from custom_mario_env import CustomMarioEnv
 
     print("Building the testable-pixel mask from live level geometry...\n")
@@ -126,6 +129,9 @@ def main():
               f"  =  {stats['testable_total']:,} px")
         print("=" * 70)
 
+        if args.dry_run:
+            print("\n--dry-run: nothing written.")
+            return
         reachability.save_masks(config.REACHABLE_MASK_PATH, solid, testable,
                                 class_map, stats)
         _s, t, meta = reachability.load_masks()

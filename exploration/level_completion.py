@@ -39,16 +39,25 @@ from __future__ import annotations
 
 import datetime
 import glob
-import hashlib
 import json
 import math
 import os
-import stat
 from collections import deque
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from common.fileio import make_read_only, sha256_of, write_json_atomic
+
 from . import config
+
+if TYPE_CHECKING:
+    from .coverage import SpatialCoverage
+
+__all__ = ['LevelAlreadyCompleted', 'PlateauTracker', 'committed_snapshots',
+           'final_level1_brain', 'is_level_complete', 'pct_text', 'plateau_report',
+           'provenance', 'remaining_regions', 'sha256_of', 'status',
+           'write_completion_snapshot', 'write_json_atomic', 'write_remaining_map']
 
 SNAPSHOT_KIND = "glitch_hunter_level1_completion"
 SNAPSHOT_DIRNAME = "level1_complete"
@@ -94,10 +103,11 @@ def pct_text(covered: int, total: int = config.TESTABLE_TOTAL, places: int = 4) 
     return f"{truncated:.{places}f}%"
 
 
-def status(coverage, timesteps: int, session_start_covered: int) -> dict:
+def status(coverage: SpatialCoverage, timesteps: int,
+           session_start_covered: int) -> dict[str, Any]:
     """Every number the trainer reports, from one exact count."""
     covered = coverage.covered_testable()
-    total = coverage.testable_total
+    total = int(coverage.testable_total or 0)
     return {
         'global_timestep': int(timesteps),
         'testable_total': int(total),
@@ -112,12 +122,16 @@ def status(coverage, timesteps: int, session_start_covered: int) -> dict:
 # ══════════════════════════════════════════════════════════════════════════
 # BELOW 100%: WHAT IS LEFT, WHERE, AND WHETHER IT IS MOVING
 # ══════════════════════════════════════════════════════════════════════════
-def remaining_mask(coverage) -> np.ndarray:
+def remaining_mask(coverage: SpatialCoverage) -> np.ndarray:
     """Testable pixels not yet visited, on the padded grid."""
-    return coverage.testable & (coverage.visited == 0)
+    if coverage.testable is None:
+        raise ValueError("remaining pixels need the testable mask")
+    rem: np.ndarray = coverage.testable & (coverage.visited == 0)
+    return rem
 
 
-def remaining_regions(coverage, top: int = 10, cell: int = config.FRONTIER_CELL) -> dict:
+def remaining_regions(coverage: SpatialCoverage, top: int = 10,
+                      cell: int = config.FRONTIER_CELL) -> dict[str, Any]:
     """Clusters of the remaining pixels, cheaply.
 
     Pixels are binned into cell x cell blocks (the frontier's 40 px), and
@@ -136,7 +150,7 @@ def remaining_regions(coverage, top: int = 10, cell: int = config.FRONTIER_CELL)
     counts = padded.reshape(ch, cell, cw, cell).sum(axis=(1, 3))
 
     label = np.zeros((ch, cw), dtype=np.int32)
-    regions = []
+    regions: list[dict[str, Any]] = []
     for sy, sx in zip(*np.nonzero(counts), strict=True):
         if label[sy, sx]:
             continue
@@ -169,7 +183,7 @@ def remaining_regions(coverage, top: int = 10, cell: int = config.FRONTIER_CELL)
             'world_bbox': [int(bx0 + coverage.x0), int(by0 + coverage.y0),
                            int(bx1 + coverage.x0), int(by1 + coverage.y0)],
         })
-    regions.sort(key=lambda r: -r['pixels'])
+    regions.sort(key=lambda r: -int(r['pixels']))
     return {'remaining_px': total, 'regions': len(regions), 'largest': regions[:top]}
 
 
@@ -181,13 +195,13 @@ class PlateauTracker:
     uses, so "stalled" means one thing in this project, not two.
     """
 
-    def __init__(self, window: int = config.STAGNATION_WINDOW):
+    def __init__(self, window: int = config.STAGNATION_WINDOW) -> None:
         self.window = window
-        self.gains = deque(maxlen=window)
-        self.last_covered = None
-        self.last_gain_timestep = None
+        self.gains: deque[int] = deque(maxlen=window)
+        self.last_covered: int | None = None
+        self.last_gain_timestep: int | None = None
 
-    def update(self, timesteps: int, covered: int) -> dict:
+    def update(self, timesteps: int, covered: int) -> dict[str, Any]:
         if self.last_covered is not None:
             gain = covered - self.last_covered
             self.gains.append(gain)
@@ -197,22 +211,26 @@ class PlateauTracker:
             self.last_gain_timestep = timesteps
         self.last_covered = covered
         stalled = len(self.gains) == self.window and not any(self.gains)
+        last_gain = timesteps if self.last_gain_timestep is None else self.last_gain_timestep
         return {
             'stalled': stalled,
             'recent_window_gains_px': list(self.gains),
-            'steps_since_last_gain': int(timesteps - self.last_gain_timestep),
+            'steps_since_last_gain': int(timesteps - last_gain),
         }
 
 
-def plateau_report(coverage, timesteps: int, tracker_state: dict, top: int = 10) -> dict:
+def plateau_report(coverage: SpatialCoverage, timesteps: int, tracker_state: dict[str, Any],
+                   top: int = 10) -> dict[str, Any]:
     """What a remaining-pixel audit needs; written by the trainer late in a campaign."""
+    total = int(coverage.testable_total or 0)
+    covered = coverage.covered_testable()        # one full-grid count, used three ways
     return {
         'kind': 'glitch_hunter_level1_remaining_audit',
         'global_timestep': int(timesteps),
-        'testable_total': int(coverage.testable_total),
-        'covered_testable_px': int(coverage.covered_testable()),
-        'remaining_testable_px': int(coverage.remaining()),
-        'coverage_pct_text': pct_text(coverage.covered_testable(), coverage.testable_total),
+        'testable_total': total,
+        'covered_testable_px': covered,
+        'remaining_testable_px': total - covered,
+        'coverage_pct_text': pct_text(covered, total),
         'level1_complete': False,
         'note': ("Remaining pixels are reported, never removed or reclassified. "
                  "The exact set is testable & ~visited from the latest saved coverage."),
@@ -223,7 +241,7 @@ def plateau_report(coverage, timesteps: int, tracker_state: dict, top: int = 10)
     }
 
 
-def remaining_map_image(coverage, scale: int = 4) -> np.ndarray:
+def remaining_map_image(coverage: SpatialCoverage, scale: int = 4) -> np.ndarray:
     """The whole padded grid as a BGR picture, one pixel per scale x scale
     block: RED where any testable pixel is still unvisited, grey where the
     testable pixels are all covered, black outside the testable mask.
@@ -232,20 +250,23 @@ def remaining_map_image(coverage, scale: int = 4) -> np.ndarray:
     island - a single ledge nobody reached, or a sliver the reachability mask
     may have got wrong - is still visible at a glance."""
     rem = remaining_mask(coverage)
+    testable = coverage.testable
+    assert testable is not None                  # remaining_mask() refuses otherwise
     h, w = rem.shape
     ph, pw = -h % scale, -w % scale
 
-    def blocks(a):
+    def blocks(a: np.ndarray) -> np.ndarray:
         a = np.pad(a, ((0, ph), (0, pw)))
         return a.reshape(a.shape[0] // scale, scale, a.shape[1] // scale, scale).any(axis=(1, 3))
 
     img = np.zeros(((h + ph) // scale, (w + pw) // scale, 3), dtype=np.uint8)
-    img[blocks(coverage.testable)] = (90, 90, 90)
+    img[blocks(testable)] = (90, 90, 90)
     img[blocks(rem)] = (40, 40, 255)
     return img
 
 
-def write_remaining_map(coverage, png_path: str, regions: dict | None = None,
+def write_remaining_map(coverage: SpatialCoverage, png_path: str,
+                        regions: dict[str, Any] | None = None,
                         scale: int = 4) -> str:
     """Writes remaining_map_image() with the largest remaining regions boxed
     in yellow and numbered as in `regions` (remaining_regions()). Atomic."""
@@ -269,10 +290,11 @@ def write_remaining_map(coverage, png_path: str, regions: dict | None = None,
 # ══════════════════════════════════════════════════════════════════════════
 # PROVENANCE: BOOTSTRAP-KNOWN vs QA-DISCOVERED
 # ══════════════════════════════════════════════════════════════════════════
-_BOOTSTRAP_BITS = {}
+BootstrapBits = tuple[np.ndarray, dict[str, Any]]
+_BOOTSTRAP_BITS: dict[tuple[str, float, tuple[int, ...]], BootstrapBits] = {}
 
 
-def _bootstrap_bits(path: str, testable: np.ndarray):
+def _bootstrap_bits(path: str, testable: np.ndarray) -> tuple[BootstrapBits | None, str | None]:
     """The bootstrap's covered testable pixels (bool, padded grid) and the
     file's facts, or (None, reason). Cached per file version."""
     if not os.path.exists(path):
@@ -292,7 +314,8 @@ def _bootstrap_bits(path: str, testable: np.ndarray):
     return _BOOTSTRAP_BITS[key], None
 
 
-def provenance(coverage, bootstrap_path: str = config.BOOTSTRAP_COVERAGE) -> dict:
+def provenance(coverage: SpatialCoverage,
+               bootstrap_path: str = config.BOOTSTRAP_COVERAGE) -> dict[str, Any]:
     """Splits the covered testable pixels by where they came from.
 
     Every covered pixel counts toward completion the same way; this only
@@ -305,6 +328,8 @@ def provenance(coverage, bootstrap_path: str = config.BOOTSTRAP_COVERAGE) -> dic
     bootstrap_px_still_covered should always equal bootstrap_known: a
     covered pixel is never uncovered within a campaign.
     """
+    if coverage.testable is None:
+        return {'available': False, 'reason': 'no testable mask'}
     found, reason = _bootstrap_bits(bootstrap_path, coverage.testable)
     if found is None:
         return {'available': False, 'reason': reason}
@@ -323,64 +348,50 @@ def provenance(coverage, bootstrap_path: str = config.BOOTSTRAP_COVERAGE) -> dic
     }
 
 
-def write_json_atomic(obj: dict, path: str) -> None:
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as fh:
-        json.dump(obj, fh, indent=1)
-    os.replace(tmp, path)
-
-
 # ══════════════════════════════════════════════════════════════════════════
 # AT 100%: THE IMMUTABLE SNAPSHOT
 # ══════════════════════════════════════════════════════════════════════════
-def sha256_of(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, 'rb') as fh:
-        for block in iter(lambda: fh.read(1 << 20), b''):
-            h.update(block)
-    return h.hexdigest()
+Record = tuple[str, dict[str, Any]]
 
 
-def committed_snapshots(snapshot_dir: str) -> list:
-    """The completion proofs already in `snapshot_dir`, oldest first."""
+def _json_records(pattern: str, kind: str) -> list[Record]:
+    """(path, record) for every readable JSON file matching `pattern` whose
+    'kind' is `kind`, sorted by path. Unreadable files are skipped: a stray or
+    half-written file must not hide - or impersonate - a real record."""
     found = []
-    for p in sorted(glob.glob(os.path.join(snapshot_dir, '*.json'))):
+    for p in sorted(glob.glob(pattern)):
         try:
             with open(p, encoding='utf-8') as fh:
-                meta = json.load(fh)
+                rec = json.load(fh)
         except (OSError, ValueError):
             continue
-        if meta.get('kind') == SNAPSHOT_KIND:
-            found.append((p, meta))
+        if isinstance(rec, dict) and rec.get('kind') == kind:
+            found.append((p, rec))
     return found
 
 
-def final_level1_brain(snapshot_dir: str):
+def committed_snapshots(snapshot_dir: str) -> list[Record]:
+    """The completion proofs already in `snapshot_dir`, oldest first."""
+    return _json_records(os.path.join(snapshot_dir, '*.json'), SNAPSHOT_KIND)
+
+
+def final_level1_brain(snapshot_dir: str) -> Record | None:
     """(verification path, record) for a VERIFIED completion, else None.
 
     The final Level-1 brain is never simply the latest checkpoint, nor the
     completion snapshot on its own: only a verification record that passed
     integrity, health AND completion retention names one
     (evaluation/level1_verification.py)."""
-    for p in sorted(glob.glob(os.path.join(snapshot_dir, '*_verification.json'))):
-        try:
-            with open(p, encoding='utf-8') as fh:
-                rec = json.load(fh)
-        except (OSError, ValueError):
-            continue
-        if rec.get('kind') == VERIFICATION_KIND and rec.get('verdict') == 'VERIFIED':
+    for p, rec in _json_records(os.path.join(snapshot_dir, '*_verification.json'),
+                                VERIFICATION_KIND):
+        if rec.get('verdict') == 'VERIFIED':
             return p, rec
     return None
 
 
-def _read_only(path: str) -> None:
-    os.chmod(path, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
-
-
-def write_completion_snapshot(model, coverage, snapshot_dir: str, name_prefix: str,
-                              timesteps: int, session_start: dict,
-                              previous_check: tuple | None) -> dict:
+def write_completion_snapshot(model: Any, coverage: SpatialCoverage, snapshot_dir: str,
+                              name_prefix: str, timesteps: int, session_start: dict[str, int],
+                              previous_check: tuple[int, int] | None) -> dict[str, Any]:
     """Saves the policy, the exact coverage and the proof of completion.
 
     Called the moment completion is detected, between periodic checkpoints
@@ -389,7 +400,8 @@ def write_completion_snapshot(model, coverage, snapshot_dir: str, name_prefix: s
     and no PPO update ran in that interval (see Level1CompletionCallback).
     """
     covered = coverage.covered_testable()
-    if not is_level_complete(covered, coverage.testable_total):
+    if coverage.testable is None or not is_level_complete(covered,
+                                                          int(coverage.testable_total or 0)):
         raise ValueError(f"not complete: {covered:,} of {coverage.testable_total:,}")
     if committed_snapshots(snapshot_dir):
         raise LevelAlreadyCompleted(
@@ -407,17 +419,19 @@ def write_completion_snapshot(model, coverage, snapshot_dir: str, name_prefix: s
 
     # Read the coverage back and count it again: the proof describes the file
     # on disk, not the array in memory.
-    d = np.load(cov_path, allow_pickle=False)
     n = coverage.w * coverage.h
-    bits = np.unpackbits(d['visited_packed'])[:n].reshape(coverage.h, coverage.w)
+    with np.load(cov_path, allow_pickle=False) as d:
+        bits = np.unpackbits(d['visited_packed'])[:n].reshape(coverage.h, coverage.w)
+        written = {'config_hash': str(d['config_hash']),
+                   'model_timesteps': int(d['model_timesteps'])}
     on_disk = int(np.count_nonzero(bits.astype(bool) & coverage.testable))
     if on_disk != config.TESTABLE_TOTAL:
         raise RuntimeError(f"written coverage re-counts to {on_disk:,}, not "
                            f"{config.TESTABLE_TOTAL:,}; completion NOT committed")
 
     try:
-        noncov = {'noncoverage_px': coverage.noncoverage_px(),
-                  'anomalous_px': coverage.anomalous_px()}
+        noncov: dict[str, Any] = {'noncoverage_px': coverage.noncoverage_px(),
+                                  'anomalous_px': coverage.anomalous_px()}
     except Exception as exc:                      # the class map is diagnostic only
         noncov = {'noncoverage_px': coverage.noncoverage_px(),
                   'anomalous_px': None, 'anomalous_error': str(exc)}
@@ -428,7 +442,7 @@ def write_completion_snapshot(model, coverage, snapshot_dir: str, name_prefix: s
 
     root = os.getcwd()
 
-    def rel(p):
+    def rel(p: str) -> str:
         return os.path.relpath(os.path.abspath(p), root).replace('\\', '/')
 
     meta = {
@@ -447,9 +461,7 @@ def write_completion_snapshot(model, coverage, snapshot_dir: str, name_prefix: s
         'session': {**session_start,
                     'new_px_this_session': on_disk - int(session_start['covered_testable_px'])},
         'model': {'path': rel(zip_path), 'sha256': sha256_of(zip_path)},
-        'coverage': {'path': rel(cov_path), 'sha256': sha256_of(cov_path),
-                     'config_hash': str(d['config_hash']),
-                     'model_timesteps': int(d['model_timesteps'])},
+        'coverage': {'path': rel(cov_path), 'sha256': sha256_of(cov_path), **written},
         'reachability': {'testable_fingerprint': config.TESTABLE_FINGERPRINT,
                          'adopted_method': config.ADOPTED_METHOD},
         'provenance': origin,
@@ -462,6 +474,6 @@ def write_completion_snapshot(model, coverage, snapshot_dir: str, name_prefix: s
     with open(meta_path, 'x', encoding='utf-8') as fh:      # 'x': never over an existing proof
         json.dump(meta, fh, indent=1)
     for p in (zip_path, cov_path, meta_path):
-        _read_only(p)
+        make_read_only(p)
     meta['_paths'] = {'model': zip_path, 'coverage': cov_path, 'metadata': meta_path}
     return meta

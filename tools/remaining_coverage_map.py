@@ -17,20 +17,25 @@ Made for the end of a campaign: small isolated red islands are exactly where
 to look for an unreachable ledge or a mistake in the reachability mask. It
 only READS the coverage file; nothing is removed, reclassified or rewritten.
 """
+from __future__ import annotations
+
 import argparse
 import datetime
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.cli import prepare_tool
+
+ROOT = prepare_tool(headless=False)
 
 from exploration import config
 from exploration import coverage as coverage_mod
 from exploration import level_completion as lc
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('coverage', help='a saved coverage .npz')
     ap.add_argument('--out', default=os.path.join(ROOT, 'coverage_audits'))
@@ -48,14 +53,15 @@ def main(argv=None):
     png = lc.write_remaining_map(cov, os.path.join(args.out, f"{stem}_remaining_map.png"),
                                  regions, scale=args.scale)
     covered = cov.covered_testable()
+    total = int(cov.testable_total or 0)
     report = {
         'kind': 'glitch_hunter_level1_remaining_map',
         'source': os.path.relpath(os.path.abspath(args.coverage), ROOT).replace('\\', '/'),
         'testable_total': cov.testable_total,
         'covered_testable_px': covered,
         'remaining_testable_px': cov.remaining(),
-        'coverage_pct_text': lc.pct_text(covered, cov.testable_total),
-        'level1_complete': lc.is_level_complete(covered, cov.testable_total),
+        'coverage_pct_text': lc.pct_text(covered, total),
+        'level1_complete': lc.is_level_complete(covered, total),
         'remaining_regions': regions,
         'provenance': lc.provenance(cov),
         'map_png': os.path.relpath(png, ROOT).replace('\\', '/'),

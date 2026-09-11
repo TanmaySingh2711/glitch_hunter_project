@@ -49,47 +49,40 @@ import re
 import sys
 import time
 
-# Console output includes box-drawing characters. On Windows the
-# default console encoding is cp1252, which cannot encode them, so
-# redirecting this tool to a file would crash it AFTER the work was
-# done but BEFORE the result was written.
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from common.cli import prepare_tool
+
+ROOT = prepare_tool()
+
+from collections.abc import Callable
+from typing import Any
+
+import gymnasium as gym
 import numpy as np
 
+from agent_logic import GlitchHunterWrapper
 from exploration import config
 from exploration.coverage import SpatialCoverage, load_testable
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), "exploration", "config.py")
+CONFIG_PATH = os.path.join(ROOT, "exploration", "config.py")
 
 
-def build_env(mode, coverage):
-    from gymnasium.wrappers import (FrameStackObservation, GrayscaleObservation,
-                                    MaxAndSkipObservation, ResizeObservation,
-                                    TimeLimit)
+def build_env(mode: str, coverage: SpatialCoverage | None
+              ) -> tuple[gym.Env[Any, Any], GlitchHunterWrapper]:
+    from gymnasium.wrappers import TimeLimit
 
-    from agent_logic import GlitchHunterWrapper
-    from custom_mario_env import CustomMarioEnv
+    from custom_mario_env import CustomMarioEnv, wrap_observation
 
-    env = CustomMarioEnv()
-    inner = GlitchHunterWrapper(env, reward_mode=mode, coverage=coverage,
+    inner = GlitchHunterWrapper(CustomMarioEnv(), reward_mode=mode, coverage=coverage,
                                 attach_coverage=coverage is not None)
-    env = MaxAndSkipObservation(inner, skip=4)
-    env = GrayscaleObservation(env, keep_dim=False)
-    env = ResizeObservation(env, (84, 84))
-    env = FrameStackObservation(env, 4)
-    env = TimeLimit(env, max_episode_steps=4000)
+    env: gym.Env[Any, Any] = TimeLimit(wrap_observation(inner), max_episode_steps=config.LEGACY_EPISODE_MAX_STEPS)
     return env, inner
 
 
-def run_arm(env, inner, model, episodes, restore=None, label=""):
+def run_arm(env: gym.Env[Any, Any], inner: GlitchHunterWrapper, model: Any, episodes: int,
+            restore: Callable[[], None] | None = None,
+            label: str = "") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Returns (returns, novelty_shapes, lengths) per episode."""
     returns, shapes, lengths = [], [], []
     for ep in range(episodes):
@@ -100,7 +93,7 @@ def run_arm(env, inner, model, episodes, restore=None, label=""):
         while True:
             action, _ = model.predict(obs, deterministic=False)
             obs, r, terminated, truncated, _info = env.step(int(action))
-            total += r
+            total += float(r)
             steps += 1
             if terminated or truncated:
                 break
@@ -112,7 +105,7 @@ def run_arm(env, inner, model, episodes, restore=None, label=""):
               flush=True)
     return np.array(returns), np.array(shapes), np.array(lengths)
 
-def write_weight(value, stats):
+def write_weight(value: float, stats: dict[str, Any]) -> None:
     """Rewrites NOVELTY_WEIGHT in exploration/config.py, recording the evidence.
 
     The measured numbers go in beside the value. A tuned constant with no
@@ -132,22 +125,22 @@ def write_weight(value, stats):
         "# ─── SOLVED BY tools/calibrate_reward.py ───",
         f"# Measured {stats['stamp']} against the {stats['model_steps']:,}-step baseline,",
         f"# {stats['episodes']} episodes per arm, QA episodes starting from the bootstrap state.",
-        f"#   legacy median return = {stats['legacy_median']:.2f}   "
-        f"(mean {stats['legacy_mean']:.2f}; the distribution is",
+        (f"#   legacy median return = {stats['legacy_median']:.2f}   "
+        f"(mean {stats['legacy_mean']:.2f}; the distribution is"),
         "#                          bimodal, so the median is the target, not the mean)",
         f"#   QA non-novelty terms = {stats['other_mean']:+.2f} per episode",
         f"#   QA novelty shape     = {stats['shape_mean']:.2f} per episode (unweighted)",
-        f"#   solved               = ({stats['legacy_median']:.2f} - "
-        f"{stats['other_mean']:.2f}) / {stats['shape_mean']:.2f} = {stats['raw']:.4f}",
-        f"#   safety ceiling       = {stats['w_max']:.4f}   "
-        f"(novelty alone must never reach half the reward clip)",
+        (f"#   solved               = ({stats['legacy_median']:.2f} - "
+        f"{stats['other_mean']:.2f}) / {stats['shape_mean']:.2f} = {stats['raw']:.4f}"),
+        (f"#   safety ceiling       = {stats['w_max']:.4f}   "
+        f"(novelty alone must never reach half the reward clip)"),
         f"#   ADOPTED              = {value:.4f}",
         "#",
-        f"# The solved value is {stats['raw'] / stats['w_max']:.0f}x the ceiling, so the "
-        f"ceiling is what binds.",
+        (f"# The solved value is {stats['raw'] / stats['w_max']:.0f}x the ceiling, so the "
+        f"ceiling is what binds."),
         "# Scale matching is NOT achievable here: the legacy return was dominated by the",
-        f"# x-monotone terms this retrofit deletes, so QA returns land at "
-        f"{stats['ratio']:.3f}x the",
+        (f"# x-monotone terms this retrofit deletes, so QA returns land at "
+        f"{stats['ratio']:.3f}x the"),
         "# legacy median and no SAFE weight closes that gap. The residual mismatch is",
         "# handled by resetting the value head on the first QA run (train_agent.py",
         "# RESET_VALUE_HEAD), not by forcing this weight upward.",
@@ -159,14 +152,14 @@ def write_weight(value, stats):
         "# PLACEHOLDER until calibration runs; calibrate_reward.py rewrites it.\n",
         "")
     src = re.sub(r"^# ─── SOLVED BY tools/calibrate_reward\.py "
-                 r"───\n(?:#.*\n)*", "", src, flags=re.M)
-    src = re.sub(r"^NOVELTY_WEIGHT = .*$", block, src, count=1, flags=re.M)
+                 r"───\n(?:#.*\n)*", "", src, flags=re.MULTILINE)
+    src = re.sub(r"^NOVELTY_WEIGHT = .*$", block, src, count=1, flags=re.MULTILINE)
 
     with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
         fh.write(src)
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--episodes", type=int, default=30,
                     help="30 rather than 20: the legacy return distribution "
@@ -211,9 +204,9 @@ def main():
     baseline_bits = coverage.visited.copy()
     print(f"  bootstrap coverage loaded: {coverage.total_unique():,} px\n")
 
-    def restore():
+    def restore() -> None:
         coverage.visited[:] = baseline_bits
-        coverage._remaining_cached = None
+        coverage.invalidate_remaining()
         coverage.episode_new_history = []
 
     env_b, inner_b = build_env("qa_exploration", coverage)
@@ -224,22 +217,22 @@ def main():
     # ── SOLVE ─────────────────────────────────────────────────────────────
     w0 = config.NOVELTY_WEIGHT
     other = qa_ret - w0 * qa_shape          # everything that is not novelty
-    L_mean = float(np.mean(legacy_ret))
-    L = float(np.median(legacy_ret))        # the target - see below
-    R = float(np.mean(other))
-    S = float(np.mean(qa_shape))
+    legacy_mean = float(np.mean(legacy_ret))
+    legacy_median = float(np.median(legacy_ret))        # the target - see below
+    other_mean = float(np.mean(other))
+    shape_mean = float(np.mean(qa_shape))
 
     print("\n" + "=" * 72)
     print("CALIBRATION")
     print("=" * 72)
-    print(f"  legacy return      mean {L_mean:>10.2f}   median {L:>10.2f}   "
+    print(f"  legacy return      mean {legacy_mean:>10.2f}   median {legacy_median:>10.2f}   "
           f"std {float(np.std(legacy_ret)):>8.2f}")
     print(f"  legacy length      mean {float(np.mean(legacy_len)):>10.1f} steps")
     print(f"  QA return @W={w0:<5.3f} mean {float(np.mean(qa_ret)):>10.2f}   "
           f"median {float(np.median(qa_ret)):>10.2f}")
     print(f"  QA length          mean {float(np.mean(qa_len)):>10.1f} steps")
-    print(f"  QA novelty shape   mean {S:>10.2f} per episode (unweighted)")
-    print(f"  QA other terms     mean {R:>10.2f} per episode")
+    print(f"  QA novelty shape   mean {shape_mean:>10.2f} per episode (unweighted)")
+    print(f"  QA other terms     mean {other_mean:>10.2f} per episode")
 
     # ─── WHY THE MEDIAN, NOT THE MEAN ───
     # The legacy return distribution is bimodal, not noisy: most episodes land
@@ -248,12 +241,12 @@ def main():
     # rewards, landing in the thousands. The mean therefore describes an
     # episode that essentially never happens, and calibrating to it would size
     # the novelty weight for the rare case.
-    completions = int(np.sum(legacy_ret > 2 * L))
+    completions = int(np.sum(legacy_ret > 2 * legacy_median))
     print(f"\n  legacy distribution is bimodal: {completions}/{len(legacy_ret)} "
           f"episodes above 2x the median")
-    print(f"  -> targeting the MEDIAN ({L:.2f}), not the mean ({L_mean:.2f})")
+    print(f"  -> targeting the MEDIAN ({legacy_median:.2f}), not the mean ({legacy_mean:.2f})")
 
-    if S <= 1e-6:
+    if shape_mean <= 1e-6:
         raise SystemExit(
             "\nThe QA arm found essentially no new ground (novelty shape ~ 0), "
             "so the weight is not solvable from this data.\n"
@@ -262,7 +255,7 @@ def main():
             "accept that novelty will be rare at first and set NOVELTY_WEIGHT "
             "by hand - but do not train without understanding which.")
 
-    raw = (L - R) / S
+    raw = (legacy_median - other_mean) / shape_mean
 
     # ─── THE SAFETY CEILING IS DERIVED, NOT PICKED ───
     # Novelty alone must never be able to saturate the backstop clamp, or the
@@ -273,10 +266,10 @@ def main():
                                            * config.NOVELTY_MULT_MAX)
     lo = 0.05
     value = float(min(w_max, max(lo, raw)))
-    predicted = value * S + R
-    ratio = predicted / L if L != 0 else float('inf')
+    predicted = value * shape_mean + other_mean
+    ratio = predicted / legacy_median if legacy_median != 0 else float('inf')
 
-    print(f"\n  solved  NOVELTY_WEIGHT = ({L:.2f} - {R:.2f}) / {S:.2f} "
+    print(f"\n  solved  NOVELTY_WEIGHT = ({legacy_median:.2f} - {other_mean:.2f}) / {shape_mean:.2f} "
           f"= {raw:.4f}")
     print(f"  safety ceiling         = 0.5 * clip {config.QA_REWARD_CLIP} / "
           f"(cap {config.NOVELTY_CAP} * mult {config.NOVELTY_MULT_MAX}) "
@@ -316,18 +309,18 @@ def main():
     print("  PER-EPISODE BUDGET (mean episode = "
           f"{ep_substeps:,.0f} substeps)")
     print("-" * 72)
-    print(f"    novelty                  {value * S:>+9.2f}")
-    print(f"    everything else          {R:>+9.2f}")
+    print(f"    novelty                  {value * shape_mean:>+9.2f}")
+    print(f"    everything else          {other_mean:>+9.2f}")
     print(f"    drought ceiling          {-config.DROUGHT_EPISODE_CAP:>+9.2f}"
           f"   (hard cap, cannot exceed)")
     print(f"    frontier total range     {config.FRONTIER_WEIGHT:>+9.2f}"
           f"   (whole map, cannot exceed)")
     print(f"    => QA episode            {predicted:>+9.2f}")
-    print(f"    vs legacy median         {L:>+9.2f}")
+    print(f"    vs legacy median         {legacy_median:>+9.2f}")
 
-    novelty_share = (value * S) / max(1e-9, value * S + abs(R))
+    novelty_share = (value * shape_mean) / max(1e-9, value * shape_mean + abs(other_mean))
     print(f"\n  novelty share of episode magnitude: {100 * novelty_share:.0f}%")
-    if value * S < abs(R):
+    if value * shape_mean < abs(other_mean):
         print("  [NOTE] Novelty is not yet the largest single contributor. "
               "That is EXPECTED at the start: the bootstrap already covers "
               "this policy's habitual routes, so there is little new ground "
@@ -364,8 +357,8 @@ def main():
         'stamp': time.strftime("%Y-%m-%d"),
         'model_steps': model.num_timesteps,
         'episodes': args.episodes,
-        'legacy_mean': L_mean, 'legacy_median': L,
-        'other_mean': R, 'shape_mean': S, 'raw': raw, 'ratio': ratio,
+        'legacy_mean': legacy_mean, 'legacy_median': legacy_median,
+        'other_mean': other_mean, 'shape_mean': shape_mean, 'raw': raw, 'ratio': ratio,
         'w_max': w_max,
     }
     if args.dry_run:

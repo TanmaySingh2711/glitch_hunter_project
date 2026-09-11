@@ -292,7 +292,7 @@ def test_idling_into_T2_earns_no_completion(env, patch_step):
     rig = Rig(env, patch_step, FULL)
     for i in range(400):                       # an earlier episode covered this spot
         rig.r(700 + (20 if (i // 30) % 2 else 0))
-    del rig.w.lifecycle._check_transition      # real transitions from here on
+    rig.w.lifecycle.auto_transition = True     # real transitions from here on
     rig.w.reset()
     while not rig.w.lifecycle.is_complete:
         rig.r(700 + (20 if (rig.w.ep_substeps // 30) % 2 else 0))
@@ -527,7 +527,7 @@ def test_legacy_ignores_every_phase_constant(env, patch_step, monkeypatch):
 # ══════════════════════════════════════════════════════════════════════════
 # The 4A values are rejected now, each for the reason calibration found
 # ══════════════════════════════════════════════════════════════════════════
-@pytest.mark.parametrize("name,value,why", [
+@pytest.mark.parametrize(('name', 'value', 'why'), [
     ("COMPLETE_PROGRESS_PER_PX", 0.03, "more than the measured mean exploration"),
     ("COMPLETE_FLAG_REWARD", 10.0, "clip"),
     ("COMPLETE_TIME_PENALTY", 0.005, "quarter of walking progress"),

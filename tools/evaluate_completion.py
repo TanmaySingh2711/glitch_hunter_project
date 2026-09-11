@@ -19,13 +19,19 @@ Inference only. Results go to evaluation/results/; nothing under
 checkpoints/, checkpoints_qa/, backup_6M/ or exploration_data/ is written.
 See evaluation/completion.py for the protocol and why it is what it is.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import sys
+from typing import Any
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.cli import prepare_tool
+
+ROOT = prepare_tool(headless=False)
 
 from evaluation import completion as ce
 from exploration import config
@@ -36,7 +42,7 @@ Z_WARNING = 2.0
 Z_REGRESSED = 4.0
 
 
-def _report(result, comparison=None):
+def _report(result: dict[str, Any], comparison: dict[str, Any] | None = None) -> None:
     s = result['summary']
     ck = result['checkpoint']
     print(f"\ncheckpoint  {ck['path']}  ({ck['num_timesteps']:,} steps, sha256 {ck['sha256'][:12]})")
@@ -61,7 +67,7 @@ def _report(result, comparison=None):
         print(f"VERDICT     {c['verdict']}" + (f"  - {'; '.join(c['reasons'])}" if c['reasons'] else ""))
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('checkpoint', nargs='?', help='checkpoint .zip to evaluate')
     ap.add_argument('--baseline', default=ce.BASELINE_PATH)

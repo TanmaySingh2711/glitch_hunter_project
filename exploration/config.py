@@ -477,7 +477,7 @@ COMPLETE_PROGRESS_PER_PX = 0.0015
 COMPLETE_NOVELTY_MULT = 0.003
 
 
-def assert_phase_reward_balance():
+def assert_phase_reward_balance() -> None:
     """The inequalities that make the phase gating mean what it says.
 
     Called at wrapper construction next to assert_reward_balance(), so a
@@ -557,7 +557,7 @@ def assert_phase_reward_balance():
         raise ValueError("phase reward balance violated: " + "; ".join(problems))
 
 
-def assert_reward_balance():
+def assert_reward_balance() -> None:
     """Guards the ordering the whole design depends on.
 
     Called at wrapper construction, so a bad retune fails at the start of a
@@ -828,18 +828,18 @@ NORMAL_LR = 1.0e-4
 STAGNATION_WINDOW = 3
 STAGNATION_RATE_THRESHOLD = 500     # new px per 10k steps
 STAGNATION_REMAINING_MIN = 100_000
-ENT_COEF_BASE = 0.03
-ENT_COEF_MAX = 0.06
+ENT_COEF_BASE = 0.03                # a fresh model's ent_coef (train_agent.build_model)
+ENT_COEF_MAX = 0.06                 # StagnationCallback never escalates past this
 
 # ═══════════════════════════════════════════════════════════════════════
 # PATHS
 # ═══════════════════════════════════════════════════════════════════════
 EXPLORATION_DATA_DIR = "exploration_data"
-REACHABLE_MASK_PATH = "exploration_data/reachable_mask.npz"
+REACHABLE_MASK_PATH = f"{EXPLORATION_DATA_DIR}/reachable_mask.npz"
 CHECKPOINT_DIR_QA = "checkpoints_qa"
 CHECKPOINT_NAME_QA = "glitch_hunter_qa"
 BASELINE_MODEL = "backup_6M/mario_brain_checkpoint.zip"
-BOOTSTRAP_COVERAGE = "exploration_data/coverage_bootstrap_6000000.npz"
+BOOTSTRAP_COVERAGE = f"{EXPLORATION_DATA_DIR}/coverage_bootstrap_6000000.npz"
 BOOTSTRAP_EPISODES = 40
 
 # ═══════════════════════════════════════════════════════════════════════

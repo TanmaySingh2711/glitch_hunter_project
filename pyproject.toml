@@ -2,7 +2,8 @@
 # This file is OPTIONAL. The pip instructions in README.md / requirements.txt
 # still work exactly as before and remain the documented default path.
 #
-# What this adds is a one-command install via `uv`, plus linter config.
+# What this adds is a one-command install via `uv`, plus the tool config
+# (ruff, mypy, pytest, coverage) that CI and `python tools/check.py` share.
 # ═══════════════════════════════════════════════════════════════════════
 
 [project]
@@ -25,9 +26,14 @@ dependencies = [
 ]
 
 [dependency-groups]
+# The exact versions CI runs (.github/workflows/ci.yml), so "passes locally"
+# and "passes in CI" mean the same thing.
 dev = [
-    "pytest>=8",
-    "ruff>=0.6",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.6",
+    "mypy==2.3.1",
+    "pre-commit==4.6.2",
 ]
 # Training curves only. Kept out of the default install so people who just
 # want to watch the agent play don't pull in a large dependency they will
@@ -64,10 +70,29 @@ explicit = true
 # ═══════════════════════════════════════════════════════════════════════
 [tool.ruff]
 line-length = 100
+target-version = "py312"
 exclude = ["mario_clone", "venv_gpu", "checkpoints"]   # vendored / generated
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B", "UP", "C4", "SIM", "RUF"]
+select = [
+    "E", "F", "W",      # pycodestyle / pyflakes
+    "I",                # import order
+    "N",                # naming
+    "UP",               # pyupgrade
+    "B",                # bugbear
+    "A",                # shadowed builtins
+    "C4",               # comprehensions
+    "SIM",              # simplify
+    "PIE", "PERF",      # misc idioms / performance anti-patterns
+    "RET", "RSE",       # return / raise hygiene
+    "ISC",              # implicit string concatenation
+    "PGH",              # no blanket `type: ignore` / `noqa`
+    "T20",              # print() - library code logs; see per-file-ignores
+    "LOG", "G",         # logging: logger use and lazy %-formatting
+    "S",                # bandit security checks
+    "PT",               # pytest style
+    "FURB", "RUF",
+]
 ignore = [
     # This project has several deliberate best-effort guards - stopping music
     # on a mixer that may not exist, focusing a window, closing a generator.
@@ -82,23 +107,86 @@ ignore = [
     # and custom_mario_env.py sets SDL_AUDIODRIVER before pygame loads.
     # Hoisting those imports to the top silently breaks both.
     "E402",     # module-import-not-at-top-of-file
-    # The watchdog's nested conditions each carry their own explanatory
-    # comment; collapsing them into one `and` chain loses that.
+    # Nested conditions that each carry their own explanatory comment;
+    # collapsing them into one `and` chain loses that.
     "SIM102",   # collapsible-if
+    # A local variable assigned and then returned is how several of the
+    # documented calculations name their result; inlining it loses the name.
+    "RET504",
+    # `assert` narrows types for mypy after a check that already ran; the
+    # invariants it states are never user input.
+    "S101",
+    # Seeded numpy Generators drive the simulations; nothing here is crypto.
+    "S311",
+    # The exception names describe the refused STATE (CoverageCorrupted,
+    # ReachabilityMismatch) and appear verbatim in operator-facing refusal
+    # messages and records; an Error suffix would rename that vocabulary.
+    "N818",
 ]
 
 [tool.ruff.lint.isort]
-# Import order in the existing files is grouped by meaning rather than
-# alphabetically. Reordering it would create a large diff across working
-# code for no functional gain.
-force-sort-within-sections = false
+known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
+                     "dashboard_backend", "dashboard_service", "evaluation",
+                     "exploration", "game_window", "rewards", "train_agent", "training"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["E402"]   # sys.path is adjusted in conftest before imports
+# Tests: sys.path is adjusted in conftest before imports; asserts are the point;
+# fixtures shadow names on purpose; print() is fine in a test.
+"tests/*" = ["E402", "S", "T20", "N802", "N806", "ARG", "PT011", "PT018"]
+# The tools are command-line reports: their stdout IS the product.
+"tools/*" = ["T20"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["agent_logic.py", "app.py", "custom_mario_env.py", "dashboard_backend.py",
+         "dashboard_service.py", "game_window.py", "train_agent.py",
+         "common", "evaluation", "exploration", "rewards", "training", "tools"]
+exclude = ["^mario_clone/", "^venv_gpu/"]
+strict = true
+warn_unreachable = true
+# numpy / torch / gymnasium generics are pervasive and partly untyped at the
+# boundary; requiring every array's dtype parameter would be noise, not safety.
+disallow_any_generics = false
+# SB3 and the mario_clone engine are untyped; calling into them is allowed,
+# and what comes back is typed at our boundary instead.
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+# The vendored engine (mario_clone/, imported as `data`) and libraries that
+# ship no type information.
+module = ["data", "data.*", "cv2", "cv2.*", "flask_socketio", "tensorboard",
+          "pygame._sdl2.*", "cloudpickle"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Flask-SocketIO's @socketio.on decorator ships no annotations.
+module = ["app"]
+disallow_untyped_decorators = false
+
+[tool.coverage.run]
+source = ["."]
+omit = ["mario_clone/*", "venv_gpu/*", "tests/*", "tools/*"]
+branch = true
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# --strict-markers: a typo'd @pytest.mark.slwo is an error, not a silently
+# fast "slow" test.
+addopts = "-q --strict-markers"
+filterwarnings = [
+    # pygame 2.6 imports pkg_resources at start-up; nothing here uses it, and
+    # the warning would otherwise head every run.
+    "ignore:pkg_resources is deprecated as an API:DeprecationWarning",
+]
 # `slow` marks the few tests that load the real 20MB checkpoint. They still
 # run by default - they cover the value-head reset, which is the one piece
 # that touches the trained brain - but the marker makes them easy to skip

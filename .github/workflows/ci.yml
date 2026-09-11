@@ -1,0 +1,97 @@
+# Continuous integration: the same three gates `python tools/check.py` runs
+# locally - lint, type check, tests - on every push and pull request.
+#
+# Headless on purpose. SDL's dummy drivers give the game a real pygame
+# display surface with no monitor and no sound card, which is all the
+# environment needs; the few window-manager tests skip themselves on a driver
+# that cannot hide a window. Nothing here needs the trained checkpoint's
+# companions (checkpoints/, backup_6M/, exploration_data/ are not in git):
+# the tests that do skip with the reason when those files are absent.
+#
+# CPU torch rather than `uv sync`: pyproject.toml pins torch to PyTorch's
+# CUDA 12.1 index for training machines, and pulling ~2.5 GB of CUDA wheels
+# onto a CI runner to run CPU-only tests would be pure waste. The versions
+# are the same pins as pyproject.toml; only the build of torch differs.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SDL_VIDEODRIVER: dummy
+  SDL_AUDIODRIVER: dummy
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff==0.16.6"
+      - run: ruff check .
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies (CPU torch)
+        run: |
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install stable-baselines3==2.9.0 --no-deps
+          pip install -r requirements.txt "mypy==2.3.1"
+      - run: mypy
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      # opencv-python (not -headless) links libGL even when it never opens a
+      # window; slim Linux images may lack it.
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1
+      - name: Install dependencies (CPU torch)
+        run: |
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install stable-baselines3==2.9.0 --no-deps
+          pip install -r requirements.txt "pytest==9.1.1" "pytest-cov==7.1.0"
+      # `slow` = the multi-minute reachability rebuild and real-engine runs
+      # thousands of steps long; they run locally before every merge
+      # (tools/check.py --full) and are kept off the per-push path.
+      - name: Run tests
+        run: pytest -m "not slow" --cov --cov-report=term-missing:skip-covered --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.os == 'ubuntu-latest'
+        with:
+          name: coverage-xml
+          path: coverage.xml

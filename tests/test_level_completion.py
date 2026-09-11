@@ -27,8 +27,12 @@ import train_agent
 from exploration import config
 from exploration import coverage as coverage_mod
 from exploration import level_completion as lc
-from exploration.coverage import (CoverageCheckpointMismatch, CoverageCorrupted,
-                                  CoverageFormatMismatch, SpatialCoverage)
+from exploration.coverage import (
+    CoverageCheckpointMismatch,
+    CoverageCorrupted,
+    CoverageFormatMismatch,
+    SpatialCoverage,
+)
 
 TOTAL = config.TESTABLE_TOTAL
 SIX_M_SHA256 = "690d57022c1fb444454b0b47f9d1e4ff1bc1444d7110c0bc3320b7fe53a188b3"
@@ -54,7 +58,7 @@ def _cov(mask, missing=0, shared=False):
     if missing:
         ys, xs = np.nonzero(mask)
         cov.visited[ys[:missing], xs[:missing]] = 0
-    cov._remaining_cached = None
+    cov.invalidate_remaining()
     return cov
 
 
@@ -253,7 +257,7 @@ def test_near_completion_remaining_pixels_are_exposed(mask):
     picks = [0, len(ys) // 2, len(ys) - 1]              # far apart along the level
     for i in picks:
         cov.visited[ys[i], xs[i]] = 0
-    cov._remaining_cached = None
+    cov.invalidate_remaining()
     r = lc.remaining_regions(cov)
     assert r['remaining_px'] == 3 and r['regions'] == 3
     boxes = {tuple(g['world_bbox']) for g in r['largest']}
@@ -332,7 +336,7 @@ def _flip_bits(packed):
     return out
 
 
-@pytest.mark.parametrize("name,changes,error", [
+@pytest.mark.parametrize(("name", "changes", "error"), [
     ("wrong_fingerprint", {'testable_fingerprint': np.str_("0" * 64)}, CoverageFormatMismatch),
     ("no_fingerprint", {'testable_fingerprint': None}, CoverageFormatMismatch),
     ("wrong_denominator", {'testable_total': np.int64(TOTAL - 1)}, CoverageFormatMismatch),

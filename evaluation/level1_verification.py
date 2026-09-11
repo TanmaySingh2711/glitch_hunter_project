@@ -24,32 +24,40 @@ The record is written ONCE, read-only, beside the snapshot - the snapshot's
 own three files are never touched. Only a VERIFIED record names a final
 brain. Nothing here trains, and nothing starts on another level.
 """
+from __future__ import annotations
+
 import datetime
 import json
+import logging
 import os
-import stat
 import zipfile
+from collections.abc import Callable
+from typing import Any
 
+from common.fileio import make_read_only
 from evaluation import completion as ce
 from exploration import config
 from exploration import coverage as coverage_mod
 from exploration import level_completion as lc
 
+_log = logging.getLogger(__name__)
+
 VERIFIED, NEEDS_REVIEW, REJECTED = "VERIFIED", "NEEDS_REVIEW", "REJECTED"
 _BY_RETENTION = {'HEALTHY': VERIFIED, 'WARNING': NEEDS_REVIEW, 'REGRESSED': REJECTED}
 
 
-def verification_path(proof_path):
+def verification_path(proof_path: str) -> str:
     return proof_path[:-len('.json')] + '_verification.json'
 
 
-def _resolve(path, root):
+def _resolve(path: str, root: str) -> str:
     return path if os.path.isabs(path) else os.path.join(root, path)
 
 
-def check_integrity(meta, root):
+def check_integrity(meta: dict[str, Any], root: str) -> tuple[list[str], dict[str, Any]]:
     """(failures, facts) for the snapshot a proof describes."""
-    failures, facts = [], {}
+    failures: list[str] = []
+    facts: dict[str, Any] = {}
     expect = {'kind': lc.SNAPSHOT_KIND, 'testable_total': config.TESTABLE_TOTAL,
               'covered_testable_px': config.TESTABLE_TOTAL, 'remaining_testable_px': 0,
               'policy_updates_since_completion': 0}
@@ -88,7 +96,7 @@ def check_integrity(meta, root):
         cov.load_verified(cov_path, expected_timesteps=t)
         covered = cov.covered_testable()
         facts['covered_testable_px'] = covered
-        if not lc.is_level_complete(covered, cov.testable_total):
+        if not lc.is_level_complete(covered, int(cov.testable_total or 0)):
             failures.append(f"coverage re-counts to {covered:,}, not {config.TESTABLE_TOTAL:,}")
         facts['provenance'] = lc.provenance(cov)
     except Exception as exc:
@@ -96,7 +104,7 @@ def check_integrity(meta, root):
     return failures, facts
 
 
-def check_health(model):
+def check_health(model: Any) -> tuple[list[str], dict[str, Any]]:
     """(failures, facts): every parameter of the policy must be finite."""
     import torch
     n, bad = 0, []
@@ -108,9 +116,13 @@ def check_health(model):
     return ([f"non-finite parameters: {', '.join(bad)}"] if bad else []), facts
 
 
-def verify(proof_path, baseline_path=ce.BASELINE_PATH, workers=1, root=None,
-           evaluate=ce.evaluate, compare=ce.compare, load_policy=ce.load_policy,
-           results_dir=ce.RESULTS_DIR, log=print):
+def verify(proof_path: str, baseline_path: str = ce.BASELINE_PATH, workers: int = 1,
+           root: str | None = None,
+           evaluate: Callable[..., ce.Result] = ce.evaluate,
+           compare: Callable[[ce.Result, ce.Result], dict[str, Any]] = ce.compare,
+           load_policy: Callable[[str], Any] = ce.load_policy,
+           results_dir: str = ce.RESULTS_DIR,
+           log: Callable[[str], None] = _log.info) -> dict[str, Any]:
     """Runs the three checks and writes the record. Returns the record."""
     root = root or os.getcwd()
     out = verification_path(proof_path)
@@ -157,6 +169,6 @@ def verify(proof_path, baseline_path=ce.BASELINE_PATH, workers=1, root=None,
     record['created'] = datetime.datetime.now().isoformat(timespec='seconds')
     with open(out, 'x', encoding='utf-8') as fh:            # written once
         json.dump(record, fh, indent=1)
-    os.chmod(out, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
+    make_read_only(out)
     record['_path'] = out
     return record

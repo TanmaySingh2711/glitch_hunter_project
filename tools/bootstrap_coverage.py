@@ -46,48 +46,37 @@ import os
 import sys
 import time
 
-# Console output includes box-drawing characters. On Windows the
-# default console encoding is cp1252, which cannot encode them, so
-# redirecting this tool to a file would crash it AFTER the work was
-# done but BEFORE the result was written.
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from common.cli import prepare_tool
+
+ROOT = prepare_tool()
+
+from typing import Any
+
+import gymnasium as gym
 import numpy as np
 
 from exploration import config
 from exploration.coverage import SpatialCoverage, load_testable
 
 
-def build_env(coverage):
-    from gymnasium.wrappers import (FrameStackObservation, GrayscaleObservation,
-                                    MaxAndSkipObservation, ResizeObservation,
-                                    TimeLimit)
+def build_env(coverage: SpatialCoverage) -> gym.Env[Any, Any]:
+    from gymnasium.wrappers import TimeLimit
 
     from agent_logic import GlitchHunterWrapper
-    from custom_mario_env import CustomMarioEnv
+    from custom_mario_env import CustomMarioEnv, wrap_observation
 
-    env = CustomMarioEnv()
     # LEGACY reward on purpose. The point is to record the routes this brain
     # actually learned, and it learned them under this reward. Running it
     # under the QA reward would be recording where a differently-motivated
     # agent goes, which is not the thing being approximated.
-    env = GlitchHunterWrapper(env, reward_mode="legacy_completion",
-                              coverage=coverage)
-    env = MaxAndSkipObservation(env, skip=4)
-    env = GrayscaleObservation(env, keep_dim=False)
-    env = ResizeObservation(env, (84, 84))
-    env = FrameStackObservation(env, 4)
-    env = TimeLimit(env, max_episode_steps=4000)
-    return env
+    env = wrap_observation(GlitchHunterWrapper(CustomMarioEnv(), reward_mode="legacy_completion",
+                                               coverage=coverage))
+    return TimeLimit(env, max_episode_steps=config.LEGACY_EPISODE_MAX_STEPS)
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--episodes", type=int, default=config.BOOTSTRAP_EPISODES)
     ap.add_argument("--model", default=config.BASELINE_MODEL)

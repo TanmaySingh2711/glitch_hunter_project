@@ -9,8 +9,7 @@ import numpy as np
 import pytest
 
 from exploration import config
-from exploration.coverage import (CoverageCheckpointMismatch,
-                                  CoverageFormatMismatch, SpatialCoverage)
+from exploration.coverage import CoverageCheckpointMismatch, CoverageFormatMismatch, SpatialCoverage
 
 
 def rect(x, y, w=30, h=40):
@@ -272,3 +271,21 @@ def test_target_never_exceeds_what_remains():
     c.episode_new_history = [500000] * 6
     assert c.episode_target() <= max(
         config.TARGET_FLOOR, int(config.TARGET_REMAIN_FRAC * c.remaining()))
+
+
+def test_spatial_coverage_satisfies_the_channel_interface():
+    """CoverageChannel is the drop-in point for a future channel (e.g.
+    interaction coverage); the one channel that exists must satisfy it."""
+    from exploration.coverage import CoverageChannel
+    assert isinstance(SpatialCoverage(), CoverageChannel)
+
+
+def test_escalating_a_local_map_leaves_config_and_other_maps_alone():
+    before = config.NOVELTY_WEIGHT_MULT
+    a, b = SpatialCoverage(), SpatialCoverage()
+    a.set_novelty_mult(2.0)
+    assert a.novelty_mult == 2.0
+    assert b.novelty_mult == before
+    assert before == config.NOVELTY_WEIGHT_MULT, "the config module was mutated"
+    a.set_novelty_mult(99.0)
+    assert a.novelty_mult == config.NOVELTY_MULT_MAX

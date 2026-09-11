@@ -20,18 +20,20 @@ These run without a live server - they exercise the primitives directly.
 """
 import threading
 
-import agent_logic
+import pytest
+
+import dashboard_backend
 
 
 def test_env_lock_is_reentrant():
     """open_agent_window() takes env_lock and then calls into helpers that
     may take it again. A plain Lock would self-deadlock on the second
     acquire; it has to be an RLock."""
-    assert isinstance(agent_logic.env_lock, type(threading.RLock()))
-    with agent_logic.env_lock:
-        acquired = agent_logic.env_lock.acquire(blocking=False)
+    assert isinstance(dashboard_backend.env_lock, type(threading.RLock()))
+    with dashboard_backend.env_lock:
+        acquired = dashboard_backend.env_lock.acquire(blocking=False)
         assert acquired, "env_lock must be reentrant"
-        agent_logic.env_lock.release()
+        dashboard_backend.env_lock.release()
 
 
 def test_close_window_waits_for_an_in_flight_step(env):
@@ -44,7 +46,7 @@ def test_close_window_waits_for_an_in_flight_step(env):
     release = threading.Event()
 
     def fake_frame_loop():
-        with agent_logic.env_lock:
+        with dashboard_backend.env_lock:
             holding.set()
             order.append('step-start')
             release.wait(timeout=5)
@@ -57,7 +59,7 @@ def test_close_window_waits_for_an_in_flight_step(env):
     closer_done = threading.Event()
 
     def closer():
-        agent_logic.close_agent_window()
+        dashboard_backend.close_agent_window()
         order.append('closed')
         closer_done.set()
 
@@ -89,7 +91,7 @@ def test_app_handlers_never_touch_the_window_themselves():
     loop, clicks landing between steps - is tested in test_dashboard_control.
     """
     import pathlib
-    src = pathlib.Path(agent_logic.__file__).with_name('app.py').read_text(
+    src = pathlib.Path(dashboard_backend.__file__).with_name('app.py').read_text(
         encoding='utf-8')
     code = chr(10).join(line for line in src.splitlines()
                         if not line.lstrip().startswith('#'))
@@ -103,19 +105,16 @@ def test_server_binds_to_localhost_by_default():
     """Regression guard: app.py used to bind 0.0.0.0, exposing an
     unauthenticated dashboard to everyone on the local network. It must
     default to loopback, with the wider bind available only as an explicit
-    opt-in via GLITCH_HUNTER_HOST.
+    opt-in via GLITCH_HUNTER_HOST. Checked on the function main() actually
+    calls, not on the source text."""
+    import app
+    assert app.bind_address({}) == ('127.0.0.1', 5000)
+    assert app.bind_address({'GLITCH_HUNTER_HOST': '0.0.0.0',
+                             'GLITCH_HUNTER_PORT': '8080'}) == ('0.0.0.0', 8080)
 
-    Comment lines are stripped before checking - app.py documents the old
-    value in a comment, and matching that would make this fail for entirely
-    the wrong reason.
-    """
-    import pathlib
-    src = pathlib.Path(agent_logic.__file__).with_name('app.py').read_text(
-        encoding='utf-8')
-    code_lines = [line for line in src.splitlines()
-                  if not line.lstrip().startswith('#')]
-    code = chr(10).join(code_lines)
 
-    assert "host='0.0.0.0'" not in code, "app.py binds all interfaces again"
-    assert "GLITCH_HUNTER_HOST" in code, "the opt-in override is gone"
-    assert "'127.0.0.1'" in code, "the loopback default is gone"
+def test_a_bad_port_is_refused_with_a_reason():
+    import app
+    for bad in ('http', '0', '70000'):
+        with pytest.raises(SystemExit, match='GLITCH_HUNTER_PORT'):
+            app.bind_address({'GLITCH_HUNTER_PORT': bad})

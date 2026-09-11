@@ -18,15 +18,25 @@ center_on_current_display() moves the finished window onto the cursor's
 monitor. On Windows the second step uses GetWindowRect, so it centres the
 whole frame - title bar included - not just the client area.
 """
+from __future__ import annotations
+
 import functools
+import logging
 import os
 import sys
+from typing import Any
+
+Area = tuple[int, int, int, int]        # (left, top, right, bottom)
+
+# Every call here is best-effort (see the module docstring), so a failure is
+# a DEBUG record - visible with GLITCH_HUNTER_LOG_LEVEL=DEBUG - never an error.
+_log = logging.getLogger(__name__)
 
 MONITOR_DEFAULTTONEAREST = 2
 SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
 
 
-def centered_origin(area, size):
+def centered_origin(area: Area, size: tuple[int, int]) -> tuple[int, int]:
     """Top-left (x, y) that centres a `size` (w, h) window in `area`
     (left, top, right, bottom). A window larger than the area is pinned to
     the area's top-left, so its title bar stays reachable."""
@@ -36,25 +46,27 @@ def centered_origin(area, size):
             top + max(0, (bottom - top - h) // 2))
 
 
-def request_centered_creation():
+def request_centered_creation() -> None:
     """Call before SDL creates a window. Clears any explicit position a
     previous caller left in the environment (it would win over centring)."""
     os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
     os.environ['SDL_VIDEO_CENTERED'] = '1'
 
 
-def _hwnd():
+def _hwnd() -> int | None:
     try:
         import pygame as pg
         if pg.display.get_surface() is None:
             return None
-        return pg.display.get_wm_info().get('window')
+        hwnd = pg.display.get_wm_info().get('window')
+        return int(hwnd) if hwnd else None
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return None
 
 
 @functools.cache
-def _user32():
+def _user32() -> Any:
     """A private user32 handle, so declaring argtypes here cannot change how
     any other module's ctypes.windll.user32 calls behave."""
     import ctypes
@@ -72,7 +84,7 @@ def _user32():
     return u
 
 
-def current_work_area():
+def current_work_area() -> Area | None:
     """(left, top, right, bottom) of the work area of the monitor under the
     cursor, or None where that cannot be known."""
     if sys.platform != 'win32':
@@ -97,10 +109,11 @@ def current_work_area():
         r = info.rcWork
         return (r.left, r.top, r.right, r.bottom)
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return None
 
 
-def center_on_current_display():
+def center_on_current_display() -> tuple[int, int] | None:
     """Moves the pygame window so it is centred on the cursor's monitor.
     Returns the new top-left, or None if there was nothing to move. Does not
     activate the window or change its size or z-order."""
@@ -121,6 +134,7 @@ def center_on_current_display():
             return None
         return (x, y)
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return None
 
 
@@ -132,14 +146,14 @@ def center_on_current_display():
 # minimise event into an access violation - measured, in the dashboard, at
 # random points in the engine. One wrapper per window ever created costs
 # nothing.
-_SDL_WINDOWS = []
+_SDL_WINDOWS: list[tuple[Any, Any]] = []
 
 
-def _sdl_window():
+def _sdl_window() -> Any:
     try:
         import pygame as pg
         from pygame._sdl2.video import Window
-        surface = pg.display.get_surface()
+        surface: pg.Surface | None = pg.display.get_surface()
         if surface is None:
             return None
         for owner, win in _SDL_WINDOWS:
@@ -149,10 +163,11 @@ def _sdl_window():
         _SDL_WINDOWS.append((surface, win))
         return win
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return None
 
 
-def hide():
+def hide() -> bool:
     """Takes the window off the screen (and the taskbar) WITHOUT destroying
     it, so everything drawn into it and every Surface stays valid."""
     if _hwnd() is None:
@@ -164,10 +179,11 @@ def hide():
         w.hide()
         return True
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return False
 
 
-def show():
+def show() -> bool:
     """Puts a hidden window back on screen; restores it if minimised."""
     if _hwnd() is None:
         return False
@@ -180,20 +196,22 @@ def show():
             w.restore()
         return True
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return False
 
 
-def is_minimized():
+def is_minimized() -> bool:
     hwnd = _hwnd()
     if not hwnd or sys.platform != 'win32':
         return False
     try:
         return bool(_user32().IsIconic(hwnd))
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return False
 
 
-def bring_to_front():
+def bring_to_front() -> bool:
     """Best-effort foreground request (Windows only). A refusal - Windows'
     focus-stealing rules - must never break playback."""
     hwnd = _hwnd()
@@ -203,4 +221,5 @@ def bring_to_front():
         import ctypes
         return bool(ctypes.windll.user32.SetForegroundWindow(hwnd))
     except Exception:
+        _log.debug("window-manager call failed", exc_info=True)
         return False

@@ -1,0 +1,27 @@
+# Normalise text files to LF in the repository; each checkout gets its
+# platform's line endings. Without this, a Windows editor and a CI runner
+# disagree about every line of every file and diffs fill with noise.
+* text=auto
+
+*.py      text diff=python
+*.md      text diff=markdown
+*.toml    text
+*.yml     text
+*.yaml    text
+*.json    text
+*.js      text
+*.css     text
+*.html    text diff=html
+
+# Binary artifacts: never diffed, never line-ending converted. A converted
+# checkpoint or mask is a corrupted one.
+*.zip     binary
+*.npz     binary
+*.png     binary
+*.ogg     binary
+*.wav     binary
+
+# Generated / vendored: collapsed in diffs and excluded from language stats.
+uv.lock                   linguist-generated=true -diff
+static/vendor/**          linguist-vendored=true
+mario_clone/**            linguist-vendored=true

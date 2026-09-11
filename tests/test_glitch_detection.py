@@ -6,8 +6,12 @@ Two things can go wrong with a bug detector and both are bad:
 There is a test for each. There is also a test for the delivery mechanism,
 which is subtle enough to be worth pinning down explicitly.
 """
-from gymnasium.wrappers import (MaxAndSkipObservation, GrayscaleObservation,
-                                ResizeObservation, FrameStackObservation)
+from gymnasium.wrappers import (
+    FrameStackObservation,
+    GrayscaleObservation,
+    MaxAndSkipObservation,
+    ResizeObservation,
+)
 
 
 def test_quiet_during_normal_play(fresh):

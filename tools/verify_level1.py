@@ -11,12 +11,17 @@ read-only, beside the snapshot; the snapshot itself is never modified.
 Exit codes: 0 VERIFIED, 1 NEEDS_REVIEW, 2 REJECTED, 3 nothing to verify.
 Inference only: nothing is trained, and no other level is started.
 """
+from __future__ import annotations
+
 import argparse
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.cli import prepare_tool
+
+ROOT = prepare_tool(headless=False)
 
 from evaluation import completion as ce
 from evaluation import level1_verification as lv
@@ -24,7 +29,7 @@ from exploration import config
 from exploration import level_completion as lc
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('proof', nargs='?', help='completion proof .json (default: the committed one)')
     ap.add_argument('--workers', type=int, default=1)

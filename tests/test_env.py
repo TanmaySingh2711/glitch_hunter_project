@@ -71,3 +71,47 @@ def test_window_can_close_and_reopen(env):
     env.reset()
     obs, _, _, _, _ = env.step(1)
     assert obs.shape == (240, 256, 3)
+
+
+def test_the_lazy_skip_matches_maxandskip_frame_for_frame(env):
+    """SkipObservation renders only the two frames the max-pool keeps. Same
+    engine, same actions - including an episode that ends mid-skip - must give
+    the plain MaxAndSkipObservation's observations, rewards and endings
+    exactly, and the engine must be left rendering normally afterwards."""
+    from gymnasium.wrappers import MaxAndSkipObservation
+
+    from custom_mario_env import SkipObservation
+    rng = np.random.default_rng(7)
+    actions = [int(a) for a in rng.choice([1, 2, 3, 4, 6], size=150)]
+
+    def trace(wrapper_cls):
+        w = wrapper_cls(env, skip=4)
+        w.reset()
+        out = []
+        for a in actions:
+            obs, r, term, trunc, _info = w.step(a)
+            out.append((obs.copy(), r, term, trunc))
+            if term or trunc:
+                w.reset()
+        return out
+
+    plain, lazy = trace(MaxAndSkipObservation), trace(SkipObservation)
+    for i, (p, q) in enumerate(zip(plain, lazy, strict=True)):
+        assert np.array_equal(p[0], q[0]), f"frame differs at agent step {i}"
+        assert p[1:] == q[1:], f"reward/ending differs at agent step {i}"
+    assert env.render_observation is True
+    assert env.step(1)[0].any(), "a bare step after the skip returned a blank frame"
+
+
+def test_the_skip_leaves_rendering_on_even_when_a_step_raises(env, patch_step):
+    from custom_mario_env import SkipObservation
+
+    def boom(_a):
+        raise RuntimeError("engine fault")
+    w = SkipObservation(env, skip=4)
+    patch_step(boom)
+    try:
+        w.step(1)
+    except RuntimeError:
+        pass
+    assert env.render_observation is True

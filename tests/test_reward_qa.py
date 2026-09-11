@@ -39,7 +39,7 @@ def _make_qa(env, mask, patch_step):
     # fixture T3 fires at the first window - either would silently move them
     # into COMPLETE. Phase-specific behaviour is tested, both phases, in
     # tests/test_phase_reward.py.
-    w.lifecycle._check_transition = lambda n_new: None
+    w.lifecycle.auto_transition = False
 
     def drive(**overrides):
         info = dict(BASE, **overrides)

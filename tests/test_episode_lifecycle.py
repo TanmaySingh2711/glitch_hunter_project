@@ -23,8 +23,13 @@ import pytest
 from agent_logic import GlitchHunterWrapper
 from exploration import config
 from exploration.coverage import SpatialCoverage
-from exploration.lifecycle import (EndReason, EpisodeLifecycle, EpisodePhase,
-                                   Transition, classify_end)
+from exploration.lifecycle import (
+    EndReason,
+    EpisodeLifecycle,
+    EpisodePhase,
+    Transition,
+    classify_end,
+)
 
 SPS = config.SUBSTEPS_PER_AGENT_STEP
 WINDOW = config.LIFECYCLE_WINDOW * SPS          # substeps per window
@@ -865,7 +870,7 @@ def test_safety_floor_is_reachable_in_the_real_engine(fresh):
 # ══════════════════════════════════════════════════════════════════════════
 # HOW EPISODES END — a taxonomy, not a single "done"
 # ══════════════════════════════════════════════════════════════════════════
-@pytest.mark.parametrize("info,safety,want", [
+@pytest.mark.parametrize(('info', 'safety', 'want'), [
     ({'flag_get': True}, False, EndReason.LEVEL_COMPLETE),
     ({'death_cause': 'timeout', 'is_dead': True}, False, EndReason.TIMEOUT),
     ({'death_cause': 'goomba', 'is_dead': True}, False, EndReason.DEATH),

@@ -283,7 +283,7 @@ def test_a_failing_step_pauses_and_tells_the_browser():
 # ══════════════════════════════════════════════════════════════════════════
 # Placement arithmetic
 # ══════════════════════════════════════════════════════════════════════════
-@pytest.mark.parametrize("area,size,want", [
+@pytest.mark.parametrize(('area', 'size', 'want'), [
     ((0, 0, 1920, 1040), (816, 639), (552, 200)),           # laptop, taskbar below
     ((-1920, 0, 0, 1080), (816, 639), (-1368, 220)),        # a monitor left of the primary
     ((0, 40, 1366, 768), (816, 639), (275, 84)),            # taskbar on top
@@ -391,3 +391,18 @@ def test_hiding_or_minimising_changes_nothing_the_agent_sees(env):
         env.open_window()
     assert hidden == visible, "hiding the window changed what the agent sees"
     assert minimised == visible, "minimising the window changed what the agent sees"
+
+
+def test_a_real_window_lands_inside_the_cursor_monitors_work_area(env):
+    """The Win32 half of the placement rule, on the live window."""
+    import sys
+    env.open_window()
+    area = game_window.current_work_area()
+    if sys.platform != 'win32' or area is None or not game_window._hwnd():
+        pytest.skip("needs a real Win32 window and monitor")
+    origin = game_window.center_on_current_display()
+    assert origin is not None
+    left, top, right, bottom = area
+    assert left <= origin[0] <= right and top <= origin[1] <= bottom
+    assert isinstance(game_window.bring_to_front(), bool)
+    assert game_window.is_minimized() is False

@@ -36,10 +36,9 @@ opencv-python==5.0.0.93
 # app.py now runs in threading mode - see the comment above the SocketIO()
 # call there for why.
 
-# OPTIONAL (developers) - run the test suite and the linter:
-#   pip install pytest ruff
-#   python -m pytest        # ~4 seconds
-#   python -m ruff check .
+# OPTIONAL (developers) - the quality gates CI runs (see CONTRIBUTING.md):
+#   pip install pytest==9.1.1 pytest-cov==7.1.0 ruff==0.16.6 mypy==2.3.1
+#   python tools/check.py   # lint, types, fast tests, artifact hashes
 
 # OPTIONAL - only if you want to see training graphs. Not needed to watch
 # the AI play, and not needed to train either (training just skips the

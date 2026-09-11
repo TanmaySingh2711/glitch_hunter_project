@@ -21,8 +21,7 @@ import pytest
 
 import train_agent
 from exploration import config
-from exploration.coverage import (CoverageCheckpointMismatch, SpatialCoverage,
-                                  create_shared)
+from exploration.coverage import CoverageCheckpointMismatch, SpatialCoverage, create_shared
 
 
 # ── Test 13: phase separation ─────────────────────────────────────────────
