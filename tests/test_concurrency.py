@@ -9,7 +9,12 @@ both are pinned here:
      serialises env access.
   2. Every Start spawned a thread. Hammering it produced 11 concurrent frame
      loops, which starved each other and made the server stop answering HTTP
-     entirely. handle_start_testing() now retires the previous loop first.
+     entirely.
+
+A third came later: the handler threads also OWNED the pygame window, and
+Windows destroys a window with its creating thread. All three are now closed
+by one design - a single game thread owns the window and is the only frame
+loop (dashboard_service.py, tested in test_dashboard_control.py).
 
 These run without a live server - they exercise the primitives directly.
 """
@@ -75,54 +80,23 @@ def test_close_window_waits_for_an_in_flight_step(env):
     env.open_window()   # leave the shared fixture usable for other tests
 
 
-def test_single_frame_loop_invariant_is_enforced_in_source():
-    """handle_start_testing() must retire the previous frame loop before
-    starting a new one. Without this, rapid Start clicks stack OS threads
-    until the server stops responding."""
+def test_app_handlers_never_touch_the_window_themselves():
+    """Every socket handler runs on its own short-lived thread, and a window
+    created or driven from one of those dies with it (Windows destroys a
+    window when its creating thread exits - measured). So app.py must only
+    post commands to the game thread (dashboard_service.py); the frame loop,
+    the pre-load and every window call live there. The behaviour - one frame
+    loop, clicks landing between steps - is tested in test_dashboard_control.
+    """
     import pathlib
     src = pathlib.Path(agent_logic.__file__).with_name('app.py').read_text(
         encoding='utf-8')
-    assert 'agent_thread' in src
-    assert 'previous.join(' in src, (
-        "the previous frame loop is no longer joined before a new one starts")
-    assert 'THREAD_RETIRE_TIMEOUT' in src
-
-
-def test_frame_loop_releases_lock_before_sleeping():
-    """The loop must hold env_lock for one step only, never across the sleep
-    - otherwise every Reset click waits a full frame period before it can
-    tear anything down."""
-    import pathlib
-    src = pathlib.Path(agent_logic.__file__).with_name('app.py').read_text(
-        encoding='utf-8')
-    body = src[src.index('def background_agent_task'):]
-    lines = body.splitlines()
-
-    def find(needle):
-        for i, line in enumerate(lines):
-            if needle in line:
-                return i
-        raise AssertionError(f"{needle!r} not found in background_agent_task")
-
-    def indent(i):
-        return len(lines[i]) - len(lines[i].lstrip())
-
-    next_line = find('next(agent_gen)')
-    sleep_line = find('socketio.sleep(')
-
-    # Anchor on the `with env_lock:` that actually wraps next() - the one
-    # immediately above it. There is an earlier, unrelated env_lock block at
-    # the top of the function guarding generator creation, and matching that
-    # one instead would compare against the wrong indent entirely.
-    lock_line = max(i for i, line in enumerate(lines[:next_line])
-                    if 'with env_lock:' in line)
-
-    assert lock_line < next_line < sleep_line, "next() must be inside the lock"
-    # The sleep must sit at or outside the `with` statement's own indent -
-    # i.e. it is NOT nested inside the locked block.
-    assert indent(sleep_line) <= indent(lock_line), (
-        "socketio.sleep() is nested inside `with env_lock:` - holding the "
-        "lock across the sleep makes teardown block for a whole frame")
+    code = chr(10).join(line for line in src.splitlines()
+                        if not line.lstrip().startswith('#'))
+    assert 'GameWindowService' in code
+    for forbidden in ('open_agent_window', 'close_agent_window', 'next(',
+                      'run_mario_agent', 'start_background_task', 'import pygame'):
+        assert forbidden not in code, f"app.py drives the window directly: {forbidden}"
 
 
 def test_server_binds_to_localhost_by_default():

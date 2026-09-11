@@ -1,11 +1,12 @@
 import os
-import random
 import sys
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
 import pygame as pg
+
+import game_window
 
 # Disable audio to prevent sound spam during training
 os.environ["SDL_AUDIODRIVER"] = "dummy"
@@ -94,14 +95,14 @@ class CustomMarioEnv(gym.Env):
         os.chdir(self.mario_clone_dir)
         sys.path.insert(0, self.mario_clone_dir)
 
-        # Tile windows across the screen so they don't stack perfectly on top
-        # of each other. The window is ~800x600; a random offset spreads the
-        # 8 parallel training windows out across the desktop.
-        x_pos = random.randint(50, 800)
-        y_pos = random.randint(50, 400)
-        os.environ['SDL_VIDEO_WINDOW_POS'] = f"{x_pos},{y_pos}"
-        if 'SDL_VIDEO_CENTERED' in os.environ:
-            del os.environ['SDL_VIDEO_CENTERED']
+        # The window is created by mario_clone/data/setup.py the first time it
+        # is imported in this process (see WINDOW LIFECYCLE below). Wherever
+        # that happens - the dashboard, a training worker, a tool, a test - it
+        # opens centred on the display the user is on (game_window.py). This
+        # replaced a random offset per window, which put windows at arbitrary
+        # places on the desktop.
+        creates_window = 'data.setup' not in sys.modules
+        game_window.request_centered_creation()
 
         try:
             from data import setup, tools, constants as c
@@ -122,6 +123,10 @@ class CustomMarioEnv(gym.Env):
             os.chdir(orig_cwd)
             if self.mario_clone_dir in sys.path:
                 sys.path.remove(self.mario_clone_dir)
+        if creates_window:
+            game_window.center_on_current_display()
+        # Set by hide_window(): the OS window exists but is off screen.
+        self._window_hidden = False
 
     def step(self, action):
         pg.event.pump()
@@ -473,11 +478,49 @@ class CustomMarioEnv(gym.Env):
         obs = self._fast_obs()
         return obs, {}
 
+    def hold_clock(self):
+        """Keeps the engine clock from running out; returns the units added.
+
+        QA mode only (GlitchHunterWrapper calls it before every substep - see
+        config QA_TIMEOUT_ENDS_EPISODE): time alone may not end a QA episode.
+        The clock loses at most one unit per engine update, so topping it up
+        whenever it is down to 1 means level1.check_if_time_out() can never
+        see 0. Anything else - the castle door, a death - ends the episode as
+        before.
+
+        The TIME box does not move: the same units are added to the display
+        offset, so it keeps drawing the legacy-equivalent clock (001 by then,
+        Phase 4D). Only while the level is being played - never during the
+        castle's time-to-score countdown - and never without a QA budget,
+        whose offset is what keeps the box still.
+        """
+        if not self.episode_time_units:
+            return 0
+        try:
+            state = self.game.state
+            hud, mario = state.overhead_info_display, state.mario
+        except AttributeError:
+            return 0
+        if (hud.time > 1 or hud.state != self.c_module.LEVEL
+                or mario.dead or mario.in_castle):
+            return 0
+        units = int(self.episode_time_units)
+        hud.time += units
+        hud.display_time_offset += units
+        return units
+
     # ═══════════════════════════════════════════════════════════════════
-    # WINDOW LIFECYCLE — for the dashboard's "pop up on Start, close on
-    # Reset/refresh" behavior. Not used during training (train_agent.py
-    # never calls these; its 8 parallel windows just stay open for the
-    # whole run, staggered by the SDL_VIDEO_WINDOW_POS logic in __init__).
+    # WINDOW LIFECYCLE — for the dashboard's game window. Not used during
+    # training (train_agent.py never calls these; its 8 parallel windows
+    # stay open for the whole run).
+    #
+    # THREADING RULE (dashboard): every call below, and every step(), must
+    # come from the ONE thread that created the window. Windows delivers a
+    # window's messages - move, minimise, the X button - only to the thread
+    # that created it, and DESTROYS the window when that thread exits. The
+    # dashboard used to create it on a short-lived socket-handler thread: the
+    # popup vanished as soon as the handler returned, and the X button never
+    # reached anyone. dashboard_service.GameWindowService now owns it.
     #
     # Important quirk this works around: pygame's actual OS window is
     # created ONCE, at module-import time, by the top-level
@@ -487,12 +530,23 @@ class CustomMarioEnv(gym.Env):
     # to grab whatever window already exists. So "closing" and "reopening"
     # the window has to be done directly through the pg.display module
     # here, not by recreating Control().
+    #
+    # Three states: OPEN, HIDDEN (hide_window: off screen, nothing destroyed)
+    # and CLOSED (close_window: destroyed). open_window() centres the window
+    # when it creates or re-shows it, and never re-centres one already open.
     # ═══════════════════════════════════════════════════════════════════
-    def open_window(self):
-        """(Re)creates the OS window if it was previously closed via
-        close_window(), then brings it to the foreground. Safe to call
-        even when the window is already open (no-op beyond refocusing)."""
+    def window_state(self):
         if pg.display.get_surface() is None:
+            return 'closed'
+        return 'hidden' if self._window_hidden else 'open'
+
+    def open_window(self):
+        """Makes the game window visible and returns what it had to do:
+        'created' (it was closed), 'shown' (it was hidden) or 'focused' (it
+        was already open - only restored if minimised, never moved)."""
+        state = self.window_state()
+        if state == 'closed':
+            game_window.request_centered_creation()
             pg.display.init()
             new_surface = pg.display.set_mode(self.c_module.SCREEN_SIZE)
             pg.display.set_caption(self.setup_module.ORIGINAL_CAPTION)
@@ -501,28 +555,27 @@ class CustomMarioEnv(gym.Env):
             # has to be updated here too - otherwise it still points at the
             # Surface object pg.display.quit() just destroyed, and the next
             # reset() crashes with "pygame.error: display Surface quit" the
-            # moment level1.py touches it.
+            # moment level1.py touches it. The live Control holds its own
+            # reference too, which lets an episode continue without a reset.
             self.setup_module.SCREEN = new_surface
             self.setup_module.SCREEN_RECT = new_surface.get_rect()
-        self._bring_to_front()
+            self.game.screen = new_surface
+            game_window.center_on_current_display()
+        elif state == 'hidden':
+            game_window.show()
+            game_window.center_on_current_display()
+        else:
+            game_window.show()          # restores it if the user minimised it
+        self._window_hidden = False
+        game_window.bring_to_front()
+        return {'closed': 'created', 'hidden': 'shown'}.get(state, 'focused')
 
-    def _bring_to_front(self):
-        """Windows-only: force the game window to the foreground. Silently
-        does nothing on other platforms - pygame has no cross-platform API
-        for this, and this project only targets Windows (see the
-        SDL_VIDEO_WINDOW_POS staggering above, which is Windows-specific
-        too). Best-effort: a focus failure here should never break
-        playback, so any error is swallowed.
-        """
-        if sys.platform != "win32":
-            return
-        try:
-            import ctypes
-            hwnd = pg.display.get_wm_info().get("window")
-            if hwnd:
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
+    def hide_window(self):
+        """Takes the window off screen WITHOUT destroying it: the game state,
+        the frame on it and every Surface survive, so open_window() shows the
+        episode exactly where it was."""
+        if pg.display.get_surface() is not None and game_window.hide():
+            self._window_hidden = True
 
     def close_window(self):
         """Destroys the OS window. Safe to call even if already closed.
@@ -530,6 +583,20 @@ class CustomMarioEnv(gym.Env):
         so the next open_window() + reset() resumes cleanly."""
         if pg.display.get_surface() is not None:
             pg.display.quit()
+        self._window_hidden = False
+
+    def poll_close_request(self):
+        """Drains the window's event queue; True if the user clicked its X
+        (or pressed Alt+F4). Nothing else in this project reads pygame
+        events, so draining them all is safe - and keeps the queue from
+        filling while the dashboard is paused."""
+        if pg.display.get_surface() is None:
+            return False
+        closing = False
+        for event in pg.event.get():
+            if event.type == pg.QUIT or event.type == getattr(pg, 'WINDOWCLOSE', -1):
+                closing = True
+        return closing
 
     def _fast_obs(self):
         # ═══════════════════════════════════════════════════════════════

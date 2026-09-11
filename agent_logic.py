@@ -85,8 +85,9 @@ DANGER_ZONE_BOOST_EPISODES = 15  # how many episodes the boost stays active
 # substep sum to exactly the reward it returns - 'clip' is the backstop
 # clamp's own adjustment, so nothing is left unattributed - and they are
 # accumulated per episode AND per phase (GlitchHunterWrapper.ep_channels).
-# 'death' is the env's own reward, which is -5.0 on any engine death,
-# including the timer running out.
+# 'death' is the env's own reward, which is -5.0 on any engine death. (The
+# timer running out was one, until the respawn rule: in QA mode the engine
+# clock is held above zero - see config QA_TIMEOUT_ENDS_EPISODE.)
 QA_CHANNELS = ('death', 'novelty', 'frontier', 'drought', 'safety_reset',
                'locomotion', 'time', 'progress', 'interaction', 'flag',
                'shortfall', 'clip')
@@ -217,6 +218,11 @@ class GlitchHunterWrapper(gym.Wrapper):
         # EXPLORE -> COMPLETE and the safety reset are part of the QA
         # objective only. Legacy keeps its own stuck termination, untouched.
         self.lifecycle = lifecycle_mod.EpisodeLifecycle(self.coverage) if qa else None
+        # The respawn rule: in QA, time alone never ends an episode, so the
+        # engine clock is kept above zero (CustomMarioEnv.hold_clock). Legacy
+        # keeps the timeout the 6M brain was trained with.
+        self.holds_engine_clock = qa and not config.QA_TIMEOUT_ENDS_EPISODE
+        self.ep_clock_extensions = 0
 
         # ─── LEGACY STATE ───
         self.visited_tiles = set()
@@ -299,6 +305,7 @@ class GlitchHunterWrapper(gym.Wrapper):
         self.ep_channels = _blank_channels()
         self.last_channels = None
         self.last_n_new = 0
+        self.ep_clock_extensions = 0
 
         # Coverage itself is NEVER cleared here - that is the entire point of
         # the retrofit. begin_episode() only rolls the per-episode counters
@@ -325,12 +332,19 @@ class GlitchHunterWrapper(gym.Wrapper):
 
     # ══════════════════════════════════════════════════════════════════════
     def step(self, action):
+        if self.holds_engine_clock:
+            hold = getattr(self.env.unwrapped, 'hold_clock', None)
+            if hold is not None and hold():
+                self.ep_clock_extensions += 1
         step_result = self.env.step(action)
         if len(step_result) == 4:
             obs, reward, done, info = step_result
         else:
             obs, reward, terminated, truncated, info = step_result
             done = terminated or truncated
+        if self.holds_engine_clock:
+            # How many times this episode has outlived a full QA clock.
+            info['clock_extensions'] = self.ep_clock_extensions
 
         n_new = self._record_coverage(info)
         # Lifecycle sees the substep BEFORE the reward, so the safety-reset
@@ -503,10 +517,11 @@ class GlitchHunterWrapper(gym.Wrapper):
         # new pixel, which killed agents crossing already-covered ground to
         # reach new ground, and kept every episode far below the 5,000-step
         # floor. The lifecycle now requires a long episode AND a long drought
-        # AND sustained genuine stuckness (exploration/lifecycle.py). The
-        # terminal charge is the same term and magnitude as before. Only
-        # evaluated on substeps the engine has not already ended, so a death
-        # is never charged twice.
+        # AND sustained genuine stagnation - stuck in a small box, or a
+        # non-transit loop that goes nowhere (exploration/lifecycle.py). Never
+        # elapsed steps or a drought alone. The terminal charge is the same
+        # term and magnitude as before. Only evaluated on substeps the engine
+        # has not already ended, so a death is never charged twice.
         if not done and self.lifecycle.safety_reset_due():
             self.lifecycle.fire_safety_reset()
             reward += config.DROUGHT_TERMINAL_PENALTY
@@ -1070,7 +1085,12 @@ _global_model = None
 #
 # Rule: hold this for the duration of any single env operation, and NEVER
 # across a sleep. Teardown then lands cleanly between two steps instead of
-# in the middle of one. See background_agent_task() in app.py.
+# in the middle of one.
+#
+# The dashboard itself no longer relies on it: every window and env call now
+# runs on dashboard_service's single game thread (the only thread Windows
+# lets drive the window), so there is nothing left to race. It stays as a
+# guard for the module-level helpers, which remain callable from anywhere.
 # ═══════════════════════════════════════════════════════════════════════
 env_lock = threading.RLock()
 
@@ -1152,13 +1172,60 @@ def open_agent_window():
 
 
 def close_agent_window():
-    """Closes the game window if one exists. Called on dashboard reset and
-    on disconnect (covers a page refresh or closed tab). The model and env
-    stay loaded in memory - only the OS window closes - so the next
-    open_agent_window() call is fast, not a full reload."""
+    """Closes the game window if one exists. Called on dashboard reset. The
+    model and env stay loaded in memory - only the OS window closes - so the
+    next open_agent_window() call is fast, not a full reload."""
     with env_lock:
         if _global_env is not None:
             _global_env.unwrapped.close_window()
+
+
+class DashboardBackend:
+    """The real work behind dashboard_service.GameWindowService.
+
+    Every method runs on the service's one game thread - the thread that
+    creates the window, and so the only one Windows lets drive it. env_lock
+    is still taken, so the module-level helpers above stay safe to call.
+    """
+
+    def preload(self):
+        """Loads the model and builds the env - which creates the window, on
+        this thread - then hides the window until the first Start."""
+        with env_lock:
+            _ensure_global_env_and_model()
+            _global_env.unwrapped.hide_window()
+
+    def open_window(self):
+        with env_lock:
+            _ensure_global_env_and_model()
+            return _global_env.unwrapped.open_window()
+
+    def hide_window(self):
+        with env_lock:
+            if _global_env is not None:
+                _global_env.unwrapped.hide_window()
+
+    def close_window(self):
+        close_agent_window()
+
+    def poll_close_request(self):
+        with env_lock:
+            return (_global_env is not None
+                    and _global_env.unwrapped.poll_close_request())
+
+    def new_session(self):
+        return run_mario_agent()
+
+    def stop_audio(self):
+        # Best-effort: the mixer may not be initialized at all (audio is
+        # forced to the "dummy" driver in custom_mario_env.py).
+        try:
+            import pygame as pg
+            if pg.mixer.get_init():
+                pg.mixer.music.stop()
+                pg.mixer.stop()
+        except Exception:
+            pass
 
 
 def run_mario_agent():

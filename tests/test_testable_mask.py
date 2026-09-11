@@ -162,6 +162,34 @@ def test_consistency_assertion_catches_an_impossible_state(masks):
         cov.assert_consistent()
 
 
+def test_enemies_never_move_the_static_denominator(env):
+    """The denominator is built from the level's STATIC colliders only.
+    Enemies spawn, walk, die and leave shells; none of it may add or remove a
+    single solid pixel, or the same world would have a different 100%."""
+    import pygame as pg
+    env.reset()
+    state = env.game.state
+    solid0, n0 = reachability.rasterize_solids(state)
+    for _ in range(400):                          # run right until enemies are out
+        if env.step(3)[2]:
+            break
+    assert len(state.enemy_group) > 0, "no enemy spawned - the test proves nothing"
+    solid1, n1 = reachability.rasterize_solids(state)
+
+    ghost = pg.sprite.Sprite()                    # an enemy parked in open air
+    ghost.rect = pg.Rect(1000, 300, 40, 40)
+    for name in ('enemy_group', 'shell_group', 'sprites_about_to_die_group'):
+        getattr(state, name).add(ghost)
+    try:
+        solid2, n2 = reachability.rasterize_solids(state)
+    finally:
+        for name in ('enemy_group', 'shell_group', 'sprites_about_to_die_group'):
+            getattr(state, name).remove(ghost)
+    assert n0 == n1 == n2 == config.EXPECTED_SOLID_RECTS
+    assert np.array_equal(solid0, solid1) and np.array_equal(solid0, solid2)
+    assert int(solid0.sum()) == config.EXPECTED_SOLID_PX
+
+
 # ── Test R: reproducible from a clean rebuild ─────────────────────────────
 @pytest.mark.slow
 def test_methods_reproduce_and_reconcile(env):

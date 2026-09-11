@@ -9,7 +9,9 @@ Two questions this module keeps strictly apart:
   WHY DID THE EPISODE END?          level_complete / death / timeout /
                                     safety_reset / engine_done (and
                                     time_limit, which only TimeLimit above the
-                                    wrapper can know about).
+                                    wrapper can know about). In QA mode time
+                                    alone never ends an episode, so timeout and
+                                    time_limit are legacy-only there.
 
 Before this existed, "the episode is over" was the only lifecycle signal
 there was, and a timeout came back dressed as a death (death_cause
@@ -31,7 +33,9 @@ the conversion happens here and nowhere else.
 from __future__ import annotations
 
 import math
+from collections import deque
 from enum import Enum
+from itertools import pairwise
 
 from . import config
 
@@ -58,6 +62,13 @@ class EndReason:
     # Set by TimeLimit, which wraps outside this layer; the trainer's
     # callback reads it from SB3's "TimeLimit.truncated" info key.
     TIME_LIMIT = "time_limit"
+
+
+class SafetyReason:
+    """Which stagnation evidence a safety reset fired on (config SAFETY RESET).
+    There is deliberately no reason made of elapsed time or drought alone."""
+    STUCK = "stuck"
+    LOOP = "unproductive_loop"
 
 
 def classify_end(info, safety_fired):
@@ -102,11 +113,16 @@ class EpisodeLifecycle:
         self.substeps = 0
         self.last_discovery_substep = 0
         self.safety_fired = False
+        self.safety_reason = None
         self.end_reason = None
 
         self.consecutive_exhausted = 0
         self.consecutive_stuck = 0
+        self.consecutive_unproductive = 0
         self.last_window = None          # the most recent window's verdict
+        # Recent verdicts, for judging a streak of windows as ONE span (the
+        # LOOP arm). Bounded: only the last SAFETY_STUCK_WINDOWS are read.
+        self.recent_windows = deque(maxlen=64)
         self._reset_window()
 
         # T1's target, frozen for the episode. coverage.episode_target() calls
@@ -180,8 +196,12 @@ class EpisodeLifecycle:
     def _close_window(self, viewport_x):
         """Classifies the window just finished as transit / stuck / neither."""
         v = {'new_px': self._w_new, 'straightness': 0.0,
-             'frontier_gain': 0.0, 'bbox_area': 0.0, 'cells_ahead': None}
+             'frontier_gain': 0.0, 'bbox_area': 0.0, 'cells_ahead': None,
+             'start': self._w_start, 'end': self._w_prev, 'path': self._w_path,
+             'centre': None}
         if self._w_start is not None:
+            v['centre'] = ((self._w_min[0] + self._w_max[0]) / 2.0,
+                           (self._w_min[1] + self._w_max[1]) / 2.0)
             s, e = self._w_start, self._w_prev
             net = math.hypot(e[0] - s[0], e[1] - s[1])
             v['straightness'] = net / max(self._w_path, 1e-6)
@@ -202,9 +222,17 @@ class EpisodeLifecycle:
                     and v['bbox_area'] < config.STUCK_BBOX_AREA
                     and v['new_px'] == 0)
         exhausted = v['new_px'] < config.YIELD_FLOOR and not in_transit
-        v.update(in_transit=in_transit, is_stuck=is_stuck, exhausted=exhausted)
+        # The LOOP arm's window: Mario was somewhere, found nothing at all, and
+        # was NOT transit. is_stuck is the same thing confined to a small box.
+        unproductive = (v['new_px'] == 0 and not in_transit
+                        and self._w_start is not None)
+        v.update(in_transit=in_transit, is_stuck=is_stuck, exhausted=exhausted,
+                 unproductive=unproductive)
+        self.recent_windows.append(v)
 
         self.consecutive_stuck = self.consecutive_stuck + 1 if is_stuck else 0
+        self.consecutive_unproductive = (self.consecutive_unproductive + 1
+                                         if unproductive else 0)
         self.consecutive_exhausted = (self.consecutive_exhausted + 1
                                       if exhausted else 0)
         self.last_window = v
@@ -290,15 +318,67 @@ class EpisodeLifecycle:
 
     # ── safety reset ──────────────────────────────────────────────────────
     def safety_reset_due(self):
-        """All three, or nothing. Elapsed steps alone can never fire it, and
-        neither can a drought while Mario is coherently in transit - transit
-        windows are never stuck windows, so they break the stuck streak."""
-        return (self.agent_steps > config.SAFETY_MIN_EPISODE_STEPS
-                and self.drought_agent_steps() > config.SAFETY_DROUGHT_STEPS
-                and self.consecutive_stuck >= config.SAFETY_STUCK_WINDOWS)
+        return self.safety_evidence() is not None
+
+    def safety_evidence(self):
+        """The SafetyReason the episode has earned a reset for, or None.
+
+        Every reset needs STAGNATION EVIDENCE; nothing made of elapsed steps
+        or of a drought alone can fire it. Both arms need ALL of:
+
+          * a drought: no meaningful new pixel for SAFETY_DROUGHT_STEPS;
+          * the floor SAFETY_MIN_EPISODE_STEPS (a floor - it only ever delays
+            a reset, it can never cause one);
+          * the last SAFETY_STUCK_WINDOWS closed windows each found nothing
+            and each was NOT coherent transit. A transit window breaks every
+            streak, so Mario crossing old ground is never reset, however long
+            the crossing or the drought;
+          * across those windows, no meaningful progress: where Mario is (the
+            centre of each window's box) moved no more than
+            TRANSIT_FRONTIER_GAIN_PX, and the frontier came no closer than
+            that. A slow zigzag that keeps gaining ground is progress.
+
+        and then, what KIND of stagnation:
+
+          STUCK  each of those windows stayed inside a small box.
+          LOOP   the windows, taken as one path, doubled back on themselves:
+                 net displacement is no more than TRANSIT_STRAIGHTNESS of the
+                 path walked - the single-window transit test, on the span.
+        """
+        if (self.drought_agent_steps() <= config.SAFETY_DROUGHT_STEPS
+                or self.agent_steps <= config.SAFETY_MIN_EPISODE_STEPS):
+            return None
+        k = config.SAFETY_STUCK_WINDOWS
+        span = list(self.recent_windows)[-k:]
+        if (self.consecutive_unproductive < k or len(span) < k
+                or self._span_progressed(span)):
+            return None
+        if self.consecutive_stuck >= k:
+            return SafetyReason.STUCK
+        if self._span_straightness(span) <= config.TRANSIT_STRAIGHTNESS:
+            return SafetyReason.LOOP
+        return None
+
+    @staticmethod
+    def _span_progressed(span):
+        """Did Mario get meaningfully anywhere across these windows?"""
+        a, b = span[0]['centre'], span[-1]['centre']
+        moved = math.hypot(b[0] - a[0], b[1] - a[1])
+        closed_in = sum(w['frontier_gain'] for w in span)
+        return (moved > config.TRANSIT_FRONTIER_GAIN_PX
+                or closed_in > config.TRANSIT_FRONTIER_GAIN_PX)
+
+    @staticmethod
+    def _span_straightness(span):
+        path = sum(w['path'] for w in span) + sum(
+            math.hypot(b['start'][0] - a['end'][0], b['start'][1] - a['end'][1])
+            for a, b in pairwise(span))
+        first, last = span[0]['start'], span[-1]['end']
+        return math.hypot(last[0] - first[0], last[1] - first[1]) / max(path, 1e-6)
 
     def fire_safety_reset(self):
         self.safety_fired = True
+        self.safety_reason = self.safety_evidence()
 
     # ── info, every substep ───────────────────────────────────────────────
     def annotate(self, info, done):
@@ -319,3 +399,6 @@ class EpisodeLifecycle:
         if done:
             self.end_reason = classify_end(info, self.safety_fired)
             info['episode_end_reason'] = self.end_reason
+            info['safety_reset_reason'] = (self.safety_reason
+                                           if self.end_reason == EndReason.SAFETY_RESET
+                                           else None)

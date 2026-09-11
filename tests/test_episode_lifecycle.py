@@ -106,9 +106,10 @@ def test_retired_drought_limit_is_gone():
 
 
 def test_make_env_timelimit_follows_the_mode():
-    """TimeLimit is chosen per mode, in the parent, from config."""
+    """TimeLimit is chosen per mode, in the parent, from config - and QA
+    training has none: a step count alone may not end a QA episode."""
     import train_agent
-    for mode, want in (("qa_exploration", config.QA_EPISODE_MAX_STEPS),
+    for mode, want in (("qa_exploration", None),
                        ("legacy_completion", config.LEGACY_EPISODE_MAX_STEPS)):
         init = train_agent.make_env(0, reward_mode=mode)
         got = inspect.getclosurevars(init).nonlocals
@@ -187,6 +188,270 @@ def test_measured_timer_caps(env):
         assert first_diff is None, f"QA frame differs from legacy at substep {first_diff + 1}"
     finally:
         env.episode_time_units = None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# THE RESPAWN RULE — time alone never ends a QA episode
+# ══════════════════════════════════════════════════════════════════════════
+def _qa_wrapper(env):
+    return GlitchHunterWrapper(env, reward_mode="qa_exploration",
+                               coverage=SpatialCoverage(
+                                   testable_mask=np.ones((config.GRID_H, config.GRID_W), bool)))
+
+
+def _hold_until(step, substeps):
+    """NOOP for up to `substeps`; returns (done, info, substeps taken)."""
+    info = {}
+    for n in range(1, substeps + 1):
+        _o, _r, done, _t, info = step(0)
+        if done:
+            return True, info, n
+    return False, info, substeps
+
+
+def test_qa_clock_running_out_does_not_end_the_episode(fresh):
+    """The engine is one unit from timing out. In QA mode it must not: the
+    clock is topped up, the TIME box keeps drawing 001, and Mario lives."""
+    w = _qa_wrapper(fresh)
+    w.reset()
+    fresh.game.state.overhead_info_display.time = 2
+    done, info, _n = _hold_until(w.step, 200)          # ~8 clock units
+    assert not done, f"QA episode ended: {info.get('death_cause')}"
+    assert info['death_cause'] is None
+    assert info['clock_extensions'] >= 1
+    assert info['time_left'] > 1
+    assert info['hud_time'] == 1, "the TIME box moved off the legacy-equivalent 001"
+
+
+def test_legacy_clock_still_times_out(fresh):
+    """Legacy keeps the timeout the 6M brain was trained with."""
+    w = GlitchHunterWrapper(fresh, reward_mode="legacy_completion", attach_coverage=False)
+    w.reset()
+    fresh.game.state.overhead_info_display.time = 2
+    done, info, _n = _hold_until(w.step, 200)
+    assert done and info['death_cause'] == 'timeout'
+
+
+def test_the_bare_engine_still_times_out_on_the_qa_budget(fresh):
+    """The completion evaluator plays the bare engine on the QA budget; its
+    frozen protocol counts timeouts, so the hold must not reach it."""
+    fresh.episode_time_units = config.QA_EPISODE_TIME_UNITS
+    fresh.reset()
+    fresh.game.state.overhead_info_display.time = 2
+    done, info, _n = _hold_until(fresh.step, 200)
+    assert done and info['death_cause'] == 'timeout'
+    assert info['hud_time'] == 0
+
+
+def test_the_hold_never_touches_the_castle_countdown(fresh):
+    """At the castle door the engine converts the remaining time to score;
+    topping the clock up there would pay out invented time."""
+    fresh.episode_time_units = config.QA_EPISODE_TIME_UNITS
+    fresh.reset()
+    state = fresh.game.state
+    state.overhead_info_display.time = 1
+    state.mario.in_castle = True
+    assert fresh.hold_clock() == 0
+    state.mario.in_castle = False
+    fresh.episode_time_units = None
+    assert fresh.hold_clock() == 0, "held a clock with no QA budget (no display offset)"
+
+
+@pytest.mark.slow
+def test_productive_exploration_outlives_the_old_qa_clock(fresh, monkeypatch):
+    """The conflict this rule resolves, on the real engine. Before it, every
+    QA episode died with death_cause 'timeout' at agent step 9,781 however
+    productive it was. Mario here keeps 'discovering' (the coverage reports a
+    new pixel every substep) and must still be alive well past that point."""
+    w = _qa_wrapper(fresh)
+    monkeypatch.setattr(w.coverage, 'record', lambda obs: 1)
+    w.reset()
+    past = (config.QA_EPISODE_CAP_AGENT_STEPS_MEASURED + 250) * SPS
+    done, info, n = _hold_until(w.step, past)
+    assert not done, f"ended at substep {n}: {info.get('episode_end_reason')}"
+    assert info['lifecycle_agent_steps'] > config.QA_EPISODE_CAP_AGENT_STEPS_MEASURED
+    assert info['clock_extensions'] >= 1
+    assert info['hud_time'] == 1
+
+
+OLD_CLOCK = config.QA_EPISODE_CAP_AGENT_STEPS_MEASURED      # 9,781: a diagnostic only
+
+
+def _wander(lc, substeps, n_new_every=None):
+    """A genuine repeated local loop: roams a 400 x 100 px area, doubling back
+    constantly - never a small box (so never STUCK), never straight enough to
+    read as transit, never gaining ground. Continues from lc.substeps."""
+    for _ in range(substeps):
+        i = lc.substeps
+        x = 400 + abs((i % 200) - 100) * 4
+        y = 398 + abs((i % 130) - 65) * 100 // 65
+        n_new = 1 if n_new_every and i % n_new_every == n_new_every - 1 else 0
+        lc.observe(_info(x, y), n_new)
+
+
+def _back_and_forth_transit(lc, windows):
+    """Each window: walk 400 px one way, then stand. Every window reads as
+    coherent transit (straightness 1.0), and finds nothing."""
+    for k in range(windows):
+        sign = 1 if k % 2 == 0 else -1
+        x = 400 if sign > 0 else 800
+        for i in range(WINDOW):
+            lc.observe(_info(x + sign * min(i, 400)), 0)
+
+
+def test_the_rule_has_no_elapsed_time_arm():                                   # [1]
+    """No step count - 9,781 or any other - is a reset threshold any more."""
+    import exploration.lifecycle as lifecycle
+    from exploration.lifecycle import SafetyReason
+    assert not hasattr(config, 'SAFETY_NO_DISCOVERY_STEPS')
+    assert not hasattr(config, 'SAFETY_LOOP_MIN_EPISODE_STEPS')
+    assert {v for k, v in vars(SafetyReason).items() if k.isupper()} == {
+        'stuck', 'unproductive_loop'}
+    lcls = lifecycle.EpisodeLifecycle
+    src = "".join(inspect.getsource(f) for f in (
+        lcls.safety_evidence, lcls._span_progressed, lcls._span_straightness))
+    for name in ('QA_EPISODE_CAP_AGENT_STEPS_MEASURED', 'MAX_EXPLORE_STEPS',
+                 'QA_EPISODE_MAX_STEPS', 'QA_EPISODE_TIME_UNITS'):
+        assert name not in src, f"the safety reset reads {name}"
+
+
+def test_elapsed_steps_and_a_drought_together_cannot_reset():                 # [1]
+    """A slow, straight walk finding nothing for 3x the old engine lifetime:
+    the longest episode and the longest drought, and no stagnation at all."""
+    lc = EpisodeLifecycle(FakeCoverage())
+    for i in range(3 * OLD_CLOCK * SPS):
+        lc.observe(_info(100 + 0.05 * i), 0)
+        if i % WINDOW == 0:
+            assert not lc.safety_reset_due(), f"reset at agent step {lc.agent_steps}"
+    assert lc.agent_steps >= 3 * OLD_CLOCK and lc.drought_agent_steps() >= 3 * OLD_CLOCK
+    assert not lc.safety_reset_due()
+
+
+def test_a_very_long_drought_in_coherent_transit_cannot_reset():             # [2]
+    """Window after window of transit - even back and forth, the pattern the
+    removed no-discovery arm used to cut off at 9,781 - never resets."""
+    lc = EpisodeLifecycle(FakeCoverage())
+    for _ in range(3 * OLD_CLOCK // config.LIFECYCLE_WINDOW + 1):
+        _back_and_forth_transit(lc, 1)
+        assert lc.last_window['in_transit']
+        assert not lc.safety_reset_due(), f"reset in transit at {lc.agent_steps}"
+    assert lc.drought_agent_steps() > 3 * OLD_CLOCK
+    assert lc.consecutive_unproductive == 0
+
+
+def test_a_slow_zigzag_that_gains_ground_is_not_a_loop():                    # [3]
+    """Every window doubles back (none reads as transit) and nothing new is
+    found - but Mario is still getting further right. That is progress. On
+    flat ground his box has zero AREA, so this also pins the gap that used to
+    let the STUCK arm read a wide, advancing zigzag as stuck."""
+    lc = EpisodeLifecycle(FakeCoverage())
+    x = 100.0
+    for i in range(3 * OLD_CLOCK * SPS):
+        x += 3 if i % 420 < 240 else -3                # +720, -540: net +180 a cycle
+        lc.observe(_info(x), 0)
+        if i % WINDOW == WINDOW - 1:
+            assert not lc.safety_reset_due(), f"reset at agent step {lc.agent_steps}"
+    assert not lc.last_window['in_transit']
+    assert lc.consecutive_unproductive >= config.SAFETY_STUCK_WINDOWS
+    assert not lc.safety_reset_due(), "reset Mario while he was still gaining ground"
+
+
+def test_a_genuine_repeated_local_loop_resets():                               # [4]
+    """Past the floor and the drought, four stagnant non-transit windows that
+    together go nowhere: that, and nothing about the step count, resets."""
+    from exploration.lifecycle import SafetyReason
+    lc = EpisodeLifecycle(FakeCoverage())
+    fired_at = None
+    for _ in range(OLD_CLOCK):
+        _wander(lc, SPS)
+        if lc.safety_reset_due():
+            fired_at = lc.agent_steps
+            break
+    assert lc.consecutive_stuck == 0, "the wander is not the small-box stuck shape"
+    assert lc.safety_evidence() == SafetyReason.LOOP
+    assert config.SAFETY_MIN_EPISODE_STEPS < fired_at < OLD_CLOCK, (
+        "the loop was only caught at the old engine lifetime")
+
+    # The same loop with a new pixel every 1,000 steps is productive: never.
+    lc = EpisodeLifecycle(FakeCoverage())
+    for _ in range(3 * OLD_CLOCK):
+        _wander(lc, SPS, n_new_every=1_000 * SPS)
+        assert not lc.safety_reset_due(), f"reset a productive episode at {lc.agent_steps}"
+
+
+def test_the_loop_reset_ends_the_episode_through_the_wrapper(qa_env, monkeypatch):  # [4]
+    """Wired end to end, and reported with the evidence it fired on."""
+    monkeypatch.setattr(config, 'SAFETY_MIN_EPISODE_STEPS', 10)
+    monkeypatch.setattr(config, 'SAFETY_DROUGHT_STEPS', 5)
+    monkeypatch.setattr(config, 'SAFETY_STUCK_WINDOWS', 1)
+    _w, drive = qa_env
+    done, info, i = False, {}, 0
+    while not done and i < 5 * WINDOW:
+        _o, _r, done, _t, info = drive(x=400 + abs((i % 200) - 100) * 4, y=398 + (i % 130))
+        i += 1
+    assert done, "the loop reset never ended the episode"
+    assert info['episode_end_reason'] == EndReason.SAFETY_RESET
+    assert info['safety_reset_reason'] == 'unproductive_loop'
+
+
+def test_long_travel_over_old_ground_never_ends_the_episode(env, patch_step):  # [1][2][3]
+    """Through the real QA wrapper, on a map where every pixel is already
+    covered: Mario walks the level back and forth for well over the old
+    engine lifetime, finding nothing at all. No timeout, no TimeLimit, no
+    reset - just a long episode."""
+    cov = SpatialCoverage(testable_mask=np.ones((config.GRID_H, config.GRID_W), bool))
+    cov.visited[:] = 1                                       # all old territory
+    w = GlitchHunterWrapper(env, reward_mode="qa_exploration", coverage=cov)
+    w.reset()
+    obs = np.zeros(env.observation_space.shape, dtype=np.uint8)
+    base = {'y_pos': 498, 'x_vel': 3.0, 'on_ground': True, 'status': 'small',
+            'flag_get': False, 'powerup_active_count': 0, 'nearest_powerup_dx': None,
+            'death_cause': None, 'is_dead': False, 'score': 0, 'coins': 0, 'viewport_x': 0}
+    info, n = {}, 0
+    for n in range(1, (OLD_CLOCK + 600) * SPS + 1):
+        lap = (n // 2400) % 2                                   # 7,200 px each way
+        x = 200 + (n % 2400) * 3 if lap == 0 else 7400 - (n % 2400) * 3
+        step_info = dict(base, x_pos=x, mario_rect=(x, 498, 30, 40))
+        patch_step(lambda a, _i=step_info: (obs, 0.0, False, False, dict(_i)))
+        _o, _r, done, _t, info = w.step(0)
+        assert not done, f"ended at agent step {n // SPS}: {info.get('episode_end_reason')}"
+    assert info['lifecycle_agent_steps'] > OLD_CLOCK
+    assert w.lifecycle.drought_agent_steps() > OLD_CLOCK
+    assert info['coverage_episode_new'] == 0
+
+
+@pytest.mark.slow
+def test_a_real_pacing_loop_is_reset_on_evidence(fresh):                       # [4][5]
+    """The real engine, a map already fully covered, Mario pacing right and
+    left near spawn: a genuine useless loop. It ends on stagnation evidence,
+    at the first moment the evidence holds - well before the old engine
+    lifetime, which plays no part."""
+    cov = SpatialCoverage(testable_mask=np.ones((config.GRID_H, config.GRID_W), bool))
+    cov.visited[:] = 1
+    w = GlitchHunterWrapper(fresh, reward_mode="qa_exploration", coverage=cov)
+    w.reset()
+    done, info, n = False, {}, 0
+    while not done and n < (OLD_CLOCK + 100) * SPS:
+        _o, _r, done, _t, info = w.step(1 if (n // (8 * SPS)) % 2 == 0 else 6)
+        n += 1
+    assert done, "a pacing loop was never reset"
+    assert info['episode_end_reason'] == EndReason.SAFETY_RESET
+    assert info['safety_reset_reason'] in ('stuck', 'unproductive_loop')
+    assert config.SAFETY_MIN_EPISODE_STEPS < info['lifecycle_agent_steps'] < OLD_CLOCK
+
+
+def test_qa_death_still_ends_the_run(fresh):                                   # [6]
+    w = _qa_wrapper(fresh)
+    w.reset()
+    for _ in range(10):
+        w.step(0)
+    mario = fresh.game.state.mario
+    mario.death_cause = 'goomba'
+    mario.start_death_jump(fresh.game.state.game_info)
+    _o, _r, done, _t, info = w.step(0)
+    assert done and info['is_dead']
+    assert info['episode_end_reason'] == EndReason.DEATH
+    assert info['safety_reset_reason'] is None
 
 
 def _to_castle(env, wrapper=None):
@@ -592,6 +857,7 @@ def test_safety_floor_is_reachable_in_the_real_engine(fresh):
         _obs, _r, done, _t, info = w.step(0)
     steps = info['lifecycle_agent_steps']
     assert info['episode_end_reason'] == EndReason.SAFETY_RESET
+    assert info['safety_reset_reason'] == 'stuck'                            # [5]
     assert config.SAFETY_MIN_EPISODE_STEPS < steps <= config.SAFETY_MIN_EPISODE_STEPS + 1
     assert info['time_left'] > 0, "the engine timer got there first"
 
@@ -638,8 +904,8 @@ def qa_env(env, patch_step):
 
     obs = np.zeros(env.observation_space.shape, dtype=np.uint8)
 
-    def drive(x):
-        info = dict(base, x_pos=x, mario_rect=(int(x), 498, 30, 40))
+    def drive(x, y=498):
+        info = dict(base, x_pos=x, y_pos=y, mario_rect=(int(x), int(y), 30, 40))
         patch_step(lambda a, _i=info: (obs, 0.0, False, False, dict(_i)))
         return w.step(0)
     yield w, drive

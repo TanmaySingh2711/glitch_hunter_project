@@ -165,12 +165,27 @@ document.addEventListener('DOMContentLoaded', () => {
         logTerminal.scrollTop = logTerminal.scrollHeight;
     });
 
+    // A pause the SERVER initiated - most often the user closing the game
+    // window with its X. The session is kept, so START TESTING reopens the
+    // window and carries on from the same moment.
+    const PAUSE_NOTES = {
+        window_closed: '— game window closed: testing paused. Press START TESTING to reopen it and resume —',
+        session_ended: '— the agent session ended —',
+        error: '— testing paused after an error (see the server console) —',
+    };
+    socket.on('testing_paused', (data) => {
+        const reason = (data && data.reason) || '';
+        note(PAUSE_NOTES[reason] || '— testing paused —');
+        setIdleUI();
+    });
+
     // ─── CONNECTION LIFECYCLE ───
     // Without these the dashboard could sit showing "Testing..." with the
     // Start button greyed out long after the stream had actually stopped.
-    // The server clears its own state whenever a client connects, so after
-    // any reconnect it is definitively NOT running - the UI has to agree,
-    // or the only way out is a manual page refresh.
+    // The server pauses whenever a client connects or disconnects (keeping
+    // the session and the game window), so after any reconnect it is
+    // definitively NOT running - the UI has to agree, or the only way out is
+    // a manual page refresh. START TESTING then resumes the same session.
     socket.on('disconnect', () => {
         if (isTesting) {
             note('— connection lost, testing stopped —');

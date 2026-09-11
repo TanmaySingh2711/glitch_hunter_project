@@ -1,4 +1,9 @@
+import argparse
+import datetime
+import json
 import os
+import sys
+import zipfile
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
@@ -8,6 +13,7 @@ from collections import deque
 
 from exploration import config as xconfig
 from exploration import coverage as coverage_mod
+from exploration import level_completion as lc
 
 class ExactMilestoneCheckpointCallback(BaseCallback):
     """
@@ -39,10 +45,24 @@ class ExactMilestoneCheckpointCallback(BaseCallback):
 
     Crucially: this callback NEVER returns False. It only saves a file and
     keeps going — no pauses, ever, matching "I don't want any pauses."
+
+    ─── TWO MODES ───
+    `targets`  an explicit list - the legacy completion phase, unchanged.
+    `every`    open-ended: every multiple of `every` global timesteps, with no
+               last one (QA mode, Phase 4F). Only milestones CROSSED DURING
+               THIS RUN are saved - multiples above the step the run started
+               at - so a missing flag can never relabel today's model as an
+               older milestone, and nothing at or below the 6M seed is ever
+               written.
     """
-    def __init__(self, targets, save_path, name_prefix, coverage=None, verbose=0):
+    def __init__(self, targets=None, save_path=None, name_prefix=None, coverage=None,
+                 every=None, verbose=0):
         super().__init__(verbose)
-        self.targets = sorted(targets)
+        if (targets is None) == (every is None):
+            raise ValueError("give exactly one of targets= or every=")
+        self.targets = sorted(targets) if targets is not None else None
+        self.every = every
+        self._start = None
         self.save_path = save_path
         self.name_prefix = name_prefix
         # When present, the exploration bitmap is saved as a MATCHED PAIR with
@@ -52,6 +72,7 @@ class ExactMilestoneCheckpointCallback(BaseCallback):
         # not, and both look like ordinary training rather than like a bug.
         self.coverage = coverage
         self._saved = set()
+        self.last_saved = None          # the newest checkpoint this run wrote
 
     def _sentinel_path(self, target):
         return os.path.join(self.save_path, f".milestone_saved_{self.name_prefix}_{target}.flag")
@@ -66,31 +87,52 @@ class ExactMilestoneCheckpointCallback(BaseCallback):
         # milestone .zip files with copies of the current model, destroying
         # the entire training history in one step.
         os.makedirs(self.save_path, exist_ok=True)
-        self._saved = {t for t in self.targets if os.path.exists(self._sentinel_path(t))}
+        if self.targets is not None:
+            self._saved = {t for t in self.targets if os.path.exists(self._sentinel_path(t))}
+        else:
+            self._saved = set()
+            self._start = int(self.model.num_timesteps)
+
+    def _due(self):
+        if self.targets is not None:
+            return [t for t in self.targets
+                    if self.num_timesteps >= t and t not in self._saved]
+        target = (self.num_timesteps // self.every) * self.every
+        if target <= self._start or target in self._saved:
+            return []
+        if os.path.exists(self._sentinel_path(target)):
+            self._saved.add(target)
+            return []
+        return [target]
 
     def _on_step(self) -> bool:
-        for target in self.targets:
-            if self.num_timesteps >= target and target not in self._saved:
-                path = os.path.join(self.save_path, f"{self.name_prefix}_{target}_steps.zip")
-                # ─── SAVE ORDER IS LOAD-BEARING ───
-                # model zip -> coverage npz -> flag. The flag is the commit
-                # point: written last, so a crash partway through leaves the
-                # milestone unflagged and it is simply redone on the next run.
-                # Writing the flag first would permanently mark a milestone
-                # done while its coverage file was missing or half-written.
-                self.model.save(path)
-                if self.coverage is not None:
-                    cov_path = os.path.join(
-                        self.save_path,
-                        f"{self.name_prefix}_{target}_steps_coverage.npz")
-                    self.coverage.save(cov_path,
-                                       model_timesteps=self.num_timesteps)
-                open(self._sentinel_path(target), "w").close()
-                self._saved.add(target)
-                print(f"\n[CHECKPOINT] Saved exact milestone: {path} (at {self.num_timesteps:,} steps)")
-                if self.coverage is not None:
-                    print(f"[CHECKPOINT] Paired coverage: "
-                          f"{self.coverage.total_unique():,} unique world px")
+        for target in self._due():
+            path = os.path.join(self.save_path, f"{self.name_prefix}_{target}_steps.zip")
+            # ─── SAVE ORDER IS LOAD-BEARING ───
+            # model zip -> coverage npz -> flag. The flag is the commit
+            # point: written last, so a crash partway through leaves the
+            # milestone unflagged and it is simply redone on the next run.
+            # Writing the flag first would permanently mark a milestone
+            # done while its coverage file was missing or half-written.
+            self.model.save(path)
+            if self.coverage is not None:
+                cov_path = os.path.join(
+                    self.save_path,
+                    f"{self.name_prefix}_{target}_steps_coverage.npz")
+                self.coverage.save(cov_path,
+                                   model_timesteps=self.num_timesteps)
+            open(self._sentinel_path(target), "w").close()
+            self._saved.add(target)
+            self.last_saved = path
+            print(f"\n[CHECKPOINT] Saved exact milestone: {path} (at {self.num_timesteps:,} steps)")
+            if self.coverage is not None and self.coverage.testable_total:
+                covered = self.coverage.covered_testable()
+                print(f"[CHECKPOINT] Paired coverage: {covered:,} / "
+                      f"{self.coverage.testable_total:,} testable px "
+                      f"({lc.pct_text(covered, self.coverage.testable_total)})")
+            elif self.coverage is not None:
+                print(f"[CHECKPOINT] Paired coverage: "
+                      f"{self.coverage.total_unique():,} unique world px")
         return True
 
 
@@ -230,20 +272,44 @@ class CoverageStatsCallback(BaseCallback):
     says whether the run is doing its job.
     """
 
-    def __init__(self, coverage, every=10_000, verbose=0):
+    def __init__(self, coverage, every=10_000, session_start_covered=None,
+                 audit_path=None, trail_path=None, map_path=None, checkpoints=None,
+                 verbose=0):
         super().__init__(verbose)
         self.coverage = coverage
         self.every = every
         self._next = 0
         self._last_total = None
         self._last_step = None
+        # What this run/session found, as opposed to the campaign's total.
+        self.session_start_covered = session_start_covered
+        # Late in a campaign: where the remaining pixels are and whether
+        # discovery has stalled, for a later audit (Phase 4F) - as JSON and as
+        # a picture of the level. Never deletes or reclassifies a pixel.
+        self.audit_path = audit_path
+        self.map_path = map_path
+        self.plateau = lc.PlateauTracker()
+        # THE AUDIT TRAIL: one JSON line per report, appended - never
+        # rewritten - across every run of the campaign, so the whole history
+        # of coverage growth survives restarts (the console does not).
+        self.trail_path = trail_path
+        self.checkpoints = checkpoints          # ExactMilestoneCheckpointCallback
+        self._episodes = 0
+
+    def _append_trail(self, entry):
+        os.makedirs(os.path.dirname(self.trail_path) or '.', exist_ok=True)
+        with open(self.trail_path, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(entry) + '\n')
 
     def _on_step(self) -> bool:
+        self._episodes += int(sum(bool(d) for d in self.locals.get("dones", ())))
         if self.coverage is None or self.num_timesteps < self._next:
             return True
         self._next = self.num_timesteps + self.every
 
         covered = self.coverage.covered_testable()
+        if self.session_start_covered is None:
+            self.session_start_covered = covered
         total = covered
         rate = 0.0
         if self._last_total is not None and self.num_timesteps > self._last_step:
@@ -259,22 +325,133 @@ class CoverageStatsCallback(BaseCallback):
         # one worth watching - if it leaves zero mid-run, a glitch was found.
         noncov = self.coverage.noncoverage_px()
         anomalous = self.coverage.anomalous_px()
-        tail = f" | {remaining:,} remaining" if remaining is not None else ""
-        print(f"{os.linesep}[COVERAGE] {self.num_timesteps:,} steps | "
-              f"{covered:,} / {self.coverage.testable_total:,} testable "
-              f"({pct:.2f}%) | {rate:,.0f} new px per 10k{tail} | "
+        session_new = covered - self.session_start_covered
+        testable_total = self.coverage.testable_total
+        # pct_text truncates: 4,013,722 covered prints 99.9999%, never 100%.
+        shown = (lc.pct_text(covered, testable_total) if testable_total
+                 else f"{pct:.2f}%")
+        tail = f" | remaining {remaining:,}" if remaining is not None else ""
+        print(f"{os.linesep}[COVERAGE] step {self.num_timesteps:,} | covered "
+              f"{covered:,} / {testable_total or 0:,} testable ({shown}){tail} | "
+              f"+{session_new:,} this session | {rate:,.0f} new px per 10k | "
               f"noncoverage {noncov:,} (anomalous {anomalous:,})")
+
+        plateau = self.plateau.update(self.num_timesteps, covered)
+        if (remaining is not None and 0 < remaining < xconfig.STAGNATION_REMAINING_MIN):
+            report = lc.plateau_report(self.coverage, self.num_timesteps, plateau)
+            regions = report['remaining_regions']
+            big = regions['largest'][0] if regions['largest'] else None
+            where = (f"; largest {big['pixels']:,} px at x {big['world_bbox'][0]}-"
+                     f"{big['world_bbox'][2]}, y {big['world_bbox'][1]}-{big['world_bbox'][3]}"
+                     if big else "")
+            print(f"[PLATEAU] {remaining:,} testable px remain in "
+                  f"{regions['regions']} region(s){where} | no new pixel for "
+                  f"{plateau['steps_since_last_gain']:,} steps"
+                  f"{' -> STALLED' if plateau['stalled'] else ''}")
+            if self.map_path:
+                try:
+                    report['map_png'] = lc.write_remaining_map(self.coverage, self.map_path,
+                                                               regions)
+                except Exception as exc:          # a picture must never stop training
+                    report['map_error'] = str(exc)
+            if self.audit_path:
+                lc.write_json_atomic(report, self.audit_path)
+        if self.trail_path and testable_total:
+            origin = lc.provenance(self.coverage)
+            self._append_trail({
+                'global_timestep': int(self.num_timesteps),
+                'covered_testable_px': int(covered),
+                'testable_total': int(testable_total),
+                'coverage_pct_text': shown,
+                'remaining_testable_px': int(remaining),
+                'new_px_per_10k': round(rate, 1),
+                'session_new_px': int(session_new),
+                'episodes_this_session': self._episodes,
+                'last_checkpoint_this_session': (self.checkpoints.last_saved
+                                                 if self.checkpoints is not None else None),
+                'bootstrap_known_px': origin.get('bootstrap_known_testable_px'),
+                'qa_discovered_px': origin.get('qa_discovered_testable_px'),
+                'stalled': bool(plateau['stalled']),
+                'written_at': datetime.datetime.now().isoformat(timespec='seconds'),
+            })
         if self.logger is not None:
             self.logger.record("coverage/covered_testable_px", covered)
             self.logger.record("coverage/noncoverage_px", noncov)
             self.logger.record("coverage/anomalous_px", anomalous)
             self.logger.record("coverage/pct_testable", pct)
             self.logger.record("coverage/new_px_per_10k", rate)
+            self.logger.record("coverage/session_new_px", session_new)
+            self.logger.record("coverage/stalled", float(plateau['stalled']))
             self.logger.record("coverage/novelty_mult",
                                self.coverage.novelty_mult)
             if remaining is not None:
                 self.logger.record("coverage/remaining_px", remaining)
         return True
+
+
+class Level1CompletionCallback(BaseCallback):
+    """Ends QA training the moment Level 1 is fully covered (Phase 4F).
+
+    THE CONDITION is lc.is_level_complete: covered testable pixels ==
+    4,013,723, exactly. A timestep never ends QA training as a success.
+
+    WHEN IT CHECKS. The exact count is a pass over the ~10M-pixel bitmap
+    (~13 ms), too slow for every step, so it runs every `check_every` vector
+    steps - and ALWAYS on the last collection step of a rollout. That second
+    rule is the guarantee: the policy only changes in PPO's train(), which
+    runs after a rollout is collected. Checking on the last collection step
+    means completion is always seen before the next update, so the snapshot
+    holds exactly the policy that finished the level, and no spatial-novelty
+    update is ever made after it. (Returning False from on_step makes SB3's
+    learn() break out BEFORE train().)
+
+    ON COMPLETION: the policy, the exact coverage and the proof are written
+    at once into snapshot_dir - even between periodic checkpoints - and
+    training stops.
+    """
+
+    def __init__(self, coverage, snapshot_dir, name_prefix, session_start,
+                 check_every=256, verbose=0):
+        super().__init__(verbose)
+        self.coverage = coverage
+        self.snapshot_dir = snapshot_dir
+        self.name_prefix = name_prefix
+        self.session_start = dict(session_start)
+        self.check_every = check_every
+        self.completed = False
+        self.snapshot = None
+        self._since_check = 0
+        self._last_check = None
+
+    def _last_collection_step(self):
+        n, n_total = self.locals.get("n_steps"), self.locals.get("n_rollout_steps")
+        return n is not None and n_total is not None and n == n_total - 1
+
+    def _on_step(self) -> bool:
+        self._since_check += 1
+        if self._since_check < self.check_every and not self._last_collection_step():
+            return True
+        self._since_check = 0
+        covered = self.coverage.covered_testable()
+        previous, self._last_check = self._last_check, (self.num_timesteps, covered)
+        if not lc.is_level_complete(covered, self.coverage.testable_total):
+            return True
+        self.snapshot = lc.write_completion_snapshot(
+            model=self.model, coverage=self.coverage,
+            snapshot_dir=self.snapshot_dir, name_prefix=self.name_prefix,
+            timesteps=self.num_timesteps, session_start=self.session_start,
+            previous_check=previous)
+        self.completed = True
+        paths = self.snapshot['_paths']
+        print(f"{os.linesep}{'=' * 68}")
+        print(f"[LEVEL 1 COMPLETE] {covered:,} / {self.coverage.testable_total:,} "
+              f"testable px covered at global step {self.num_timesteps:,}.")
+        print(f"[LEVEL 1 COMPLETE] policy   -> {paths['model']}")
+        print(f"[LEVEL 1 COMPLETE] coverage -> {paths['coverage']}")
+        print(f"[LEVEL 1 COMPLETE] proof    -> {paths['metadata']}")
+        print("[LEVEL 1 COMPLETE] Stopping QA training; no further updates.")
+        print("=" * 68)
+        return False
 
 
 class LifecycleStatsCallback(BaseCallback):
@@ -288,7 +465,12 @@ class LifecycleStatsCallback(BaseCallback):
         transition, the adaptive criteria are mis-set - the brief says report
         it rather than tune around it.
       * safety_reset should be rare too. It is the last-resort ending, after
-        level completion and death.
+        level completion and death. Each is reported with the evidence it
+        fired on (stuck / unproductive_loop).
+
+    Also reported: the longest episode, and how many outlived the old QA clock
+    (9,781 agent steps) - under the respawn rule those are the episodes the
+    engine timer used to kill.
     """
 
     def __init__(self, every=10_000, verbose=0):
@@ -298,6 +480,8 @@ class LifecycleStatsCallback(BaseCallback):
         self._transitions = {}
         self._ends = {}
         self._episodes = 0
+        self._outlived_clock = 0
+        self._longest = 0
 
     def _on_step(self) -> bool:
         for done, info in zip(self.locals.get("dones", []),
@@ -311,7 +495,11 @@ class LifecycleStatsCallback(BaseCallback):
             # TimeLimit sits above the wrapper; SB3 flags its truncation here.
             if info.get("TimeLimit.truncated"):
                 end = "time_limit"
+            if end == "safety_reset" and info.get("safety_reset_reason"):
+                end = f"safety_reset:{info['safety_reset_reason']}"
             self._ends[end] = self._ends.get(end, 0) + 1
+            self._outlived_clock += bool(info.get("clock_extensions"))
+            self._longest = max(self._longest, int(info.get("lifecycle_agent_steps") or 0))
 
         if self.num_timesteps < self._next or not self._episodes:
             return True
@@ -320,13 +508,18 @@ class LifecycleStatsCallback(BaseCallback):
         def fmt(d):
             return ", ".join(f"{k} {v}" for k, v in sorted(d.items()))
         print(f"[LIFECYCLE] {self._episodes} episodes | "
-              f"transitions: {fmt(self._transitions)} | ends: {fmt(self._ends)}")
+              f"transitions: {fmt(self._transitions)} | ends: {fmt(self._ends)} | "
+              f"longest {self._longest:,} steps, {self._outlived_clock} outlived "
+              f"the old {xconfig.QA_EPISODE_CAP_AGENT_STEPS_MEASURED:,}-step clock")
         if self.logger is not None:
             for k, v in self._transitions.items():
                 self.logger.record(f"lifecycle/transition_{k}", v / self._episodes)
             for k, v in self._ends.items():
                 self.logger.record(f"lifecycle/end_{k}", v / self._episodes)
+            self.logger.record("lifecycle/longest_episode_steps", self._longest)
+            self.logger.record("lifecycle/outlived_old_clock", self._outlived_clock / self._episodes)
         self._transitions, self._ends, self._episodes = {}, {}, 0
+        self._outlived_clock, self._longest = 0, 0
         return True
 
 
@@ -414,12 +607,15 @@ def make_env(rank, shm_names=None, reward_mode=None):
     """
     # Resolved HERE, in the parent, and closed over as plain ints - so the
     # worker receives numbers rather than having to re-derive the mode.
-    # TimeLimit is a BACKSTOP strictly above the engine timer's measured cap
-    # (the engine clock is authoritative - see exploration/config.py EPISODE
-    # LENGTH). It used to be 4000 in both modes, which was dead code: the
-    # engine always timed out first, at 2,451 agent steps.
+    # LEGACY: TimeLimit is a BACKSTOP strictly above the engine timer's
+    # measured cap (the engine clock is authoritative - see exploration/
+    # config.py EPISODE LENGTH). It used to be 4000 in both modes, which was
+    # dead code: the engine always timed out first, at 2,451 agent steps.
+    # QA: none. A step count alone may not end a QA episode (the respawn
+    # rule, config QA_TIMEOUT_ENDS_EPISODE); the lifecycle's evidence-based
+    # safety reset is what ends an unproductive one.
     mode = reward_mode or xconfig.REWARD_MODE
-    max_steps = (xconfig.QA_EPISODE_MAX_STEPS if mode == "qa_exploration"
+    max_steps = (None if mode == "qa_exploration"
                  else xconfig.LEGACY_EPISODE_MAX_STEPS)
     skip = xconfig.SUBSTEPS_PER_AGENT_STEP
 
@@ -440,7 +636,8 @@ def make_env(rank, shm_names=None, reward_mode=None):
         env = GrayscaleObservation(env, keep_dim=False)
         env = ResizeObservation(env, (84, 84))
         env = FrameStackObservation(env, 4)
-        env = TimeLimit(env, max_episode_steps=max_steps)
+        if max_steps is not None:
+            env = TimeLimit(env, max_episode_steps=max_steps)
         env = Monitor(env)
         return env
     return _init
@@ -499,24 +696,40 @@ FRESH_START = False
 RESET_VALUE_HEAD = True
 
 # ═══════════════════════════════════════════════════════════════════════
-# BUDGET
+# WHEN TRAINING ENDS
 #
-# The completion phase finished at exactly 6,000,000, which makes the
-# remaining budget max(0, 6M - 6M) = 0 - the script correctly refuses to
-# train because there is nothing left to do. Continuing therefore REQUIRES a
-# new total, and that number is stated here explicitly rather than being
-# nudged upward quietly: 6,000,000 more steps, for a lifetime total of
-# 12,000,000. The QA phase gets as many steps as the completion phase did,
-# because it is learning a genuinely different objective, not fine-tuning
-# the old one.
+# LEGACY: a step budget, unchanged. The completion phase finished at exactly
+# 6,000,000, so its remaining budget is 0 and it refuses to train again.
 #
-# Nothing about the first 6,000,000 is discarded or recounted. The step
-# counter continues from 6,000,001 (reset_num_timesteps stays False), so the
-# milestone list below starts at 6.4M rather than at 400k.
+# QA (Phase 4F): there is NO step target. QA training succeeds when, and only
+# when, every verified testable pixel of Level 1 is covered:
+#
+#     covered_testable_pixels == 4,013,723      (exploration/level_completion.py)
+#
+# Level1CompletionCallback stops training the moment that holds and writes
+# the immutable completion snapshot. Timesteps keep numbering checkpoints and
+# logs and nothing else. (This replaced a fixed 12,000,000 lifetime target,
+# which said nothing about whether the level had actually been explored.)
+#
+# QA_SAFETY_CAP_TIMESTEPS is a SAFETY CAP ONLY - an absolute global step at
+# which a run is cut off whether or not the level is done (e.g. to bound a
+# short validation run). Reaching it is never Level-1 completion and is
+# reported as a stop with pixels still remaining. None = no cap.
+# `--safety-cap-timesteps N` sets it for one launch without editing this file.
+#
+# THE LAUNCH GATE. A QA launch with no cap at all is an unrestricted long
+# campaign, and one of those only starts with `--unrestricted`: before it,
+# the controlled validation (python train_agent.py --safety-cap-timesteps
+# 6020000, i.e. 6.0M -> 6.02M) has to be run and its coverage growth, reward
+# balance, lifecycle behaviour, resume integrity and completion retention
+# reviewed. The gate cannot check that the review happened - only a person
+# can - but it makes sure an unbounded run is never started by default.
 # ═══════════════════════════════════════════════════════════════════════
 TOTAL_TIMESTEPS_LEGACY = 6_000_000
-TOTAL_TIMESTEPS_QA = 12_000_000
-TOTAL_TIMESTEPS = TOTAL_TIMESTEPS_QA if QA_PHASE else TOTAL_TIMESTEPS_LEGACY
+QA_SAFETY_CAP_TIMESTEPS = None
+# SB3's learn() must be given SOME integer; with no cap this is it. It is not
+# a target and no message ever presents it as one.
+_SB3_OPEN_ENDED = 2 ** 62
 NUM_ENVS = 8                          # Parallel environments
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -526,13 +739,23 @@ NUM_ENVS = 8                          # Parallel environments
 # See ExactMilestoneCheckpointCallback above for why this is reliable where
 # a frequency-based approach isn't.
 # ═══════════════════════════════════════════════════════════════════════
-if QA_PHASE:
-    # 6.4M .. 12.0M, continuing the same 400k cadence. These are ABSOLUTE
-    # lifetime step counts, so they do not collide with the completion
-    # phase's 400k-6.0M files even though the cadence is identical.
-    CHECKPOINT_MILESTONES = [400_000 * i for i in range(16, 31)]
-else:
-    CHECKPOINT_MILESTONES = [400_000 * i for i in range(1, 16)]  # 400k .. 6.0M
+LEGACY_CHECKPOINT_MILESTONES = [400_000 * i for i in range(1, 16)]  # 400k .. 6.0M
+# QA: every multiple of 400k GLOBAL timesteps - 6.4M, 6.8M, 7.2M, ... - with
+# no last one, since QA has no step target. Absolute lifetime counts, in
+# checkpoints_qa/ under the QA name, so they never collide with the
+# completion phase's 400k-6.0M files.
+QA_CHECKPOINT_EVERY = 400_000
+CHECKPOINT_MILESTONES = None if QA_PHASE else LEGACY_CHECKPOINT_MILESTONES
+
+# The Level-1 completion snapshot: its own directory beside the periodic
+# checkpoints, written once, read-only (exploration/level_completion.py). The
+# remaining-pixel audit is a live file, rewritten late in a campaign.
+LEVEL1_SNAPSHOT_DIR = os.path.join(CHECKPOINT_DIR, lc.SNAPSHOT_DIRNAME)
+REMAINING_AUDIT_PATH = os.path.join(CHECKPOINT_DIR, "level1_remaining_audit.json")
+REMAINING_MAP_PATH = os.path.join(CHECKPOINT_DIR, "level1_remaining_map.png")
+# Append-only history of coverage growth, one JSON line per report, across
+# every run of the campaign.
+COVERAGE_TRAIL_PATH = os.path.join(CHECKPOINT_DIR, "coverage_audit_trail.jsonl")
 
 # ═══════════════════════════════════════════════════════════════════════
 # OPTIONAL TENSORBOARD LOGGING
@@ -571,6 +794,138 @@ def _milestone_steps(filename):
         except ValueError:
             return -1
     return -1
+
+
+def checkpoint_timesteps(path):
+    """The global timestep saved inside an SB3 checkpoint zip, read from its
+    'data' record without loading any weights (~1 ms) - so the coverage that
+    belongs to it can be verified before a single worker starts."""
+    with zipfile.ZipFile(path) as z:
+        return int(json.loads(z.read("data"))["num_timesteps"])
+
+
+def steps_to_run(qa, num_timesteps, reset_num_timesteps, safety_cap=None):
+    """What to hand SB3's learn().
+
+    LEGACY: the remaining lifetime budget - the formula this project already
+    used, unchanged (SB3 adds num_timesteps on top when resuming, so passing
+    the raw total would re-aim for that many MORE steps each restart).
+
+    QA: open-ended; Level1CompletionCallback ends it. With a safety cap, the
+    steps left until the cap - which is a cut-off, never a success.
+    """
+    if not qa:
+        return (TOTAL_TIMESTEPS_LEGACY if reset_num_timesteps
+                else max(0, TOTAL_TIMESTEPS_LEGACY - num_timesteps))
+    if safety_cap is None:
+        return _SB3_OPEN_ENDED
+    return max(0, int(safety_cap) - int(num_timesteps))
+
+
+def campaign_coverage_path(latest_checkpoint, seeded_from_legacy):
+    """The coverage file that belongs to the checkpoint being resumed."""
+    if latest_checkpoint is None:
+        raise SystemExit(
+            "QA mode needs a checkpoint to resume and the coverage that belongs "
+            "to it; there is none (FRESH_START?). Refusing to start from an "
+            "empty map.")
+    if seeded_from_legacy:
+        cov_path = xconfig.BOOTSTRAP_COVERAGE
+        if not os.path.exists(cov_path):
+            raise SystemExit(
+                f"{cov_path} not found.\n"
+                f"The first QA run starts from the bootstrap map. Run "
+                f"`python tools/bootstrap_coverage.py` first - starting "
+                f"from an empty map would pay the agent full novelty "
+                f"for re-walking everywhere it already knows.")
+        return cov_path
+    paired = f"{os.path.splitext(latest_checkpoint)[0]}_coverage.npz"
+    if os.path.exists(paired):
+        return paired
+    if os.path.exists(COVERAGE_FINAL_PATH):
+        return COVERAGE_FINAL_PATH
+    raise SystemExit(
+        f"Resuming {latest_checkpoint} but no matching "
+        f"coverage file was found (looked for {paired} and "
+        f"{COVERAGE_FINAL_PATH}).\n"
+        f"Refusing to continue with an empty map - that would "
+        f"silently re-reward everywhere already explored.")
+
+
+def prepare_qa_coverage(coverage, latest_checkpoint, seeded_from_legacy):
+    """Loads and VERIFIES the campaign's cumulative coverage into `coverage`
+    before any worker starts. Returns (path, checkpoint timesteps).
+
+    Anything incompatible or corrupted - wrong mask fingerprint, wrong
+    denominator, a bitmap that does not re-count to its own totals, a file
+    paired with a different checkpoint - stops the launch with the reason.
+    It is never reset, never repaired, and nothing is written.
+    """
+    cov_path = campaign_coverage_path(latest_checkpoint, seeded_from_legacy)
+    try:
+        expected = checkpoint_timesteps(latest_checkpoint)
+        coverage.load_verified(cov_path, expected_timesteps=expected)
+    except (coverage_mod.CoverageFormatMismatch, coverage_mod.CoverageCorrupted,
+            coverage_mod.CoverageCheckpointMismatch, FileNotFoundError,
+            zipfile.BadZipFile, KeyError, ValueError) as exc:
+        raise SystemExit(
+            f"[COVERAGE] Refusing to resume: {cov_path} is not a usable "
+            f"campaign coverage state for {latest_checkpoint}.\n"
+            f"  {type(exc).__name__}: {exc}\n"
+            f"Nothing was trained and no file was written. Restore the "
+            f"matching coverage file rather than starting from an empty map.") from exc
+    return cov_path, expected
+
+
+VALIDATION_CAP_TIMESTEPS = 6_020_000        # the controlled +20k run from the 6M seed
+
+
+def parse_args(argv):
+    ap = argparse.ArgumentParser(description="Train the Glitch Hunter agent.")
+    ap.add_argument("--safety-cap-timesteps", type=int, metavar="N", default=None,
+                    help="QA: stop at global step N whether or not Level 1 is complete "
+                         f"(a cut-off, never success). The validation run is "
+                         f"--safety-cap-timesteps {VALIDATION_CAP_TIMESTEPS}.")
+    ap.add_argument("--unrestricted", action="store_true",
+                    help="QA: explicitly approve a campaign with no safety cap. Only "
+                         "after the controlled validation run has been reviewed.")
+    return ap.parse_args(list(argv))
+
+
+def check_launch_gate(qa, safety_cap, unrestricted):
+    """No QA campaign runs unbounded unless someone said so explicitly."""
+    if not qa or safety_cap is not None or unrestricted:
+        return
+    raise SystemExit(
+        "[LAUNCH] Refusing an unrestricted QA campaign: no safety cap was given "
+        "and it was not explicitly approved.\n"
+        "  1. Run the controlled validation from a clean state and review it:\n"
+        f"       python train_agent.py --safety-cap-timesteps {VALIDATION_CAP_TIMESTEPS}\n"
+        "  2. Only after reviewing its coverage growth, reward balance, lifecycle\n"
+        "     behaviour, resume integrity and completion retention:\n"
+        "       python train_agent.py --unrestricted\n"
+        "Nothing was trained and no file was written.")
+
+
+def report_level_complete(coverage):
+    """Launch-time: the campaign is already done. Says so, points at the
+    proof if there is one, and trains nothing."""
+    print("=" * 68)
+    print(f"LEVEL 1 IS ALREADY COMPLETE: {coverage.covered_testable():,} / "
+          f"{coverage.testable_total:,} testable px covered (100%).")
+    found = lc.committed_snapshots(LEVEL1_SNAPSHOT_DIR)
+    if found:
+        path, meta = found[0]
+        print(f"Completed at global step {meta['global_timestep']:,}; proof: {path}")
+    else:
+        print(f"(no completion snapshot found in {LEVEL1_SNAPSHOT_DIR})")
+    final = lc.final_level1_brain(LEVEL1_SNAPSHOT_DIR)
+    if final:
+        print(f"Final Level-1 brain (VERIFIED): {final[1]['final_level1_brain']['path']}")
+    else:
+        print("Not yet the final Level-1 brain: run `python tools/verify_level1.py`.")
+    print("Not training further, and not re-saving anything. No other level is started.")
+    print("=" * 68)
 
 
 def build_model(latest_checkpoint, vec_env, device):
@@ -767,7 +1122,11 @@ def save_pair(model, coverage):
               f"{coverage.total_unique():,} unique world px")
 
 
-if __name__ == "__main__":
+def main(argv=()):
+    args = parse_args(argv)
+    # The command line wins over the constant; either is a cut-off only.
+    safety_cap = (args.safety_cap_timesteps if args.safety_cap_timesteps is not None
+                  else QA_SAFETY_CAP_TIMESTEPS)
     # Look for the latest checkpoint (skipped entirely if FRESH_START).
     # The master file wins over numbered milestones when it exists.
     latest_checkpoint = None
@@ -828,6 +1187,53 @@ if __name__ == "__main__":
 
     vec_env = None
     try:
+        # ═══════════════════════════════════════════════════════════════
+        # LOAD THE COVERAGE THAT BELONGS TO THIS CHECKPOINT - before any
+        # worker starts (Phase 4F)
+        #
+        # The model and its coverage are a MATCHED PAIR. Pairing coverage with
+        # the wrong brain corrupts every downstream number silently: the agent
+        # gets re-paid for ground it already explored, or starved of reward
+        # for ground it has not, and either way it looks like ordinary
+        # training rather than a bug. load_verified also checks the mask
+        # fingerprint, the denominator and the bitmap's own counts, and
+        # prepare_qa_coverage turns any refusal into a clean exit.
+        #
+        # Loading first also means a finished campaign never spawns a worker.
+        # ═══════════════════════════════════════════════════════════════
+        session_start = None
+        if QA_PHASE:
+            cov_path, expected_timesteps = prepare_qa_coverage(
+                coverage, latest_checkpoint, seeded_from_legacy)
+            covered = coverage.covered_testable()
+            session_start = {'global_timestep': expected_timesteps,
+                             'covered_testable_px': covered}
+            print(f"[COVERAGE] Loaded {cov_path} (verified: mask fingerprint "
+                  f"{xconfig.TESTABLE_FINGERPRINT[:12]}..., paired at step "
+                  f"{expected_timesteps:,})")
+            print(f"           world raster    {xconfig.WORLD_RASTER_PX:>12,}"
+                  f"   informational only")
+            print(f"           testable        {coverage.testable_total:>12,}"
+                  f"   method {xconfig.ADOPTED_METHOD}")
+            print(f"           covered         {covered:>12,}"
+                  f"   {lc.pct_text(covered, coverage.testable_total)}")
+            print(f"           remaining       {coverage.remaining():>12,}")
+            nb = coverage.noncoverage_breakdown()
+            print(f"           noncoverage     {nb['total']:>12,}"
+                  f"   NOT coverage")
+            print(f"             expected      {nb['expected_total']:>12,}"
+                  f"   normal engine behaviour, not glitches")
+            print(f"             model gap     {nb['model_gap_total']:>12,}"
+                  f"   reachability model, not the game")
+            print(f"             anomalous     {nb['anomalous_total']:>12,}"
+                  f"   -> glitch system")
+            if lc.is_level_complete(covered, coverage.testable_total):
+                report_level_complete(coverage)
+                return
+            # After the coverage checks (which write nothing), before any
+            # worker, model or file.
+            check_launch_gate(QA_PHASE, safety_cap, args.unrestricted)
+
         # Create 8 parallel environments
         vec_env = SubprocVecEnv([
             make_env(i, shm_names=shm_names,
@@ -852,6 +1258,11 @@ if __name__ == "__main__":
             print("=" * 60)
 
         model = build_model(latest_checkpoint, vec_env, device)
+        if QA_PHASE and model.num_timesteps != session_start['global_timestep']:
+            raise SystemExit(
+                f"{latest_checkpoint} loaded at {model.num_timesteps:,} steps but "
+                f"its zip record said {session_start['global_timestep']:,}; "
+                f"refusing to pair it with coverage verified for the latter.")
 
         # ─── FIRST QA RUN ONLY ───
         # Done exactly once, when the QA phase is seeded from the completion
@@ -862,76 +1273,34 @@ if __name__ == "__main__":
         if QA_PHASE and seeded_from_legacy and RESET_VALUE_HEAD:
             reset_value_head(model)
 
-        # ═══════════════════════════════════════════════════════════════
-        # LOAD THE COVERAGE THAT BELONGS TO THIS CHECKPOINT
-        #
-        # The model and its coverage are a MATCHED PAIR and load() refuses a
-        # mismatch by design. Pairing coverage with the wrong brain corrupts
-        # every downstream number silently: the agent gets re-paid for ground
-        # it already explored, or starved of reward for ground it has not,
-        # and either way it looks like ordinary training rather than a bug.
-        # ═══════════════════════════════════════════════════════════════
-        if QA_PHASE:
-            cov_path = None
-            if seeded_from_legacy:
-                cov_path = xconfig.BOOTSTRAP_COVERAGE
-                if not os.path.exists(cov_path):
-                    raise SystemExit(
-                        f"{cov_path} not found.\n"
-                        f"The first QA run starts from the bootstrap map. Run "
-                        f"`python tools/bootstrap_coverage.py` first - starting "
-                        f"from an empty map would pay the agent full novelty "
-                        f"for re-walking everywhere it already knows.")
-            else:
-                paired = f"{os.path.splitext(latest_checkpoint)[0]}_coverage.npz"
-                if os.path.exists(paired):
-                    cov_path = paired
-                elif os.path.exists(COVERAGE_FINAL_PATH):
-                    cov_path = COVERAGE_FINAL_PATH
-                else:
-                    raise SystemExit(
-                        f"Resuming {latest_checkpoint} but no matching "
-                        f"coverage file was found (looked for {paired} and "
-                        f"{COVERAGE_FINAL_PATH}).\n"
-                        f"Refusing to continue with an empty map - that would "
-                        f"silently re-reward everywhere already explored.")
-            coverage.load(cov_path, model=model)
-            coverage.assert_consistent()
-            print(f"[COVERAGE] Loaded {cov_path}")
-            print(f"           world raster    {xconfig.WORLD_RASTER_PX:>12,}"
-                  f"   informational only")
-            print(f"           testable        {coverage.testable_total:>12,}"
-                  f"   method {xconfig.ADOPTED_METHOD}")
-            print(f"           covered         {coverage.covered_testable():>12,}"
-                  f"   {coverage.coverage_pct():.2f}%")
-            print(f"           remaining       {coverage.remaining():>12,}")
-            nb = coverage.noncoverage_breakdown()
-            print(f"           noncoverage     {nb['total']:>12,}"
-                  f"   NOT coverage")
-            print(f"             expected      {nb['expected_total']:>12,}"
-                  f"   normal engine behaviour, not glitches")
-            print(f"             model gap     {nb['model_gap_total']:>12,}"
-                  f"   reachability model, not the game")
-            print(f"             anomalous     {nb['anomalous_total']:>12,}"
-                  f"   -> glitch system")
-
         # Auto-save at exact milestones (see ExactMilestoneCheckpointCallback
-        # above for why this replaces SB3's built-in CheckpointCallback)
-        checkpoint_callback = ExactMilestoneCheckpointCallback(
-            targets=CHECKPOINT_MILESTONES,
-            save_path=CHECKPOINT_DIR,
-            name_prefix=CHECKPOINT_NAME,
-            coverage=coverage,
-        )
+        # above for why this replaces SB3's built-in CheckpointCallback).
+        # QA: every 400k global steps, open-ended; legacy: its fixed list.
+        if QA_PHASE:
+            checkpoint_callback = ExactMilestoneCheckpointCallback(
+                every=QA_CHECKPOINT_EVERY, save_path=CHECKPOINT_DIR,
+                name_prefix=CHECKPOINT_NAME, coverage=coverage)
+        else:
+            checkpoint_callback = ExactMilestoneCheckpointCallback(
+                targets=CHECKPOINT_MILESTONES, save_path=CHECKPOINT_DIR,
+                name_prefix=CHECKPOINT_NAME, coverage=coverage)
 
         callbacks = [checkpoint_callback, WatchdogCallback()]
+        completion = None
         if QA_PHASE:
+            completion = Level1CompletionCallback(
+                coverage, snapshot_dir=LEVEL1_SNAPSHOT_DIR,
+                name_prefix=CHECKPOINT_NAME, session_start=session_start)
+            callbacks.append(completion)
             callbacks.append(ValueWarmupCallback(
                 warmup_until=model.num_timesteps + xconfig.VF_WARMUP_STEPS,
                 warmup_lr=xconfig.VF_WARMUP_LR,
                 normal_lr=xconfig.NORMAL_LR,
             ))
-            callbacks.append(CoverageStatsCallback(coverage))
+            callbacks.append(CoverageStatsCallback(
+                coverage, session_start_covered=session_start['covered_testable_px'],
+                audit_path=REMAINING_AUDIT_PATH, map_path=REMAINING_MAP_PATH,
+                trail_path=COVERAGE_TRAIL_PATH, checkpoints=checkpoint_callback))
             callbacks.append(LifecycleStatsCallback())
             callbacks.append(StagnationCallback(coverage))
         callback_list = CallbackList(callbacks)
@@ -944,17 +1313,11 @@ if __name__ == "__main__":
         # training continue at 6,000,001 rather than at 1.
         reset_num_timesteps = latest_checkpoint is None
 
-        # ─── BUGFIX: TOTAL_TIMESTEPS was silently a moving target ───
-        # SB3's learn() adds the model's current num_timesteps on top of
-        # whatever total_timesteps it's given whenever reset_num_timesteps=False
-        # (every resume). Passing the raw TOTAL_TIMESTEPS constant unchanged
-        # meant each restart re-aimed for "that many MORE steps from right
-        # now" instead of "that many steps total, ever" - e.g. resuming from
-        # 5,200,000 actually targeted 11,200,000 internally, which is why
-        # training sailed straight through the intended 6M mark without
-        # stopping. Passing the remaining budget instead keeps the absolute
-        # lifetime target fixed no matter how many times the script restarts.
-        steps_to_run = TOTAL_TIMESTEPS if reset_num_timesteps else max(0, TOTAL_TIMESTEPS - model.num_timesteps)
+        # See steps_to_run(): legacy passes its remaining budget (SB3 adds
+        # num_timesteps on top when resuming); QA is open-ended and ends on
+        # Level-1 coverage, or at the safety cap if one is set.
+        n_steps = steps_to_run(QA_PHASE, model.num_timesteps, reset_num_timesteps,
+                               safety_cap)
 
         print("=" * 68)
         print(f"PHASE            : {'QA EXPLORATION' if QA_PHASE else 'LEGACY COMPLETION'}")
@@ -962,8 +1325,23 @@ if __name__ == "__main__":
         print(f"resuming from    : {latest_checkpoint or 'scratch'}"
               f"{'  (SEED - read only, never written)' if seeded_from_legacy else ''}")
         print(f"current step     : {model.num_timesteps:,}")
-        print(f"lifetime target  : {TOTAL_TIMESTEPS:,}")
-        print(f"remaining        : {steps_to_run:,}")
+        if QA_PHASE:
+            covered = coverage.covered_testable()
+            print(f"success          : Level 1 covered = {coverage.testable_total:,} "
+                  f"testable px (NOT a step count)")
+            print(f"covered          : {covered:,}  "
+                  f"({lc.pct_text(covered, coverage.testable_total)}), "
+                  f"{coverage.remaining():,} remaining")
+            print(f"safety cap       : "
+                  f"{'none (approved with --unrestricted)' if safety_cap is None else f'{safety_cap:,} (a cut-off, never completion)'}")
+            print(f"coverage trail   : {COVERAGE_TRAIL_PATH} (appended every 10,000 steps)")
+            nxt = (model.num_timesteps // QA_CHECKPOINT_EVERY + 1) * QA_CHECKPOINT_EVERY
+            print(f"checkpoints      : every {QA_CHECKPOINT_EVERY:,} global steps "
+                  f"(next {nxt:,}) -> {CHECKPOINT_DIR}")
+            print(f"on completion    : immutable snapshot -> {LEVEL1_SNAPSHOT_DIR}")
+        else:
+            print(f"lifetime target  : {TOTAL_TIMESTEPS_LEGACY:,}")
+            print(f"remaining        : {n_steps:,}")
         print(f"writes model to  : {FINAL_MODEL_PATH}.zip and {CHECKPOINT_DIR}")
         if QA_PHASE:
             print(f"master preserved : {LEGACY_CHECKPOINT_NAME}.zip and "
@@ -971,23 +1349,48 @@ if __name__ == "__main__":
         print("=" * 68)
 
         try:
-            if steps_to_run == 0:
-                # Budget already met. Return WITHOUT training and WITHOUT saving:
+            if n_steps == 0:
+                # Nothing to run. Return WITHOUT training and WITHOUT saving:
                 # learn(0) still collects a rollout, and re-saving here would
-                # overwrite the finished master checkpoint with a model that has
-                # been stepped past the milestone for no reason.
-                print(f"Already at TOTAL_TIMESTEPS ({TOTAL_TIMESTEPS:,}); current step: "
-                      f"{model.num_timesteps:,}. Nothing to train — raise TOTAL_TIMESTEPS to continue.")
+                # overwrite the master with a model stepped past its point for
+                # no reason.
+                if QA_PHASE:
+                    print(f"Safety cap {safety_cap:,} already reached at step "
+                          f"{model.num_timesteps:,}. Level 1 is NOT complete "
+                          f"({coverage.remaining():,} px remain). Raise the cap "
+                          f"(--safety-cap-timesteps) to continue.")
+                else:
+                    print(f"Already at TOTAL_TIMESTEPS ({TOTAL_TIMESTEPS_LEGACY:,}); current step: "
+                          f"{model.num_timesteps:,}. Nothing to train — raise TOTAL_TIMESTEPS to continue.")
             else:
-                print(f"Training to {TOTAL_TIMESTEPS:,} total steps "
-                      f"({steps_to_run:,} remaining). Ctrl+C to stop and resume later.")
+                if QA_PHASE:
+                    print("Training until Level 1 is fully covered. Ctrl+C to stop "
+                          "and resume later.")
+                else:
+                    print(f"Training to {TOTAL_TIMESTEPS_LEGACY:,} total steps "
+                          f"({n_steps:,} remaining). Ctrl+C to stop and resume later.")
                 model.learn(
-                    total_timesteps=steps_to_run,
+                    total_timesteps=n_steps,
                     callback=callback_list,
                     reset_num_timesteps=reset_num_timesteps,
                 )
                 save_pair(model, coverage)
-                print(f"Training complete! Model saved to {FINAL_MODEL_PATH}.zip")
+                if not QA_PHASE:
+                    print(f"Training complete! Model saved to {FINAL_MODEL_PATH}.zip")
+                elif completion.completed:
+                    print(f"Level 1 complete. Master {FINAL_MODEL_PATH}.zip holds the "
+                          f"same policy as the snapshot; relaunching will not train.")
+                    print("It is NOT yet the final Level-1 brain: verify it first with "
+                          "`python tools/verify_level1.py`. No other level is started.")
+                elif (safety_cap is not None
+                      and model.num_timesteps >= safety_cap):
+                    print(f"Stopped at the SAFETY CAP ({safety_cap:,}). "
+                          f"Level 1 is NOT complete: {coverage.remaining():,} px remain "
+                          f"({lc.pct_text(coverage.covered_testable(), coverage.testable_total)}).")
+                else:
+                    print(f"Training stopped at step {model.num_timesteps:,} before "
+                          f"Level 1 was complete ({coverage.remaining():,} px remain). "
+                          f"Saved; run again to resume.")
         except KeyboardInterrupt:
             print("\nTraining paused by user. Saving current brain state...")
             save_pair(model, coverage)
@@ -1001,3 +1404,7 @@ if __name__ == "__main__":
             # worker is gone.
             coverage.close()
             coverage.unlink()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -68,6 +68,8 @@ mario_brain_*checkpoint*.zip
 backup_6M/
 exploration_data/
 checkpoints_qa/
+# tools/remaining_coverage_map.py output: pictures of a coverage file, regenerable
+coverage_audits/
 
 # The QA-phase master lives at the repo root, next to (never on top of)
 # mario_brain_checkpoint.zip. Unlike that file it is NOT tracked: the

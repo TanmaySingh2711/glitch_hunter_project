@@ -73,6 +73,10 @@ class CoverageFormatMismatch(RuntimeError):
     """A coverage file was written by an incompatible version or grid."""
 
 
+class CoverageCorrupted(RuntimeError):
+    """A coverage file is unreadable, or its bitmap disagrees with its own counts."""
+
+
 @runtime_checkable
 class CoverageChannel(Protocol):
     """One measurable dimension of "how much of the thing have we explored".
@@ -681,6 +685,9 @@ class SpatialCoverage:
         d = {
             'visited_packed': np.packbits(self.visited),
             'total_covered': np.int64(self.total_unique()),
+            # The numerator itself, so a resume can re-count the bitmap
+            # against it (load_verified) instead of trusting it.
+            'covered_testable': np.int64(self.covered_testable()),
             'testable_total': np.int64(self.testable_total or 0),
             'testable_fingerprint': np.str_(config.TESTABLE_FINGERPRINT or ''),
             'oob_events': np.int64(self.oob_events),
@@ -768,6 +775,85 @@ class SpatialCoverage:
                     f"  coverage file : {path}\n"
                     f"  model         : {getattr(model, '_gh_path', '<in memory>')}\n"
                     f"Pass --allow-coverage-mismatch to override.")
+        return self
+
+    # Everything a campaign file must carry for load_verified() to vouch for it.
+    _CAMPAIGN_KEYS = ('visited_packed', 'total_covered', 'testable_total',
+                      'testable_fingerprint', 'format_version', 'grid_geom',
+                      'model_timesteps', 'config_hash', 'oob_events',
+                      'episode_new_history')
+
+    def load_verified(self, path, expected_timesteps):
+        """Campaign resume: load(), plus every check the cumulative count
+        depends on. Refuses - it never repairs, and never falls back to an
+        empty map - because a silently reset or mis-scaled map looks exactly
+        like ordinary training.
+
+        The live mask must be the verified one; the file must name the same
+        fingerprint, denominator and config hash; its bitmap must re-count to
+        the totals saved beside it; and it must pair with the checkpoint's
+        timestep. All of that is checked BEFORE the live map is touched.
+        """
+        import zipfile
+
+        from .reachability import mask_fingerprint
+        if self.testable is None or self.testable_total != config.TESTABLE_TOTAL:
+            raise CoverageFormatMismatch(
+                f"the live testable mask totals {self.testable_total}, not the "
+                f"verified {config.TESTABLE_TOTAL:,}")
+        live_fp = mask_fingerprint(self.testable)
+        if live_fp != config.TESTABLE_FINGERPRINT:
+            raise CoverageFormatMismatch(
+                f"the live testable mask is {live_fp[:16]}..., not the verified "
+                f"{config.TESTABLE_FINGERPRINT[:16]}...")
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        try:
+            with np.load(path, allow_pickle=False) as npz:
+                d = {k: npz[k] for k in npz.files}          # reads (and CRCs) every array now
+        except (OSError, ValueError, EOFError, zipfile.BadZipFile) as exc:
+            raise CoverageCorrupted(f"{path} cannot be read: {exc}") from exc
+
+        missing = [k for k in self._CAMPAIGN_KEYS if k not in d]
+        if missing:
+            raise CoverageFormatMismatch(f"{path} lacks {missing}; not a campaign coverage file")
+        saved_fp = str(d['testable_fingerprint'])
+        if saved_fp != config.TESTABLE_FINGERPRINT:
+            raise CoverageFormatMismatch(
+                f"{path} was recorded against mask {saved_fp[:16] or '<none>'}..., "
+                f"not the verified {config.TESTABLE_FINGERPRINT[:16]}...")
+        if int(d['testable_total']) != config.TESTABLE_TOTAL:
+            raise CoverageFormatMismatch(
+                f"{path} was recorded against a denominator of "
+                f"{int(d['testable_total']):,}, not {config.TESTABLE_TOTAL:,}")
+        if str(d['config_hash']) != _config_hash():
+            raise CoverageFormatMismatch(
+                f"{path} config_hash {str(d['config_hash'])[:16]}... does not "
+                f"match this build ({_config_hash()[:16]}...)")
+
+        n = self.w * self.h
+        if d['visited_packed'].size != (n + 7) // 8:
+            raise CoverageCorrupted(
+                f"{path}: bitmap holds {d['visited_packed'].size:,} bytes, "
+                f"expected {(n + 7) // 8:,}")
+        bits = np.unpackbits(d['visited_packed'])[:n].reshape(self.h, self.w)
+        if int(np.count_nonzero(bits)) != int(d['total_covered']):
+            raise CoverageCorrupted(
+                f"{path}: bitmap counts {int(np.count_nonzero(bits)):,} visited px "
+                f"but the file says {int(d['total_covered']):,}")
+        covered = int(np.count_nonzero(bits.astype(bool) & self.testable))
+        if 'covered_testable' in d and covered != int(d['covered_testable']):
+            raise CoverageCorrupted(
+                f"{path}: bitmap counts {covered:,} covered testable px but the "
+                f"file says {int(d['covered_testable']):,}")
+        saved_t = int(d['model_timesteps'])
+        if saved_t != int(expected_timesteps):
+            raise CoverageCheckpointMismatch(
+                f"{path} was saved at model_timesteps={saved_t:,} but the "
+                f"checkpoint is at {int(expected_timesteps):,}")
+
+        self.load_state_dict(d)
+        self.assert_consistent()
         return self
 
 

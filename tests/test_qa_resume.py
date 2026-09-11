@@ -41,21 +41,24 @@ def test_qa_phase_never_writes_the_6m_master():
     assert "mario_brain" not in train_agent.COVERAGE_FINAL_PATH
 
 
-def test_budget_is_raised_explicitly_and_continues_past_6m():
+def test_qa_has_no_step_target_and_continues_past_6m():
     """The completion phase ended at exactly its budget, so remaining was 0.
 
-    Continuing REQUIRES a new total. It has to be a stated number, and the
-    milestones have to continue the same cadence in absolute lifetime steps
-    rather than restarting at 400k - otherwise the QA files would collide
-    with the completion phase's.
+    QA does not replace that with a bigger number (Phase 4F): it has no step
+    target at all - Level-1 coverage ends it - and its checkpoints continue
+    the same 400k cadence in absolute lifetime steps, open-ended, rather than
+    restarting at 400k and colliding with the completion phase's files.
     """
     if not train_agent.QA_PHASE:
         pytest.skip("only meaningful in QA mode")
-    assert train_agent.TOTAL_TIMESTEPS_QA > train_agent.TOTAL_TIMESTEPS_LEGACY
-    assert min(train_agent.CHECKPOINT_MILESTONES) > train_agent.TOTAL_TIMESTEPS_LEGACY
-    assert max(train_agent.CHECKPOINT_MILESTONES) == train_agent.TOTAL_TIMESTEPS_QA
-    legacy_targets = {400_000 * i for i in range(1, 16)}
-    assert not legacy_targets & set(train_agent.CHECKPOINT_MILESTONES)
+    assert not hasattr(train_agent, "TOTAL_TIMESTEPS_QA")
+    assert not hasattr(train_agent, "TOTAL_TIMESTEPS")
+    assert train_agent.CHECKPOINT_MILESTONES is None
+    assert train_agent.QA_CHECKPOINT_EVERY == 400_000
+    seed = train_agent.TOTAL_TIMESTEPS_LEGACY
+    first = (seed // train_agent.QA_CHECKPOINT_EVERY + 1) * train_agent.QA_CHECKPOINT_EVERY
+    assert first == 6_400_000
+    assert [400_000 * i for i in range(1, 16)] == train_agent.LEGACY_CHECKPOINT_MILESTONES
 
 
 # ── Test 9: milestones save model and coverage as a matched pair ──────────

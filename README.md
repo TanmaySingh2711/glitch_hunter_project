@@ -47,9 +47,10 @@ That's it. A game window will pop up and the same footage streams live to your b
 
 ## Using the dashboard
 
-- **Start Testing** — pops up the game window and starts streaming it to the browser.
-- **Stop Testing** — pauses the game (both the pop-up window and the browser view freeze on the same frame).
-- **Reset Dashboard** / refreshing the page — closes the pop-up window.
+- **Start Testing** — opens the game window, centred on the screen you're using, and starts streaming it to the browser. After a pause it carries on from the same moment.
+- **Stop Testing** — pauses the game (both the pop-up window and the browser view freeze on the same frame). The window stays where it is; minimise, move or close it yourself whenever you like.
+- **The game window's X** — closes the window and pauses testing. Nothing is lost: **Start Testing** reopens it and resumes.
+- **Reset Dashboard** — ends the session and closes the window; the next start is a fresh one. Refreshing the page only pauses.
 - **BUG TRACKER** (red panel) — stays empty unless the game actually breaks a
   rule it's supposed to follow: Mario alive below the floor, moving at an
   impossible speed, or the score/coin counter running backwards. An empty
@@ -125,11 +126,18 @@ defence.
 python tools/build_reachability.py     # once - the coverage denominator
 python tools/bootstrap_coverage.py     # ~3 min - seed the map from the 6M brain
 python tools/calibrate_reward.py       # ~8 min - solve NOVELTY_WEIGHT
-python train_agent.py                  # the QA phase itself
+python train_agent.py --safety-cap-timesteps 6020000   # the controlled +20k validation
+# ...review it, then the campaign itself, which runs until Level 1 is fully covered:
+python train_agent.py --unrestricted
+python tools/verify_level1.py          # after completion: is it the final Level-1 brain?
 ```
 
 The first three are one-off. Each refuses to run if the previous one has not,
 rather than silently proceeding with a wrong denominator or an empty map.
+A QA launch with no safety cap is refused unless `--unrestricted` is given,
+so an unbounded campaign never starts by accident.
+`python tools/remaining_coverage_map.py <coverage.npz>` draws what is left of
+the level at any point.
 
 ### Going back to the old behaviour
 

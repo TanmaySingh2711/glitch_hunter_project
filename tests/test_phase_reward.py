@@ -531,6 +531,31 @@ def test_no_term_explodes_past_the_safety_bounds(full, phase):
         config.COMPLETE_PROGRESS_PER_PX * config.MAX_FRAME_DX + 1e-9)
 
 
+def test_backing_up_and_rewalking_cannot_farm_complete_progress(empty):
+    """The backward-movement exploit: retreat, walk the same ground again,
+    repeat. Progress is paid against the episode's max-x, so ground already
+    crossed pays once - retreating costs nothing, re-crossing earns nothing,
+    and only genuinely new ground pays again."""
+    empty.r(6000)
+    empty.complete()
+    x = 6000
+    while x < 6300:
+        x += 6
+        empty.r(x)
+    paid_once = empty.w.ep_progress_paid
+    assert paid_once > 0
+    for _ in range(5):                               # five laps of the same 300 px
+        while x > 6000:
+            x -= 6
+            empty.r(x)
+        while x < 6300:
+            x += 6
+            empty.r(x)
+    assert empty.w.ep_progress_paid == paid_once, "re-walking old ground paid progress again"
+    empty.r(x + 6)
+    assert empty.w.ep_progress_paid > paid_once, "new ground stopped paying"
+
+
 def test_complete_time_and_progress_are_bounded_per_episode(empty):
     empty.r(110)
     empty.complete()

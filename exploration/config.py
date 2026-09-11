@@ -644,6 +644,12 @@ PENETRATION_TOL = 6
 #                     AND a drought AND sustained stuckness; elapsed steps
 #                     alone can never fire it.
 #
+# QA TRAINING, since the respawn rule (QA_TIMEOUT_ENDS_EPISODE below): 1 and 2
+# no longer end a QA episode - time alone may not. 3 is the only non-game
+# ending, and its arms are driven by substep counts rather than the HUD clock,
+# so a frozen clock cannot stall them either. 1 and 2 still govern legacy
+# mode and the completion evaluator's frozen protocol.
+#
 # The retired DROUGHT_HARD_LIMIT was a fourth, conflicting limit; see above.
 # ═══════════════════════════════════════════════════════════════════════
 SUBSTEPS_PER_AGENT_STEP = 4         # MaxAndSkipObservation(skip=...) - one source
@@ -677,8 +683,29 @@ QA_EPISODE_CAP_AGENT_STEPS_MEASURED = 9781
 # TimeLimit backstops, in agent steps. Each is strictly above its mode's
 # measured timer cap (asserted by tests/test_episode_lifecycle.py). The legacy
 # value is unchanged from what the 6M brain was trained with.
+#
+# QA_EPISODE_MAX_STEPS no longer wraps QA TRAINING (see QA_TIMEOUT_ENDS_EPISODE
+# below): a step count alone may not end a QA episode. It stays because the
+# completion-retention protocol (evaluation/completion.py) froze it into the
+# 6M baseline, and a comparison is only fair under the identical protocol.
 QA_EPISODE_MAX_STEPS = 12000
 LEGACY_EPISODE_MAX_STEPS = 4000
+
+# ─── THE RESPAWN RULE (QA) ───
+# Mario never respawns merely because time has passed. A QA episode ends only
+# at the castle door, on a death, or on a safety reset backed by evidence
+# (SAFETY RESET below). So in QA the engine clock is held above zero while the
+# episode runs (CustomMarioEnv.hold_clock, called by GlitchHunterWrapper each
+# substep), and TimeLimit is not applied to QA training.
+#
+# What that removes is the one moment the clock used to decide: agent step
+# 9,781, where EVERY QA episode was killed with death_cause 'timeout' whether
+# or not Mario was still finding new pixels or crossing to new ground. Now no
+# step count ends an episode; only stagnation evidence can (SAFETY RESET).
+# The TIME box is unaffected: it holds at 001 exactly as before (Phase 4D).
+# Legacy mode and the bare engine (the completion evaluator) keep the real
+# timeout.
+QA_TIMEOUT_ENDS_EPISODE = False
 
 # End QA episodes at the castle door instead of after the engine's victory
 # sequence. At the door the HUD switches to FAST_COUNT_DOWN and burns the
@@ -758,14 +785,34 @@ TRANSIT_FRONTIER_GAIN_PX = 200      # closed this much distance on the frontier
 STUCK_BBOX_AREA = 120 * 120         # px^2 of the window's position bbox
 
 # ═══════════════════════════════════════════════════════════════════════
-# SAFETY RESET — requires ALL THREE. Fires in either phase.
+# SAFETY RESET — only ever on STAGNATION EVIDENCE. Fires in either phase.
 #
-# Reachable now that the QA cap is 9,781: 5,000 < 9,781. At the old 2,451
-# cap it was dead code, and so was anything above 2,451.
+# Every reset needs ALL of: a drought (SAFETY_DROUGHT_STEPS without a
+# meaningful new pixel), the floor (SAFETY_MIN_EPISODE_STEPS - it can only
+# delay a reset, never cause one), SAFETY_STUCK_WINDOWS consecutive closed
+# windows that each found nothing and were NOT coherent transit, and no
+# meaningful progress across them (where Mario is moved <= TRANSIT_FRONTIER_
+# GAIN_PX, and the frontier came no closer than that). Then one of:
+#
+#   STUCK  every one of those windows stayed inside STUCK_BBOX_AREA;
+#   LOOP   the windows, taken as one path, doubled back: span straightness
+#          <= TRANSIT_STRAIGHTNESS.
+#
+# Only the existing per-window transit thresholds are reused - no new number.
+# (The progress requirement also closes a gap in STUCK: the box is an AREA,
+# which is 0 on flat ground, so a wide zigzag that kept gaining ground used
+# to read as stuck.)
+#
+# NOT a reason, ever: elapsed steps, or a drought on its own. A transit
+# window breaks every streak, so Mario crossing old ground is never reset -
+# however long the episode, however long since his last new pixel. The old
+# engine lifetime (QA_EPISODE_CAP_AGENT_STEPS_MEASURED, 9,781) plays no part
+# in this rule; it survives only as a logged diagnostic ("outlived the old
+# clock", train_agent.LifecycleStatsCallback).
 # ═══════════════════════════════════════════════════════════════════════
 SAFETY_MIN_EPISODE_STEPS = 5000     # a FLOOR, never a trigger by itself
 SAFETY_DROUGHT_STEPS = 1500         # agent steps since meaningful discovery
-SAFETY_STUCK_WINDOWS = 4            # consecutive IS_STUCK windows
+SAFETY_STUCK_WINDOWS = 4            # consecutive stagnant (non-transit, zero-yield) windows
 # What counts as "meaningful". 1 testable px - the most conservative choice,
 # since it makes the fallback as hard as possible to fire. n_new already
 # counts only TESTABLE pixels, so an out-of-world clip cannot reset it.
