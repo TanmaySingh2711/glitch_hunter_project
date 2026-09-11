@@ -25,12 +25,15 @@ dist/
 
 # ═══════════════════════════════════════════════════════════════════════
 # TEST / LINT / TYPE-CHECK CACHES
-# Created by `pytest` and `ruff` (see README "Running the tests").
+# Created by pytest, ruff, mypy and pytest-cov (see README "Running the
+# tests"). coverage.xml is what CI's `--cov-report=xml` writes.
 # ═══════════════════════════════════════════════════════════════════════
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -60,16 +63,25 @@ mario_brain_*checkpoint*.zip
 
 # ═══════════════════════════════════════════════════════════════════════
 # EXPLORATION RETROFIT ARTIFACTS
-# backup_6M/      immutable copy of the 6M brain, restorable from
-#                   checkpoints/ - not worth a second 20MB blob in history
+# backup_6M/        immutable copy of the 6M brain - the baseline every
+#                   tool and slow test reads (config.BASELINE_MODEL), and
+#                   restorable from checkpoints/, so not worth a second
+#                   20MB blob in history
 # exploration_data/ generated masks and bootstrap coverage
 # checkpoints_qa/   the QA-phase model zips + their paired coverage
 # ═══════════════════════════════════════════════════════════════════════
 backup_6M/
 exploration_data/
 checkpoints_qa/
-# tools/remaining_coverage_map.py output: pictures of a coverage file, regenerable
+# Tool outputs - regenerable records, one per run:
+#   coverage_audits/     tools/remaining_coverage_map.py (pictures + region lists)
+#   evaluation/results/  tools/evaluate_completion.py and verify_level1.py
+#   calibration_runs/    tools/calibrate_phase_reward.py (per-step pickles)
+# evaluation/completion_baseline_6M.json sits OUTSIDE results/ on purpose: it
+# is the frozen baseline, tracked and hash-protected, not a run output.
 coverage_audits/
+evaluation/results/
+calibration_runs/
 
 # The QA-phase master lives at the repo root, next to (never on top of)
 # mario_brain_checkpoint.zip. Unlike that file it is NOT tracked: the

@@ -1,9 +1,9 @@
 # ═══════════════════════════════════════════════════════════════════════
-# This file is OPTIONAL. The pip instructions in README.md / requirements.txt
-# still work exactly as before and remain the documented default path.
-#
-# What this adds is a one-command install via `uv`, plus the tool config
-# (ruff, mypy, pytest, coverage) that CI and `python tools/check.py` share.
+# Two jobs. It is the one-command install (`uv sync`), an alternative to
+# the 3-step pip instructions in README.md / requirements.txt, which still
+# work exactly as before. And it holds the tool config (ruff, mypy, pytest,
+# coverage) that CI and `python tools/check.py` share - that part is not
+# optional, whichever way you installed.
 # ═══════════════════════════════════════════════════════════════════════
 
 [project]
@@ -22,7 +22,6 @@ dependencies = [
     "opencv-python==5.0.0.93",
     "stable-baselines3==2.9.0",
     "torch==2.5.1",
-    "torchvision==0.20.1",
 ]
 
 [dependency-groups]
@@ -57,7 +56,6 @@ override-dependencies = ["torch==2.5.1"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu121" }
-torchvision = { index = "pytorch-cu121" }
 
 [[tool.uv.index]]
 name = "pytorch-cu121"
@@ -71,7 +69,7 @@ explicit = true
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["mario_clone", "venv_gpu", "checkpoints"]   # vendored / generated
+exclude = ["mario_clone", "venv_gpu"]   # vendored / generated
 
 [tool.ruff.lint]
 select = [
@@ -102,11 +100,6 @@ ignore = [
     "S110",     # try-except-pass
     "E501",     # long lines: the explanatory comment blocks are deliberate
     "SIM105",   # contextlib.suppress() reads worse than an annotated try/except here
-    # Import position is load-bearing in two files and must NOT be "fixed":
-    # app.py reconfigures sys.stdout before anything it imports can print,
-    # and custom_mario_env.py sets SDL_AUDIODRIVER before pygame loads.
-    # Hoisting those imports to the top silently breaks both.
-    "E402",     # module-import-not-at-top-of-file
     # Nested conditions that each carry their own explanatory comment;
     # collapsing them into one `and` chain loses that.
     "SIM102",   # collapsible-if
@@ -132,9 +125,12 @@ known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
 [tool.ruff.lint.per-file-ignores]
 # Tests: sys.path is adjusted in conftest before imports; asserts are the point;
 # fixtures shadow names on purpose; print() is fine in a test.
-"tests/*" = ["E402", "S", "T20", "N802", "N806", "ARG", "PT011", "PT018"]
-# The tools are command-line reports: their stdout IS the product.
-"tools/*" = ["T20"]
+"tests/*" = ["E402", "S", "T20", "N802", "N806", "PT011", "PT018"]
+# The tools are command-line reports: their stdout IS the product. Their
+# imports follow the shared start-up (common/cli.py) on purpose: the project
+# root has to be on sys.path, and SDL told to run headless, before anything
+# that loads pygame is imported - hoisting them breaks every tool.
+"tools/*" = ["T20", "E402"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -187,10 +183,6 @@ filterwarnings = [
     # the warning would otherwise head every run.
     "ignore:pkg_resources is deprecated as an API:DeprecationWarning",
 ]
-# `slow` marks the few tests that load the real 20MB checkpoint. They still
-# run by default - they cover the value-head reset, which is the one piece
-# that touches the trained brain - but the marker makes them easy to skip
-# with `-m "not slow"` during quick iteration.
 markers = [
     # Anything needing the trained checkpoint or a full geometry rebuild.
     # The reachability rebuild at the adopted 1 px lattice takes ~5 minutes,

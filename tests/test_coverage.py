@@ -151,6 +151,25 @@ def test_checkpoint_mismatch_is_detected(tmp_path, cov):
     assert "5,600,000" in msg and "6,000,000" in msg
 
 
+def test_a_refused_load_does_not_hold_the_file_open(tmp_path, cov):
+    """The refusal's traceback keeps load()'s frame alive. If the .npz were
+    still open in it, Windows would refuse the atomic replace training's
+    next save makes of this same file (WinError 5)."""
+    path = str(tmp_path / "cov.npz")
+    cov.save(path, model_timesteps=5_600_000)
+
+    class FakeModel:
+        num_timesteps = 6_000_000
+
+    fresh = SpatialCoverage(
+        testable_mask=np.ones((config.GRID_H, config.GRID_W), dtype=bool))
+    with pytest.raises(CoverageCheckpointMismatch) as exc:
+        fresh.load(path, model=FakeModel())
+    assert exc.value is not None                  # the traceback is still held here
+    cov.save(path, model_timesteps=6_000_000)     # save() replaces the file atomically
+    assert SpatialCoverage(testable_mask=None).load(path).total_unique() == cov.total_unique()
+
+
 def test_format_mismatch_is_detected(tmp_path, cov):
     path = str(tmp_path / "cov.npz")
     cov.save(path, model_timesteps=1)

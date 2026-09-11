@@ -58,8 +58,8 @@ about Mario at all.
 
 `CustomMarioEnv.step()` advances the engine one 60 fps frame. The agent acts
 once per **4** frames (`SkipObservation` - Gymnasium's MaxAndSkip, rendering
-only the frames it keeps - config `SUBSTEPS_PER_AGENT_STEP`), and `GlitchHunterWrapper` sits *below* that skip,
-so it sees every frame:
+only the frames it keeps - config `SUBSTEPS_PER_AGENT_STEP`), and
+`GlitchHunterWrapper` sits *below* that skip, so it sees every frame:
 
 1. **Respawn rule** (QA only) - `CustomMarioEnv.hold_clock()` keeps the engine
    timer above zero. Time alone never ends a QA episode.
@@ -104,7 +104,8 @@ decision, not a refactor.
   fingerprint, denominator, config hash, the bitmap's own counts and the
   checkpoint's timestep. Nothing is ever reset or repaired silently.
 * **The 6M master is never written in QA mode.** QA reads it once to seed
-  itself; `backup_6M/` holds a byte-identical copy.
+  itself; `backup_6M/` holds a byte-identical copy, which is also the
+  baseline every tool and slow test loads (`config.BASELINE_MODEL`).
 * **Time alone never ends a QA episode.** Only the castle door, a death, or
   the safety reset - which needs positive stagnation evidence (a drought,
   consecutive non-transit zero-yield windows, and no progress across them),
@@ -122,13 +123,14 @@ decision, not a refactor.
 | Path | Written by | In git | Notes |
 |---|---|---|---|
 | `mario_brain_checkpoint.zip` | legacy training | yes | the 6M brain; SHA-256 `690d5702…a188b3` |
-| `backup_6M/` | by hand | no | byte-identical copies of the 6M brain |
+| `backup_6M/` | by hand | no | byte-identical copies of the 6M brain; `mario_brain_checkpoint.zip` there is `config.BASELINE_MODEL` |
 | `checkpoints/` | legacy training | no | 400k … 6.0M milestones + `.flag` sentinels |
 | `exploration_data/reachable_mask.npz` | `tools/build_reachability.py` | no | the testable mask + noncoverage class map |
 | `exploration_data/coverage_bootstrap_6000000.npz` | `tools/bootstrap_coverage.py` | no | the QA campaign's starting map |
 | `checkpoints_qa/`, `glitch_hunter_qa*.{zip,npz}` | QA training | no | matched model/coverage pairs |
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |
 | `logs/train.log` | QA / legacy training | no | the run's full log |
+| `evaluation/results/`, `coverage_audits/`, `calibration_runs/` | the tools (see `tools/README.md`) | no | one regenerable record per run |
 
 `tools/verify_artifacts.py` re-hashes every artifact that is present against
 `artifacts.json` and reports any that drifted.

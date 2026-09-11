@@ -227,7 +227,7 @@ class EpisodeLifecycle:
             self._close_window(info.get('viewport_x', 0))
 
         if self.phase is EpisodePhase.EXPLORE and self.auto_transition:
-            self._check_transition(n_new)
+            self._check_transition()
 
     def _close_window(self, viewport_x: int) -> None:
         """Classifies the window just finished as transit / stuck / neither."""
@@ -279,7 +279,7 @@ class EpisodeLifecycle:
         self.last_window = v
         self._reset_window()
 
-    def _check_transition(self, n_new: int) -> None:
+    def _check_transition(self) -> None:
         # T1 needs an INFORMED target. With fewer than TARGET_MIN_HISTORY
         # episodes behind it - every worker's first episodes of every run -
         # the target is the bare 500 px floor, which says nothing about this

@@ -264,18 +264,26 @@ def test_a_browser_refresh_pauses_and_keeps_everything(svc):
 def test_a_failing_step_pauses_and_tells_the_browser():
     class Broken(FakeBackend):
         def new_session(self):
+            self.sessions += 1
+
             def run():
                 yield {'frame': b'', 'log': 'ok'}
                 raise RuntimeError("boom")
             return run()
-    events = []
-    s = ds.GameWindowService(Broken(), emit=lambda e, p: events.append((e, p)),
+    events, backend = [], Broken()
+    s = ds.GameWindowService(backend, emit=lambda e, p: events.append((e, p)),
                              log=lambda *a: None)
     s.start(timeout=5)
     try:
         s.start_testing()
         assert wait_for(lambda: ('testing_paused', {'reason': 'error'}) in events)
         assert not s.testing and s.alive
+        # The crashed session is dropped, so the next Start plays a fresh one
+        # rather than reporting that the dead one has ended.
+        assert s.session is None
+        s.start_testing()
+        assert wait_for(lambda: backend.sessions == 2)
+        assert ('testing_paused', {'reason': 'session_ended'}) not in events
     finally:
         s.shutdown()
 

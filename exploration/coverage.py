@@ -38,6 +38,8 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
+from common.fileio import atomic_write
+
 from . import config
 
 _log = logging.getLogger(__name__)
@@ -309,10 +311,6 @@ class SpatialCoverage:
         `obs` carries prev/cur rects plus velocity and contact state. Only the
         rects are used today - see CoverageChannel for why the rest is in the
         signature.
-
-        The count returned is RAW new pixels, including any outside the
-        testable mask. Novelty reward is paid on testable pixels only - see
-        record_testable() - so a clipping glitch cannot be farmed for reward.
         """
         cur = obs['cur_rect']
         prev = obs.get('prev_rect') or self.prev_rect
@@ -719,10 +717,8 @@ class SpatialCoverage:
         worst failure mode available here - it would look valid and silently
         misreport how much of the world has been explored.
         """
-        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-        tmp = path + '.tmp'
-        np.savez_compressed(tmp, **self.state_dict(model_timesteps))
-        os.replace(tmp + '.npz', path)
+        with atomic_write(path) as fh:
+            np.savez_compressed(fh, **self.state_dict(model_timesteps))
 
     def load_state_dict(self, d: Any) -> None:
         found = int(d['format_version'])
@@ -768,11 +764,13 @@ class SpatialCoverage:
         """
         if not os.path.exists(path):
             raise FileNotFoundError(path)
-        d = np.load(path, allow_pickle=False)
-        self.load_state_dict(d)
+        # Closed before returning: on Windows an open handle would block the
+        # os.replace() that training's next save of this same file makes.
+        with np.load(path, allow_pickle=False) as d:
+            self.load_state_dict(d)
+            saved = int(d['model_timesteps']) if model is not None else 0
 
         if model is not None:
-            saved = int(d['model_timesteps'])
             actual = int(getattr(model, 'num_timesteps', saved))
             if saved != actual and not allow_mismatch:
                 raise CoverageCheckpointMismatch(

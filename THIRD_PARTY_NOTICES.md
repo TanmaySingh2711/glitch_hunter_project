@@ -50,10 +50,23 @@ This project is not affiliated with, endorsed by, or sponsored by Nintendo.
 
 ---
 
+## static/vendor/socket.io.min.js — Socket.IO client
+
+**Version:** 4.7.2 · **Copyright:** (c) 2014-2023 Guillermo Rauch ·
+**License:** MIT
+
+Shipped in the repository (not fetched from a CDN) so the dashboard works
+with no internet connection. The copyright and license notice is kept in the
+file's own header comment, as the MIT license requires. Upstream:
+https://github.com/socketio/socket.io
+
+---
+
 ## Python dependencies
 
-The packages listed in `requirements.txt` (PyTorch, Stable-Baselines3,
-Gymnasium, Pygame, Flask, Flask-SocketIO, Eventlet, OpenCV, NumPy) are each
+The packages listed in `requirements.txt` and `pyproject.toml` (PyTorch,
+Stable-Baselines3, Gymnasium, Pygame, Flask, Flask-SocketIO, OpenCV, NumPy,
+cloudpickle) are each
 distributed under their own licenses — mostly MIT, BSD, and Apache 2.0. They
 are installed from PyPI at setup time and are not redistributed as part of
 this repository. Refer to each project for its exact terms.

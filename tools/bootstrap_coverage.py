@@ -109,7 +109,7 @@ def main() -> None:
     print(f"  model num_timesteps = {model.num_timesteps:,}")
 
     per_episode = []
-    t0 = time.time()
+    t0 = time.perf_counter()
     try:
         for ep in range(args.episodes):
             obs, _ = env.reset()
@@ -172,7 +172,7 @@ def main() -> None:
               f"   -> glitch evidence")
         print(f"  COVERAGE             : {coverage.coverage_pct():.2f}%")
     print(f"  out-of-grid events   : {coverage.oob_events}")
-    print(f"  wall clock           : {time.time() - t0:.0f}s")
+    print(f"  wall clock           : {time.perf_counter() - t0:.0f}s")
     print()
     print("  COVERAGE is covered_testable / testable_coverable. The denominator")
     print("  is Method C at a 1 px lattice - connectivity-checked from spawn and")

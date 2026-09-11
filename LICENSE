@@ -1,21 +1,20 @@
 ═══════════════════════════════════════════════════════════════════════
 SCOPE — please read this first
 
-This repository contains code from two different sources, and only one of
-them is covered by the MIT license below.
+This repository contains code from several sources, and only this
+project's own work is covered by the MIT license below.
 
   COVERED by the MIT license (original work in this project):
-      app.py
-      agent_logic.py
-      custom_mario_env.py
-      train_agent.py
-      static/
-      templates/
-      README.md, requirements.txt
+      every file in this repository EXCEPT the ones listed under NOT
+      COVERED - the Python modules at the top level and in common/,
+      evaluation/, exploration/, rewards/, training/, tools/ and tests/;
+      static/ (except static/vendor/) and templates/; the documentation
+      and configuration files; and
       mario_brain_checkpoint.zip  (the trained model weights)
 
   NOT COVERED — third-party, different terms, see THIRD_PARTY_NOTICES.md:
       mario_clone/          (the Super Mario Bros clone and its assets)
+      static/vendor/        (the Socket.IO client - its own MIT license)
 
 The mario_clone/ directory is someone else's work and its upstream project
 carries no open-source license at all. Do not assume the MIT terms below

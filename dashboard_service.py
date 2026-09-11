@@ -82,7 +82,6 @@ class GameWindowService:
         self.testing = False
         self.session: Session | None = None
         self.steps = 0
-        self.last_pause_reason: str | None = None
 
     # ── called from any thread ────────────────────────────────────────────
     def start(self, timeout: float | None = None) -> None:
@@ -167,7 +166,6 @@ class GameWindowService:
                 if self.session is None:
                     self.session = self.backend.new_session()
                 self.testing = True
-                self.last_pause_reason = None
             except Exception:
                 _log.exception("could not start testing")
                 self._pause('error', notify=True)
@@ -182,7 +180,6 @@ class GameWindowService:
         """Stops stepping. Touches nothing else - not the window, not the
         session. `notify` tells the browser, for pauses it did not ask for."""
         self.testing = False
-        self.last_pause_reason = reason
         try:
             self.backend.stop_audio()
         except Exception:                 # silence is best-effort; the pause is not
@@ -211,6 +208,9 @@ class GameWindowService:
             return
         except Exception as exc:
             _log.exception("Error in the game loop: %s", exc)
+            # A generator that raised is finished for good: keeping it would
+            # make the next Start report "session ended" instead of playing.
+            self._close_session()
             self._pause('error', notify=True)
             return
         self.steps += 1

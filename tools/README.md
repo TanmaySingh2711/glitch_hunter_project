@@ -14,7 +14,7 @@ refuses (with the reason) rather than guessing when an input is missing.
 | `benchmark_step.py` | Milliseconds per agent step for the bare engine, the legacy wrapper and the QA wrapper; `--profile` shows where the time goes. | nothing |
 | `evaluate_completion.py` | Can a checkpoint still finish Level 1-1? Plays the frozen protocol and compares with the 6M baseline: HEALTHY / WARNING / REGRESSED. | `evaluation/results/` |
 | `remaining_coverage_map.py` | Where the uncovered testable pixels are, as a picture and a JSON region list. | `coverage_audits/` |
-| `verify_level1.py` | After Level 1 is fully covered: integrity, policy health and completion retention of the snapshot. Decides whether it is the final Level-1 brain. | one read-only `*_verification.json` |
+| `verify_level1.py` | After Level 1 is fully covered: integrity, policy health and completion retention of the snapshot. Decides whether it is the final Level-1 brain. | one read-only `*_verification.json` beside the snapshot; the retention result in `evaluation/results/` |
 
 ## QA campaign set-up (run once, in this order)
 

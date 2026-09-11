@@ -252,7 +252,6 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         if pg.display.get_surface() is not None:
             pg.display.update()
 
-
         obs = self._fast_obs() if self.render_observation else self._blank_obs
 
         reward = 0.0
@@ -377,7 +376,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
     # GLITCH DETECTION — what actually feeds the dashboard's BUG TRACKER
     #
     # Sets info['glitch_alert'] to a human-readable string when the game
-    # violates an invariant it is supposed to hold. agent_logic.py turns
+    # violates an invariant it is supposed to hold. dashboard_backend.py turns
     # that into a "BUG FOUND" log line, which main.js routes into the bug
     # panel. Nothing wrote this key before, so that panel could never show
     # anything - this is the piece that was missing.
@@ -690,7 +689,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         (width, height) BEFORE the numpy conversion via pg.transform.scale -
         the same technique _fast_obs() uses, see that method's comment for
         why this matters. Used by the dashboard's streaming path
-        (agent_logic.py), which only needs display-quality output at well
+        (dashboard_backend.py), which only needs display-quality output at well
         under the window's native 800x600 resolution."""
         surface: pg.Surface | None = pg.display.get_surface()
         if surface is None:

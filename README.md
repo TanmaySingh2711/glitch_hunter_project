@@ -27,13 +27,13 @@ uv sync
 
 *Or with plain pip, in this exact order* (don't skip ahead or combine these):
 ```bash
-pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 pip install stable-baselines3==2.9.0 --no-deps
 pip install -r requirements.txt
 ```
 No NVIDIA GPU? Use this instead for the first line — everything still works, just training would be slow (watching the AI play is unaffected either way):
 ```bash
-pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
+pip install torch==2.5.1
 ```
 
 **4. Run it:**
@@ -210,8 +210,9 @@ The game in `mario_clone/` was written by **Justin Meister**
 **no open-source license**, and its author states it is "intended for non-commercial
 educational purposes." The artwork and sounds are Nintendo's property.
 
-**So: learn from this, don't sell it.** Our own code (`app.py`, `agent_logic.py`,
-`custom_mario_env.py`, `train_agent.py`, the dashboard) is MIT-licensed.
+**So: learn from this, don't sell it.** Our own code — everything outside
+`mario_clone/` and `static/vendor/` (the Socket.IO client, MIT-licensed by its
+own authors) — is MIT-licensed.
 
 Full details in [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
@@ -252,7 +253,7 @@ cp checkpoints/mario_brain_checkpoint_5200000_steps.zip mario_brain_checkpoint.z
 ### Running the tests
 
 ```bash
-pip install pytest pytest-cov ruff mypy
+pip install pytest==9.1.1 pytest-cov==7.1.0 ruff==0.16.6 mypy==2.3.1   # or: uv sync (dev group)
 python tools/check.py          # lint, type check, fast tests, artifact hashes (~2 min)
 python tools/check.py --full   # everything, including the slow tests (~15 min) and coverage
 ```

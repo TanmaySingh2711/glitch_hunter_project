@@ -217,25 +217,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeModal = document.querySelector('.close-modal');
 
     if (infoBtn && infoModal && closeModal) {
-        infoBtn.addEventListener('click', () => {
-            infoModal.classList.remove('hidden');
-        });
+        // A closed modal is only faded out (.hidden animates opacity), so it
+        // is also made inert: otherwise Tab still reaches its invisible ×.
+        // Opening moves focus into it; closing hands focus back to the i.
+        function setModalOpen(open) {
+            const wasOpen = !infoModal.classList.contains('hidden');
+            infoModal.classList.toggle('hidden', !open);
+            infoModal.inert = !open;
+            if (open) {
+                closeModal.focus();
+            } else if (wasOpen) {
+                infoBtn.focus();
+            }
+        }
 
-        closeModal.addEventListener('click', () => {
-            infoModal.classList.add('hidden');
+        infoBtn.addEventListener('click', () => setModalOpen(true));
+        closeModal.addEventListener('click', () => setModalOpen(false));
+
+        // The × is a focusable role="button" span, so it has to answer the
+        // keys a real button does - otherwise a keyboard user can tab to it
+        // and nothing happens.
+        closeModal.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setModalOpen(false);
+            }
         });
 
         // Close when clicking outside
         infoModal.addEventListener('click', (e) => {
             if (e.target === infoModal) {
-                infoModal.classList.add('hidden');
+                setModalOpen(false);
             }
         });
 
         // ...and on Escape, which is what people reflexively press.
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                infoModal.classList.add('hidden');
+                setModalOpen(false);
             }
         });
     }

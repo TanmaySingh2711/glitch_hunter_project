@@ -27,8 +27,8 @@ from exploration import coverage as coverage_mod
 
 log = logging.getLogger(__name__)
 
-# Must match CHECKPOINT_NAME / FINAL_MODEL_PATH in train_agent.py — this is
-# the master checkpoint that training writes on finish and on Ctrl+C.
+# Must match LEGACY_CHECKPOINT_NAME in train_agent.py — the completion-phase
+# master checkpoint that legacy training writes on finish and on Ctrl+C.
 CHECKPOINT_NAME = "mario_brain_checkpoint"
 
 _global_env: gym.Env[Any, Any] | None = None
@@ -243,7 +243,7 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     obs = _reset_obs(env)
 
     step_count = 0
-    fps_window_start = time.time()
+    fps_window_start = time.perf_counter()
     fps_window_frames = 0
     while True:
         action, _states = model.predict(obs, deterministic=True)
@@ -265,7 +265,7 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
         # really running at 60fps" is something you can read from the
         # terminal instead of guessing from how smooth the browser looks.
         fps_window_frames += 1
-        now = time.time()
+        now = time.perf_counter()
         elapsed = now - fps_window_start
         if elapsed >= FPS_REPORT_EVERY_S:
             log.info("[STREAM FPS] %.1f", fps_window_frames / elapsed)

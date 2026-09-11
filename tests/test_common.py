@@ -33,6 +33,23 @@ def test_a_failed_write_leaves_the_previous_file_intact(tmp_path):
     with pytest.raises(TypeError):
         fileio.write_json_atomic({'v': object()}, target)   # not serialisable
     assert json.loads(target.read_text(encoding='utf-8')) == {'v': 1}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["record.json"], "temp file left behind"
+
+
+def test_atomic_write_replaces_on_success_and_keeps_the_old_file_on_failure(tmp_path):
+    target = tmp_path / "blob.bin"
+    with fileio.atomic_write(target) as fh:
+        fh.write(b"first")
+    assert target.read_bytes() == b"first"
+
+    def crash_mid_write():
+        with fileio.atomic_write(target) as fh:
+            fh.write(b"half-written")
+            raise RuntimeError("crash mid-write")
+    with pytest.raises(RuntimeError):
+        crash_mid_write()
+    assert target.read_bytes() == b"first"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["blob.bin"]
 
 
 def test_make_read_only_drops_the_write_bit(tmp_path):

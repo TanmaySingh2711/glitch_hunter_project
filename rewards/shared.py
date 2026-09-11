@@ -29,12 +29,17 @@ ENEMY_CAUSES = ('goomba', 'koopa', 'koopa_shell')
 # row, that spot is marked as a temporary "danger zone" for the next 15
 # episodes, during which extra shaping kicks in specifically there:
 #   - pit deaths    -> momentum/clean-jump rewards are doubled in that zone,
-#                       and the stuck-penalty is relaxed there (more patience
-#                       to actually line up a good running jump instead of
-#                       being time-pressured into repeating the same mistake)
+#                       and (legacy) the stuck-penalty is relaxed there (more
+#                       patience to actually line up a good running jump
+#                       instead of being time-pressured into repeating the
+#                       same mistake)
 #   - enemy deaths  -> an extra "attempt a jump here" bonus is added in that
 #                       zone, nudging toward stomping instead of walking in
-#   - timeout       -> the time penalty is halved in that zone
+#   - timeout       -> (legacy) the time penalty is halved in that zone
+#
+# Both modes track deaths the same way; the boosts marked (legacy) exist only
+# in the legacy reward, because the QA reward has no stuck penalty, no flat
+# time penalty in EXPLORE, and no engine timeout (the respawn rule).
 #
 # This is genuine PPO-compatible shaping (nothing here needs access to the
 # training loop or hyperparameters) and it decays automatically — if the

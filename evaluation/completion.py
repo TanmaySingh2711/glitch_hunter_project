@@ -311,7 +311,7 @@ def evaluate(model_path: str, protocol: Protocol, workers: int = 1,
     full result (metadata, per-episode records, summary)."""
     import stable_baselines3
     import torch
-    t0 = time.time()
+    t0 = time.perf_counter()
     model = load_policy(model_path)
     seeds = episode_seeds(protocol)
     if workers > 1:
@@ -345,7 +345,7 @@ def evaluate(model_path: str, protocol: Protocol, workers: int = 1,
                      'numpy': np.__version__, 'gymnasium': gym.__version__,
                      'pygame': pg.version.ver},
         'workers': workers,
-        'elapsed_s': round(time.time() - t0, 1),
+        'elapsed_s': round(time.perf_counter() - t0, 1),
         'created': time.strftime('%Y-%m-%dT%H:%M:%S'),
     }
 

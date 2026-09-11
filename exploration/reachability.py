@@ -70,10 +70,12 @@ from typing import Any
 
 import numpy as np
 
-Mask = np.ndarray                  # 2-D bool array, (rows, cols)
-Stats = dict[str, Any]
+from common.fileio import atomic_write
 
 from . import config
+
+Mask = np.ndarray                  # 2-D bool array, (rows, cols)
+Stats = dict[str, Any]
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -650,10 +652,14 @@ def save_masks(path: str, solid_world: Mask, testable_world: Mask,
     """
     solid = _embed_in_grid(solid_world)
     testable = _embed_in_grid(testable_world)
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    tmp = path + '.tmp'
+    with atomic_write(path) as fh:
+        _write_mask_bundle(fh, solid, testable, class_map, stats)
+
+
+def _write_mask_bundle(fh: Any, solid: Mask, testable: Mask,
+                       class_map: np.ndarray, stats: Stats) -> None:
     np.savez_compressed(
-        tmp,
+        fh,
         solid_packed=np.packbits(solid),
         testable_packed=np.packbits(testable),
         # Why the taxonomy is stored rather than recomputed: it is derived
@@ -680,7 +686,6 @@ def save_masks(path: str, solid_world: Mask, testable_world: Mask,
         testable_fingerprint=np.str_(mask_fingerprint(testable)),
         format_version=np.int64(config.COVERAGE_FORMAT_VERSION),
     )
-    os.replace(tmp + '.npz', path)
 
 
 def load_masks(path: str | None = None) -> tuple[Mask, Mask, Stats]:

@@ -43,13 +43,12 @@ from training.callbacks import (
     WatchdogCallback,
 )
 from training.checkpoints import checkpoint_timesteps, newest_milestone
-from training.checkpoints import milestone_steps as _milestone_steps
 from training.value_head import reset_value_head
 
 __all__ = [
     'CoverageStatsCallback', 'ExactMilestoneCheckpointCallback', 'Level1CompletionCallback',
     'LifecycleStatsCallback', 'StagnationCallback', 'ValueWarmupCallback', 'WatchdogCallback',
-    '_milestone_steps', 'build_model', 'campaign_coverage_path', 'check_launch_gate',
+    'build_model', 'campaign_coverage_path', 'check_launch_gate',
     'checkpoint_timesteps', 'main', 'make_env', 'prepare_qa_coverage', 'reset_value_head',
     'steps_to_run',
 ]
@@ -658,8 +657,8 @@ def run_training(model: PPO, callback_list: CallbackList, completion: Level1Comp
                          f"{safety_cap:,}", f"{model.num_timesteps:,}",
                          f"{coverage.remaining() or 0:,}")
             else:
-                log.info("Already at TOTAL_TIMESTEPS (%s); current step: %s. Nothing to "
-                         "train — raise TOTAL_TIMESTEPS to continue.",
+                log.info("Already at TOTAL_TIMESTEPS_LEGACY (%s); current step: %s. Nothing "
+                         "to train — raise TOTAL_TIMESTEPS_LEGACY to continue.",
                          f"{TOTAL_TIMESTEPS_LEGACY:,}", f"{model.num_timesteps:,}")
             return
         if QA_PHASE:

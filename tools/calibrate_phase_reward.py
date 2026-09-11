@@ -307,7 +307,7 @@ def run_arm(name: str, spec: ArmSpec, bootstrap: str, seed: int) -> list[Episode
         steps_phase: list[int] = []
         steps_x: list[int] = []
         steps_r: list[float] = []
-        t, t0 = 0, time.time()
+        t, t0 = 0, time.perf_counter()
         while True:
             if force and not force.get('pin') and t == force['at']:
                 lc.force_complete(force['reason'], force['credit'])
@@ -336,7 +336,7 @@ def run_arm(name: str, spec: ArmSpec, bootstrap: str, seed: int) -> list[Episode
             "episode_new": int(cov.episode_new), "target": int(target or 0),
             "covered_before": covered0, "max_x": int(inner.ep_max_x),
             "flag": bool(info.get('flag_get')), "clip_events": inner.qa_clip_events - clip0,
-            "channels": chans, "wall": time.time() - t0,
+            "channels": chans, "wall": time.perf_counter() - t0,
             "step_channels": np.asarray(steps_ch, dtype=np.float32),
             "step_phase": np.asarray(steps_phase, dtype=np.int8),
             "step_x": np.asarray(steps_x, dtype=np.int32),

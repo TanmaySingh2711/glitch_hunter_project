@@ -1,21 +1,23 @@
 """Atomic writes, content hashes and write-protection for project artifacts.
 
-These three operations were implemented separately in the completion
-snapshot, the completion evaluator and the verification record - identical
-code in three places, so a fix to one (say, closing the temp file before the
-rename on Windows) would silently miss the others. They live here once.
+These operations used to be implemented separately wherever a record,
+coverage map or mask was written - identical code in several places, so a
+fix to one (say, closing the temp file before the rename on Windows) would
+silently miss the others. They live here once.
 
 Every write here is ATOMIC: the payload goes to a sibling temp file which is
-then renamed over the target. A crash mid-write leaves the old file, never a
-half-written one that would look valid.
+flushed to disk and then renamed over the target. A crash mid-write leaves
+the old file, never a half-written one that would look valid.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import stat
-from typing import Any
+from collections.abc import Iterator
+from typing import IO, Any
 
 _HASH_BLOCK = 1 << 20          # 1 MiB: bounded memory for 20 MB checkpoints
 
@@ -52,14 +54,36 @@ def ensure_parent_dir(path: str | os.PathLike[str]) -> None:
     os.makedirs(os.path.dirname(os.fspath(path)) or '.', exist_ok=True)
 
 
-def write_json_atomic(obj: Any, path: str | os.PathLike[str], indent: int = 1) -> None:
-    """Writes `obj` as JSON to `path` atomically (temp file, then rename)."""
+@contextlib.contextmanager
+def atomic_write(path: str | os.PathLike[str], mode: str = 'wb',
+                 encoding: str | None = None) -> Iterator[IO[Any]]:
+    """Opens a sibling temp file for writing and, when the block succeeds,
+    renames it over `path`.
+
+    The temp file is flushed to disk before the rename - otherwise a power
+    cut just after it can leave the NEW name pointing at an empty file - and
+    is removed if the block raises, so a failed write leaves the old file
+    and no debris behind.
+    """
     path = os.fspath(path)
     ensure_parent_dir(path)
     tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as fh:
+    try:
+        with open(tmp, mode, encoding=encoding) as fh:
+            yield fh
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(tmp)
+        raise
+
+
+def write_json_atomic(obj: Any, path: str | os.PathLike[str], indent: int = 1) -> None:
+    """Writes `obj` as JSON to `path` atomically (see atomic_write)."""
+    with atomic_write(path, 'w', encoding='utf-8') as fh:
         json.dump(obj, fh, indent=indent)
-    os.replace(tmp, path)
 
 
 def read_json(path: str | os.PathLike[str]) -> Any:

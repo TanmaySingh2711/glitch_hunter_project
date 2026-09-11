@@ -120,7 +120,6 @@ select:focus {
 }
 
 .video-panel {
-    display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
@@ -170,8 +169,6 @@ select:focus {
 
 .log-panel, .bug-panel {
     padding: 15px;
-    display: flex;
-    flex-direction: column;
     overflow: hidden;
     height: 100%;
     box-sizing: border-box;

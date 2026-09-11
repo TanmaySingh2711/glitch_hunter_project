@@ -187,7 +187,7 @@ def main() -> None:
     print(f"Baseline: {args.model} at {model.num_timesteps:,} steps "
           f"({device}, inference only)\n")
 
-    t0 = time.time()
+    t0 = time.perf_counter()
 
     # ── ARM A: the scale to match ─────────────────────────────────────────
     print(f"ARM A - legacy_completion, {args.episodes} episodes")
@@ -366,7 +366,7 @@ def main() -> None:
     else:
         write_weight(value, stats)
         print(f"\n  Wrote NOVELTY_WEIGHT = {value:.4f} to exploration/config.py")
-    print(f"  wall clock: {time.time() - t0:.0f}s")
+    print(f"  wall clock: {time.perf_counter() - t0:.0f}s")
 
 
 if __name__ == "__main__":

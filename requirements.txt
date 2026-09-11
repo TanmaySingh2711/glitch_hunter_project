@@ -10,14 +10,15 @@
 # ═══════════════════════════════════════════════════════════════════════
 
 # STEP 1 - install PyTorch first, separately (pick ONE line):
-#   Have an NVIDIA GPU:  pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
-#   No NVIDIA GPU:       pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
+#   Have an NVIDIA GPU:  pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+#   No NVIDIA GPU:       pip install torch==2.5.1
+#   (torch alone: nothing here uses torchvision or torchaudio.)
 
 # STEP 2 - install stable-baselines3 on its own, with --no-deps:
 #   pip install stable-baselines3==2.9.0 --no-deps
 #   (Why --no-deps: it asks for a torch version newer than any CUDA build
 #   that exists, so without this flag it silently swaps out the torch you
-#   just installed in Step 1. See README.md "Why the install is 3 steps".)
+#   just installed in Step 1. See README.md "Why the pip install is 3 steps".)
 
 # STEP 3 - install everything else:
 #   pip install -r requirements.txt
@@ -37,7 +38,7 @@ opencv-python==5.0.0.93
 # call there for why.
 
 # OPTIONAL (developers) - the quality gates CI runs (see CONTRIBUTING.md):
-#   pip install pytest==9.1.1 pytest-cov==7.1.0 ruff==0.16.6 mypy==2.3.1
+#   pip install pytest==9.1.1 pytest-cov==7.1.0 ruff==0.16.6 mypy==2.3.1 pre-commit==4.6.2
 #   python tools/check.py   # lint, types, fast tests, artifact hashes
 
 # OPTIONAL - only if you want to see training graphs. Not needed to watch

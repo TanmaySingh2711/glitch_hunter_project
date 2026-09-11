@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from common.fileio import make_read_only, sha256_of, write_json_atomic
+from common.fileio import atomic_write, make_read_only, sha256_of, write_json_atomic
 
 from . import config
 
@@ -279,11 +279,11 @@ def write_remaining_map(coverage: SpatialCoverage, png_path: str,
         cv2.rectangle(img, p0, p1, (0, 230, 255), 1)
         cv2.putText(img, str(i), (p0[0], max(10, p0[1] - 2)), cv2.FONT_HERSHEY_SIMPLEX,
                     0.35, (0, 230, 255), 1, cv2.LINE_AA)
-    os.makedirs(os.path.dirname(png_path) or '.', exist_ok=True)
-    tmp = png_path[:-4] + '.tmp.png'
-    if not cv2.imwrite(tmp, img):
-        raise OSError(f"could not write {tmp}")
-    os.replace(tmp, png_path)
+    ok, png = cv2.imencode('.png', img)
+    if not ok:
+        raise OSError(f"could not encode {png_path}")
+    with atomic_write(png_path) as fh:
+        fh.write(png.tobytes())
     return png_path
 
 
