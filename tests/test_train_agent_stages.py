@@ -70,13 +70,180 @@ def test_fresh_start_ignores_every_checkpoint(in_tmp, monkeypatch):
     assert ta.find_resume_point() == ta.Resume(None, False)
 
 
-def test_the_master_wins_over_numbered_milestones(in_tmp, monkeypatch):
+def _fake_checkpoint(path, steps):
+    """A zip shaped like an SB3 save, as far as checkpoint_timesteps reads it."""
+    import json
+    import zipfile
+    os.makedirs(os.path.dirname(str(path)) or ".", exist_ok=True)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("data", json.dumps({"num_timesteps": steps}))
+    return str(path)
+
+
+def test_the_newest_checkpoint_wins_even_when_the_master_is_older(in_tmp, monkeypatch):
+    """The 6.4M regression: a stale root master must not beat a newer milestone.
+
+    The campaign was stopped between milestones, so checkpoints_qa/ held a
+    verified 6,400,000-step pair while the root master still read 6,032,768.
+    Under the old "master always wins" rule the next launch would have
+    resumed the older one and silently discarded 367,232 steps - no error,
+    no warning, just a coverage number that went backwards.
+    """
     monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(in_tmp / "ckpts"))
-    os.makedirs(in_tmp / "ckpts")
-    (in_tmp / "ckpts" / f"{ta.CHECKPOINT_NAME}_6400000_steps.zip").write_bytes(b"")
+    _fake_checkpoint(in_tmp / "ckpts" / f"{ta.CHECKPOINT_NAME}_6400000_steps.zip",
+                     6_400_000)
     assert ta.find_resume_point().checkpoint.endswith("_6400000_steps.zip")
-    (in_tmp / f"{ta.CHECKPOINT_NAME}.zip").write_bytes(b"")
+
+    _fake_checkpoint(in_tmp / f"{ta.CHECKPOINT_NAME}.zip", 6_032_768)
+    chosen = ta.find_resume_point().checkpoint
+    assert chosen.endswith("_6400000_steps.zip"), (
+        f"resumed {chosen} at 6,032,768 when a verified 6,400,000-step "
+        f"checkpoint existed - this is the silent-regression bug")
+
+
+def test_the_master_is_kept_when_it_ties_the_newest_milestone(in_tmp, monkeypatch):
+    """Same state on both paths: keep the root pair the campaign maintains."""
+    monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(in_tmp / "ckpts"))
+    _fake_checkpoint(in_tmp / "ckpts" / f"{ta.CHECKPOINT_NAME}_6400000_steps.zip",
+                     6_400_000)
+    _fake_checkpoint(in_tmp / f"{ta.CHECKPOINT_NAME}.zip", 6_400_000)
     assert ta.find_resume_point() == ta.Resume(f"{ta.CHECKPOINT_NAME}.zip", False)
+
+
+def test_an_unreadable_checkpoint_is_skipped_loudly(in_tmp, monkeypatch, caplog):
+    """A corrupt zip must not rank as step 0 and must not pass silently."""
+    monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(in_tmp / "ckpts"))
+    _fake_checkpoint(in_tmp / "ckpts" / f"{ta.CHECKPOINT_NAME}_6400000_steps.zip",
+                     6_400_000)
+    (in_tmp / f"{ta.CHECKPOINT_NAME}.zip").write_bytes(b"not a zip")
+    with caplog.at_level(logging.WARNING):
+        chosen = ta.find_resume_point().checkpoint
+    assert chosen.endswith("_6400000_steps.zip")
+    assert any("unreadable checkpoint" in m for m in _messages(caplog))
+
+
+def test_resume_candidates_are_ranked_newest_first(in_tmp, monkeypatch):
+    monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(in_tmp / "ckpts"))
+    _fake_checkpoint(in_tmp / "ckpts" / f"{ta.CHECKPOINT_NAME}_6400000_steps.zip",
+                     6_400_000)
+    _fake_checkpoint(in_tmp / f"{ta.CHECKPOINT_NAME}.zip", 6_032_768)
+    ranked = ta.resume_candidates()
+    assert [s for s, _ in ranked] == [6_400_000, 6_032_768]
+
+
+# ── health-aware selection and --resume-from ───────────────────────────────
+def _record_verdict(in_tmp, checkpoint, verdict, name="result.json"):
+    """Write the file tools/evaluate_completion.py would, for this checkpoint."""
+    import json
+
+    from common.fileio import canonical_sha256
+    results = in_tmp / "evaluation" / "results"
+    results.mkdir(parents=True, exist_ok=True)
+    (results / name).write_text(json.dumps({
+        "checkpoint": {"sha256": canonical_sha256(checkpoint), "num_timesteps": 1},
+        "comparison": {"verdict": verdict, "completion_rate": 0.06},
+    }), encoding="utf-8")
+
+
+def _two_checkpoints(in_tmp, monkeypatch):
+    """A healthy 6,032,768 master and a newer 6,400,000 milestone."""
+    monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(in_tmp / "ckpts"))
+    healthy = _fake_checkpoint(in_tmp / f"{ta.CHECKPOINT_NAME}.zip", 6_032_768)
+    newer = _fake_checkpoint(in_tmp / "ckpts" / f"{ta.CHECKPOINT_NAME}_6400000_steps.zip",
+                             6_400_000)
+    return healthy, newer
+
+
+def test_automatic_resume_never_picks_a_regressed_checkpoint(in_tmp, monkeypatch, caplog):
+    """The 6.4M incident: newest, and REGRESSED. Newest must not win."""
+    healthy, newer = _two_checkpoints(in_tmp, monkeypatch)
+    _record_verdict(in_tmp, newer, "REGRESSED", "newer.json")
+    _record_verdict(in_tmp, healthy, "HEALTHY", "healthy.json")
+    with caplog.at_level(logging.WARNING):
+        chosen = ta.find_resume_point().checkpoint
+    assert chosen == f"{ta.CHECKPOINT_NAME}.zip"
+    assert any("REGRESSED" in m and "6400000" in m for m in _messages(caplog))
+
+
+def test_a_warning_verdict_is_not_treated_as_unsafe(in_tmp, monkeypatch):
+    """WARNING means degraded, not lost; only REGRESSED is refused."""
+    _, newer = _two_checkpoints(in_tmp, monkeypatch)
+    _record_verdict(in_tmp, newer, "WARNING")
+    assert ta.find_resume_point().checkpoint.endswith("_6400000_steps.zip")
+
+
+def test_an_unevaluated_checkpoint_is_unknown_not_unsafe(in_tmp, monkeypatch):
+    _, _newer = _two_checkpoints(in_tmp, monkeypatch)
+    assert ta.find_resume_point().checkpoint.endswith("_6400000_steps.zip")
+
+
+def test_the_verdict_belongs_to_the_bytes_not_the_filename(in_tmp, monkeypatch):
+    """Renaming or copying a regressed checkpoint must not launder it."""
+    import shutil
+    healthy, newer = _two_checkpoints(in_tmp, monkeypatch)
+    _record_verdict(in_tmp, newer, "REGRESSED")
+    renamed = in_tmp / "ckpts" / f"{ta.CHECKPOINT_NAME}_6400000_steps.zip"
+    copy = in_tmp / "elsewhere.zip"
+    shutil.copy(renamed, copy)
+    assert ta.checkpoint_health(str(copy))["verdict"] == "REGRESSED"
+    assert ta.checkpoint_health(healthy) is None
+
+
+def test_it_refuses_outright_when_every_candidate_is_regressed(in_tmp, monkeypatch):
+    healthy, newer = _two_checkpoints(in_tmp, monkeypatch)
+    _record_verdict(in_tmp, newer, "REGRESSED", "a.json")
+    _record_verdict(in_tmp, healthy, "REGRESSED", "b.json")
+    with pytest.raises(SystemExit) as exc:
+        ta.find_resume_point()
+    assert "unsafe retention verdict" in str(exc.value)
+    assert "Nothing was trained" in str(exc.value)
+
+
+def test_resume_from_overrides_automatic_selection(in_tmp, monkeypatch):
+    healthy, _newer = _two_checkpoints(in_tmp, monkeypatch)
+    chosen = ta.find_resume_point(explicit=healthy)
+    assert chosen == ta.Resume(healthy, False)
+
+
+def test_resume_from_can_name_a_regressed_checkpoint_but_says_so(in_tmp, monkeypatch, caplog):
+    """A named checkpoint is a decision, so it is reported and not vetoed."""
+    _, newer = _two_checkpoints(in_tmp, monkeypatch)
+    _record_verdict(in_tmp, newer, "REGRESSED")
+    with caplog.at_level(logging.WARNING):
+        chosen = ta.find_resume_point(explicit=newer)
+    assert chosen.checkpoint == newer
+    assert any("REGRESSED" in m and "named explicitly" in m for m in _messages(caplog))
+
+
+def test_resume_from_a_missing_file_fails_loudly(in_tmp):
+    with pytest.raises(SystemExit) as exc:
+        ta.find_resume_point(explicit=str(in_tmp / "nope.zip"))
+    assert "nope.zip" in str(exc.value)
+
+
+def test_resume_from_an_unreadable_zip_fails_loudly(in_tmp):
+    bad = in_tmp / "bad.zip"
+    bad.write_bytes(b"not a zip")
+    with pytest.raises(SystemExit):
+        ta.find_resume_point(explicit=str(bad))
+
+
+def test_retention_verdicts_skip_unreadable_and_malformed_results(in_tmp):
+    from training.checkpoints import retention_verdicts
+    results = in_tmp / "evaluation" / "results"
+    results.mkdir(parents=True)
+    (results / "broken.json").write_text("{not json", encoding="utf-8")
+    (results / "no_verdict.json").write_text('{"checkpoint": {"sha256": "aa"}}',
+                                             encoding="utf-8")
+    (results / "good.json").write_text(
+        '{"checkpoint": {"sha256": "bb", "num_timesteps": 5},'
+        ' "comparison": {"verdict": "HEALTHY", "completion_rate": 0.44}}',
+        encoding="utf-8")
+    (results / "notes.txt").write_text("ignored", encoding="utf-8")
+    got = retention_verdicts(str(results))
+    assert list(got) == ["bb"]
+    assert got["bb"]["verdict"] == "HEALTHY"
+    assert retention_verdicts(str(in_tmp / "missing")) == {}
 
 
 def test_the_first_qa_run_seeds_from_the_6m_master_read_only(in_tmp, monkeypatch):

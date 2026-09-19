@@ -369,6 +369,19 @@ class QAExplorationReward(RewardState):
                 interaction -= 10.0 * config.QA_POWERUP_SCALE
 
         if interaction > 0.0:
+            # ─── THROTTLED WHILE THE EPISODE IS FAILING TO EXPLORE ───
+            # The per-episode ceiling is absolute but novelty decays with
+            # coverage, so the margin that made the ceiling safe inverts on
+            # its own (config.QA_INTERACTION_DROUGHT_SCALE has the measured
+            # numbers and what it cost). The condition is deliberately the
+            # SAME one the drought penalty uses a few blocks above, not a new
+            # signal: it already means "unproductive lingering, and not
+            # merely standing on an old pixel", and it already exempts
+            # COMPLETE and coherent transit. Sharing it means the two can
+            # never disagree about whether this substep counts as exploring.
+            if (drought > config.DROUGHT_GRACE and not complete
+                    and not lifecycle.in_coherent_transit):
+                interaction *= config.QA_INTERACTION_DROUGHT_SCALE
             allowed = min(interaction,
                           config.QA_INTERACTION_EPISODE_CAP
                           - self.ep_interaction_paid)

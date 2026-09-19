@@ -25,6 +25,7 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.utils import FloatSchedule
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecEnv
 
+from common.fileio import canonical_sha256
 from common.logging_setup import configure_logging
 from exploration import config as xconfig
 from exploration import coverage as coverage_mod
@@ -43,7 +44,11 @@ from training.callbacks import (
     ValueWarmupCallback,
     WatchdogCallback,
 )
-from training.checkpoints import checkpoint_timesteps, newest_milestone
+from training.checkpoints import (
+    checkpoint_timesteps,
+    newest_milestone,
+    retention_verdicts,
+)
 from training.value_head import reset_value_head
 
 __all__ = [
@@ -132,6 +137,10 @@ else:
 
 FINAL_MODEL_PATH = f"./{CHECKPOINT_NAME}"
 COVERAGE_FINAL_PATH = f"./{CHECKPOINT_NAME}_coverage.npz"
+# Where tools/evaluate_completion.py writes its verdicts. Read (never
+# written) by checkpoint selection, so a REGRESSED brain cannot be resumed
+# automatically - see UNSAFE_VERDICTS.
+RETENTION_RESULTS_DIR = os.path.join("evaluation", "results")
 # The run's own log, beside the TensorBoard curves. Opened only once every
 # launch gate has passed, so a refused launch writes nothing at all.
 TRAIN_LOG_PATH = os.path.join("logs", "train.log")
@@ -331,7 +340,64 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--unrestricted", action="store_true",
                     help="QA: explicitly approve a campaign with no safety cap. Only "
                          "after the controlled validation run has been reviewed.")
+    ap.add_argument("--dry-run-resume", action="store_true",
+                    help="print which checkpoint and coverage file this launch would "
+                         "resume from, verify the pair, and exit without training.")
+    ap.add_argument("--resume-from", metavar="CHECKPOINT", default=None,
+                    help="resume this exact checkpoint instead of the automatic "
+                         "choice. Its coverage pair is still verified, and a "
+                         "REGRESSED verdict is reported but not vetoed - naming a "
+                         "checkpoint is treated as a decision.")
     return ap.parse_args(list(argv))
+
+
+def dry_run_resume(explicit: str | None = None) -> int:
+    """Report and VERIFY the resume selection, then exit. Trains nothing.
+
+    Exists because the failure this guards against is silent: resuming an
+    older master looks exactly like a normal launch. This runs the real
+    selection and the real coverage verification, so a mismatch is reported
+    here rather than discovered later from a coverage number that went
+    backwards.
+    """
+    rule = "=" * 68
+    ranked = resume_candidates()
+    log.info(rule)
+    log.info("RESUME SELECTION (dry run - nothing is trained or written)")
+    log.info(rule)
+    if not ranked and explicit is None:
+        log.info("  no QA checkpoint found; a launch would seed from the 6M master")
+        return 0
+    for steps, path in ranked:
+        health = checkpoint_health(path)
+        log.info("  candidate  %12s  %-58s  retention: %s", f"{steps:,}", path,
+                 str(health["verdict"]) if health else "not evaluated")
+    resume = find_resume_point(explicit)
+    if resume.checkpoint is None:
+        log.info("  FRESH_START is set; no checkpoint would be resumed.")
+        return 0
+    chosen = checkpoint_timesteps(resume.checkpoint)
+    log.info("  SELECTED   %12s  %s", f"{chosen:,}", resume.checkpoint)
+    if not QA_PHASE:
+        log.info("  (legacy phase: no campaign coverage to pair)")
+        return 0
+    coverage = SpatialCoverage(testable_mask=coverage_mod.load_testable())
+    cov_path, paired_at = prepare_qa_coverage(
+        coverage, resume.checkpoint, resume.seeded_from_legacy)
+    covered = coverage.covered_testable()
+    total = int(coverage.testable_total or 0)
+    log.info("  COVERAGE   %s", cov_path)
+    log.info("    paired with checkpoint step : %s", f"{paired_at:,}")
+    log.info("    covered_testable            : %s / %s (%.4f%%)",
+             f"{covered:,}", f"{total:,}", 100.0 * covered / max(1, total))
+    log.info("    remaining                   : %s", f"{coverage.remaining() or 0:,}")
+    log.info("    mask fingerprint            : %s...",
+             xconfig.TESTABLE_FINGERPRINT[:16])
+    log.info("    anomalous px                : %d", coverage.anomalous_px())
+    coverage.assert_consistent()
+    log.info("    integrity                   : OK (re-counted and consistent)")
+    log.info(rule)
+    return 0
 
 
 def check_launch_gate(qa: bool, safety_cap: int | None, unrestricted: bool) -> None:
@@ -540,17 +606,133 @@ class Resume:
     seeded_from_legacy: bool
 
 
-def find_resume_point() -> Resume:
-    """The checkpoint to resume (skipped entirely if FRESH_START). The master
-    file wins over numbered milestones when it exists."""
+#: Verdicts that automatic selection refuses to resume on its own. WARNING is
+#: deliberately not here: it means "look at the trend", not "this is broken",
+#: and silently refusing to continue a marginal run would be its own surprise.
+#: An explicit --resume-from always wins, including for these.
+UNSAFE_VERDICTS = ("REGRESSED",)
+
+
+def checkpoint_health(path: str) -> dict[str, object] | None:
+    """The recorded retention verdict for a checkpoint, or None if unevaluated."""
+    try:
+        sha = canonical_sha256(path)
+    except OSError:
+        return None
+    return retention_verdicts(RETENTION_RESULTS_DIR).get(sha)
+
+
+def resume_candidates() -> list[tuple[int, str]]:
+    """Every resumable QA checkpoint, as (global_timestep, path), newest first.
+
+    A candidate whose zip cannot be read for its step count is dropped with a
+    warning rather than silently ranked at zero - an unreadable checkpoint is
+    not something to resume from, but it is also not a reason to quietly pick
+    an older one without saying so.
+    """
+    paths = []
+    master = f"{CHECKPOINT_NAME}.zip"
+    if os.path.exists(master):
+        paths.append(master)
+    milestone = newest_milestone(CHECKPOINT_DIR, CHECKPOINT_NAME)
+    if milestone and os.path.abspath(milestone) != os.path.abspath(master):
+        paths.append(milestone)
+
+    out: list[tuple[int, str]] = []
+    for p in paths:
+        try:
+            out.append((checkpoint_timesteps(p), p))
+        except (zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
+            log.warning("Ignoring unreadable checkpoint %s (%s: %s)",
+                        p, type(exc).__name__, exc)
+    out.sort(key=lambda t: t[0], reverse=True)
+    return out
+
+
+def find_resume_point(explicit: str | None = None) -> Resume:
+    """The checkpoint to resume (skipped entirely if FRESH_START).
+
+    ─── NEWEST WINS, BUT ONLY AMONG CHECKPOINTS KNOWN NOT TO BE BROKEN ───
+    This started as "the master file wins over numbered milestones", which is
+    only true while the master IS the newest thing on disk. It stopped being
+    true the moment a run ended between milestones: checkpoints_qa/ held a
+    verified 6,400,000-step pair while the root master still read 6,032,768,
+    so the next launch would have resumed the older one and silently thrown
+    away 367,232 steps. Fixing that gave "highest global timestep wins".
+
+    Then the 6,400,000-step checkpoint came back REGRESSED - completion 6.0%
+    against the 6M baseline's 46.8% - and "newest wins" pointed straight at
+    it. Newer stopped meaning better, so step count alone is not a safe rule
+    either: it would have resumed a brain that had lost the level.
+
+    So automatic selection now skips any candidate whose recorded retention
+    verdict is in UNSAFE_VERDICTS, loudly, and takes the newest of what is
+    left. `explicit` (--resume-from) overrides all of it, including an unsafe
+    verdict, because a human naming a checkpoint is a decision and not an
+    accident - it is only reported, never vetoed. Either way the coverage
+    pairing is verified downstream by prepare_qa_coverage(), which refuses a
+    missing, corrupt or wrong-fingerprint map rather than falling back.
+    """
+    if explicit is not None:
+        if not os.path.exists(explicit):
+            raise SystemExit(
+                f"[RESUME] --resume-from {explicit} does not exist.\n"
+                f"Nothing was trained and no file was written.")
+        try:
+            steps = checkpoint_timesteps(explicit)
+        except (zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
+            raise SystemExit(
+                f"[RESUME] --resume-from {explicit} is not a readable SB3 "
+                f"checkpoint ({type(exc).__name__}: {exc}).\n"
+                f"Nothing was trained and no file was written.") from exc
+        health = checkpoint_health(explicit)
+        verdict = str(health["verdict"]) if health else "not evaluated"
+        log.info("[RESUME] Explicitly selected %s (%s steps, retention: %s).",
+                 explicit, f"{steps:,}", verdict)
+        if health and verdict in UNSAFE_VERDICTS:
+            log.warning("[RESUME] %s is recorded %s. Continuing because it was "
+                        "named explicitly.", explicit, verdict)
+        return Resume(explicit, False)
+
     if FRESH_START:
         log.info("FRESH_START is True — ignoring any existing checkpoints, training from step 0.")
         return Resume(None, False)
     latest: str | None = None
-    if os.path.exists(f"{CHECKPOINT_NAME}.zip"):
-        latest = f"{CHECKPOINT_NAME}.zip"
-    else:
-        latest = newest_milestone(CHECKPOINT_DIR, CHECKPOINT_NAME)
+    ranked = resume_candidates()
+    safe: list[tuple[int, str]] = []
+    for steps, path in ranked:
+        health = checkpoint_health(path)
+        found = str(health["verdict"]) if health else None
+        if found in UNSAFE_VERDICTS:
+            log.warning("[RESUME] Skipping %s (%s steps): retention verdict %s. "
+                        "Use --resume-from to train it anyway.",
+                        path, f"{steps:,}", found)
+            continue
+        safe.append((steps, path))
+    if ranked and not safe:
+        raise SystemExit(
+            "[RESUME] Every resumable checkpoint has an unsafe retention "
+            "verdict:\n" + "\n".join(
+                f"  {s:>12,}  {p}  ({checkpoint_health(p) or {}})"
+                for s, p in ranked) +
+            "\nRefusing to continue training a brain that is recorded as "
+            "broken. Name one explicitly with --resume-from if that is "
+            "really what you want.\n"
+            "Nothing was trained and no file was written.")
+    if safe:
+        best_steps, latest = safe[0]
+        master = f"{CHECKPOINT_NAME}.zip"
+        for steps, path in safe[1:]:
+            if steps == best_steps and os.path.abspath(path) == os.path.abspath(master):
+                latest = path          # identical state; keep the root pair
+        for steps, path in safe:
+            if path != latest:
+                log.info("Resume candidate %s is at %s steps; not selected.",
+                         path, f"{steps:,}")
+        health = checkpoint_health(latest)
+        log.info("Resuming the newest safe checkpoint: %s (%s steps, retention: %s).",
+                 latest, f"{best_steps:,}",
+                 str(health["verdict"]) if health else "not evaluated")
     # ─── QA SEEDING ───
     # First QA run only: there is no QA checkpoint yet, so the completion
     # phase's master is READ to seed the weights. It is never written
@@ -758,10 +940,13 @@ def main(argv: Sequence[str] = ()) -> None:
         log.info("[INFO] tensorboard not installed - training will run without logging "
                  "curves. Install it with `pip install tensorboard` if you want them.")
     args = parse_args(argv)
+    if args.dry_run_resume:
+        dry_run_resume(args.resume_from)
+        return
     # The command line wins over the constant; either is a cut-off only.
     safety_cap = (args.safety_cap_timesteps if args.safety_cap_timesteps is not None
                   else QA_SAFETY_CAP_TIMESTEPS)
-    resume = find_resume_point()
+    resume = find_resume_point(args.resume_from)
 
     # ═══════════════════════════════════════════════════════════════════
     # SHARED COVERAGE (QA phase only)

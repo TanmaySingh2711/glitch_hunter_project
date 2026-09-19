@@ -70,7 +70,10 @@ def _campaign_files():
              for f in sorted(os.listdir(os.path.join(ROOT, 'exploration_data')))]
     qa_dir = os.path.join(ROOT, config.CHECKPOINT_DIR_QA)
     if os.path.isdir(qa_dir):
-        paths += [os.path.join(config.CHECKPOINT_DIR_QA, f) for f in sorted(os.listdir(qa_dir))]
+        # Walk into sub-folders: checkpoints_qa/pre_main_6032768/ holds the
+        # healthy rollback pair, and it is exactly what must stay byte-identical.
+        for folder, _dirs, names in sorted(os.walk(qa_dir)):
+            paths += [os.path.relpath(os.path.join(folder, n), ROOT) for n in sorted(names)]
     paths += ["glitch_hunter_qa.zip", "glitch_hunter_qa_coverage.npz"]
     return paths
 

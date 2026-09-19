@@ -42,3 +42,42 @@ def checkpoint_timesteps(path: str) -> int:
     belongs to it can be verified before a single worker starts."""
     with zipfile.ZipFile(path) as z:
         return int(json.loads(z.read("data"))["num_timesteps"])
+
+
+def retention_verdicts(results_dir: str) -> dict[str, dict[str, object]]:
+    """Known completion-retention verdicts, keyed by checkpoint SHA-256.
+
+    "Newest wins" is only safe while newer also means better, and the
+    6,400,000-step checkpoint is the counter-example: it is the newest thing
+    on disk AND it is REGRESSED (completion 6.0% against the 6M baseline's
+    46.8%, mean progress 0.280 against 0.710). Resuming it would have
+    continued training a brain that had lost the ability to finish the level.
+
+    So selection reads the verdicts the evaluator has already written. Keyed
+    by SHA-256 rather than by path because a checkpoint gets copied and
+    renamed - the root master and checkpoints_qa/pre_main_6032768/ are the
+    same bytes - and the verdict belongs to the weights, not the filename.
+
+    A checkpoint with no result file is simply unknown, never assumed good or
+    bad; the caller decides what to do with that.
+    """
+    out: dict[str, dict[str, object]] = {}
+    if not os.path.isdir(results_dir):
+        return out
+    for name in sorted(os.listdir(results_dir)):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(results_dir, name), encoding="utf-8") as fh:
+                doc = json.load(fh)
+            sha = str(doc["checkpoint"]["sha256"])
+            verdict = str(doc["comparison"]["verdict"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue          # an unreadable result is not a verdict
+        out[sha] = {
+            "verdict": verdict,
+            "result_file": name,
+            "num_timesteps": doc["checkpoint"].get("num_timesteps"),
+            "completion_rate": doc.get("comparison", {}).get("completion_rate"),
+        }
+    return out

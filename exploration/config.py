@@ -330,6 +330,45 @@ QA_POWERUP_SCALE = 0.25
 # a cap on penalties would be a loophole, not a safeguard.
 QA_INTERACTION_EPISODE_CAP = 10.0
 
+# ─── THE CAP IS ABSOLUTE; THE THING IT WAS CALIBRATED AGAINST IS NOT ───
+# Read the paragraph above again: "a typical episode earns roughly 36 from
+# novelty against this ceiling of 10". That 3.6:1 margin was measured on a
+# 46%-covered map, and it is the entire safety argument for the cap. But
+# novelty is paid for NEW pixels, so it necessarily shrinks as coverage
+# saturates, while the ceiling does not. The margin is not a constant - it
+# decays, and at some coverage level it inverts.
+#
+# It inverted between 6,032,768 and 6,400,000 steps, and it cost the policy
+# its ability to finish the level. Measured per-episode means over that
+# window, binned by 50k steps:
+#
+#     6.03-6.08M   novelty 12.32   interaction 6.19     (still 2:1 novelty)
+#     6.13-6.18M   novelty  1.99   interaction 6.95     <- inverted
+#     6.18-6.23M   novelty  1.51   interaction 7.49
+#     6.33-6.38M   novelty  5.90   interaction 8.10
+#
+# Interaction hit its +10 ceiling in ~35% of episodes while half of them
+# discovered nothing at all. Lingering near interactable objects had become
+# strictly more profitable than exploring, and the policy learned exactly
+# that: median max-x fell 5,971 -> 1,172 and completion retention collapsed
+# from 43.8% to 6.0% (REGRESSED).
+#
+# THE FIX IS A GATE, NOT A BIGGER NOVELTY WEIGHT. Raising novelty globally
+# would restore the ratio for a while and then invert again at the next
+# coverage level, because the decay is structural. Instead the interaction
+# channel is throttled exactly while the episode is FAILING TO EXPLORE -
+# reusing the drought condition the penalty in rewards/qa.py already uses,
+# so it inherits every exemption that was calibrated there: never in
+# COMPLETE (crossing old ground is that phase's job), never during coherent
+# transit, and never before DROUGHT_GRACE has elapsed.
+#
+# Scaled rather than zeroed on purpose. A powerup grabbed during a drought
+# is still worth marginally more than no powerup, so the gradient that
+# teaches interaction survives; what dies is the PROFITABILITY of standing
+# still. At this scale a drought-bound episode earns at most 1.0 from
+# interaction against a drought penalty that reaches -15.
+QA_INTERACTION_DROUGHT_SCALE = 0.1
+
 # ─── CUMULATIVE LOCOMOTION CAP (Phase 4B) ───
 # Momentum and clean running jumps are direction-agnostic on purpose (see
 # the wrapper), which also makes them farmable in place. Measured with a
@@ -871,7 +910,33 @@ SAFETY_MEANINGFUL_NEW_PX = 1
 # ═══════════════════════════════════════════════════════════════════════
 VF_WARMUP_STEPS = 200_000
 VF_WARMUP_LR = 2.5e-5
-NORMAL_LR = 1.0e-4
+
+# ─── QA FINE-TUNING RUNS AT THE WARM-UP RATE, NOT ABOVE IT ───
+# This was 1.0e-4, inherited from the legacy completion phase, and the
+# 6.03M -> 6.4M campaign measured what it does to a QA resume. Per PPO
+# update, 12 updates at 2.5e-5 against 9 at 1.0e-4:
+#
+#                      2.5e-5              1.0e-4
+#     approx_kl        0.0176 (max 0.0370) 0.0398 (max 0.0737)   2.26x
+#     clip_fraction    0.158               0.332                 2.11x
+#     explained_var    0.539 (max 0.707)   0.424 (max 0.595)     fell
+#     early-stopped    4 of 12             8 of 9
+#
+# 8 of 9 updates aborting mid-epoch on max-KL is the important number: PPO
+# was discarding most of each update's gradient, so the higher rate did not
+# even buy faster learning - it bought truncated, noisier updates and a
+# critic that tracked worse. Safety resets during training doubled (9% ->
+# 20%) at exactly the step-up, and coverage grew SLOWER per step afterwards
+# (0.039 pp/10k during warm-up vs 0.015 pp/10k after).
+#
+# 2.5e-5 is the only rate with direct evidence of healthy QA fine-tuning on
+# this policy, so it is the one adopted; the schedule is now effectively
+# constant and the warm-up "step-up" is a no-op. Do not raise this without
+# measuring at the intended rate first - 5e-5 was never run, and guessing a
+# midpoint is how 1.0e-4 got here. Legacy training is unaffected: it does
+# not use ValueWarmupCallback, and build_model's resume branch still sets
+# its own 1.0e-4.
+NORMAL_LR = 2.5e-5
 
 STAGNATION_WINDOW = 3
 STAGNATION_RATE_THRESHOLD = 500     # new px per 10k steps

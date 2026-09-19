@@ -19,6 +19,7 @@ import pytest
 from agent_logic import GlitchHunterWrapper
 from exploration import config
 from exploration.coverage import SpatialCoverage
+from exploration.lifecycle import EpisodePhase
 
 BASE = {
     'x_pos': 500, 'y_pos': 400, 'x_vel': 0.0, 'on_ground': True,
@@ -348,3 +349,136 @@ def test_qa_mode_without_coverage_is_refused(env):
     with pytest.raises(ValueError, match="requires a coverage channel"):
         GlitchHunterWrapper(env, reward_mode="qa_exploration",
                             attach_coverage=False)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# REWARD INVERSION: interaction must not become a substitute for exploring
+#
+# The per-episode interaction ceiling is an absolute 10.0, but the novelty it
+# was calibrated against ("roughly 36 per episode" - config) shrinks as the
+# map fills. Between 6,032,768 and 6,400,000 steps the ratio inverted:
+# novelty fell 12.32 -> 1.51 per episode while interaction held 6.19 -> 7.49
+# and hit its ceiling in ~35% of episodes. Half of those episodes discovered
+# nothing at all. The policy learned to linger next to interactable objects,
+# median max-x fell 5,971 -> 1,172, and completion retention went from 43.8%
+# to 6.0% (REGRESSED).
+#
+# The gate throttles interaction on exactly the condition the drought penalty
+# already uses, so the two can never disagree about what "exploring" means.
+# ══════════════════════════════════════════════════════════════════════════
+def _drought(rig, substeps, score=0):
+    """Stand still long enough to be past DROUGHT_GRACE on an old pixel.
+
+    `score` is held at whatever the caller last used, because `score` in the
+    info dict is ABSOLUTE and the reward reads its DELTA - letting it fall
+    back to 0 here would hand the next call a much bigger delta than
+    intended and quietly change what the test measures.
+    """
+    for _ in range(substeps):
+        rig.drive(**dict(_at(6800), score=score))
+
+
+def test_interaction_is_throttled_once_the_episode_stops_discovering(qa_flat):
+    """Lingering next to a scoring object must stop being worth much."""
+    # Small deltas on purpose: big ones hit the 10.0 episode ceiling, and
+    # then the CAP is what bound the payment, not the gate under test.
+    qa_flat.drive(**_at(6800))
+    fresh = qa_flat.drive(**dict(_at(6800), score=100))
+    _drought(qa_flat, config.DROUGHT_GRACE + config.DROUGHT_STEP, score=100)
+    before = qa_flat.ep_interaction_paid
+    qa_flat.drive(**dict(_at(6800), score=200))     # the same +100 delta
+    gated = qa_flat.ep_interaction_paid - before
+
+    full_pay = 100 * config.QA_SCORE_SCALE
+    assert fresh == pytest.approx(full_pay, abs=1e-6), \
+        "the first interaction, before any drought, was not paid in full"
+    assert gated == pytest.approx(full_pay * config.QA_INTERACTION_DROUGHT_SCALE,
+                                  abs=1e-6), (
+        f"a drought-bound interaction paid {gated:.4f}; it must be scaled by "
+        f"{config.QA_INTERACTION_DROUGHT_SCALE}")
+
+
+def test_interaction_still_pays_in_full_while_discovering(qa):
+    """Genuinely useful interaction learning is preserved.
+
+    The gate is about lingering, not about interacting. An agent picking up
+    a powerup while covering new ground is doing both things right and must
+    be paid for both.
+    """
+    qa.drive(**_at(1000))
+    before = qa.ep_interaction_paid
+    qa.drive(**dict(_at(1100), score=100))     # new ground AND a score event
+    paid = qa.ep_interaction_paid - before
+    assert qa.coverage.steps_since_new_pixel == 0, "this step found no new ground"
+    assert paid == pytest.approx(100 * config.QA_SCORE_SCALE, abs=1e-6), \
+        "interaction was throttled on a step that discovered new pixels"
+
+
+def test_the_gate_never_scales_a_penalty(qa_flat):
+    """Same rule the cap follows: the downside is never softened."""
+    qa_flat.drive(**dict(_at(6900), status='tall'))
+    # status is held across the drought, so the tall -> small transition
+    # happens ONCE, on the measured step, and not silently inside the loop.
+    for _ in range(config.DROUGHT_GRACE + config.DROUGHT_STEP):
+        qa_flat.drive(**dict(_at(6900), status='tall'))
+    r = qa_flat.drive(**dict(_at(6900), status='small'))
+    assert r < -1.0, (
+        "losing a powerup during a drought became cheap - the gate must only "
+        "ever throttle positive interaction")
+
+
+def test_the_gate_is_off_in_the_complete_phase(qa_flat):
+    """Crossing old ground is COMPLETE's whole job, so it is not a drought."""
+    qa_flat.lifecycle.phase = EpisodePhase.COMPLETE
+    qa_flat.lifecycle.completion_credit = 1.0
+    _drought(qa_flat, config.DROUGHT_GRACE + config.DROUGHT_STEP)
+    before = qa_flat.ep_interaction_paid
+    qa_flat.drive(**dict(_at(6800), score=100))
+    paid = qa_flat.ep_interaction_paid - before
+    assert paid == pytest.approx(100 * config.QA_SCORE_SCALE, abs=1e-6), \
+        "interaction was throttled in COMPLETE, where old ground is the route"
+
+
+def test_the_gate_is_off_during_coherent_transit(qa_flat):
+    """Transit across old territory toward a frontier is not lingering."""
+    _drought(qa_flat, config.DROUGHT_GRACE + config.DROUGHT_STEP)
+    # in_coherent_transit is derived from the last COMPLETED window, so it is
+    # set the way the lifecycle sets it rather than assigned to.
+    qa_flat.lifecycle.last_window = {'in_transit': True, 'cells_ahead': 1,
+                                     'new_px': 0}
+    assert qa_flat.lifecycle.in_coherent_transit
+    before = qa_flat.ep_interaction_paid
+    qa_flat.drive(**dict(_at(6800), score=100))
+    paid = qa_flat.ep_interaction_paid - before
+    assert paid == pytest.approx(100 * config.QA_SCORE_SCALE, abs=1e-6), \
+        "interaction was throttled during coherent transit"
+
+
+def test_a_zero_yield_episode_cannot_be_farmed_into_profit(qa_flat):
+    """The exploit that cost the policy the level, end to end.
+
+    Stand on one already-covered pixel and take the biggest score windfall
+    the engine can produce. 36 of the 129 recorded zero-yield episodes ended
+    net POSITIVE before the gate; replaying them through it leaves 1.
+
+    Note what is NOT claimed: the gate is a scale, not a second ceiling, so a
+    large enough windfall still reaches the +10 interaction cap eventually -
+    it just needs 10x the score to get there. The property that matters is
+    that the drought outruns it, so the EPISODE is a loss. Turning the cap
+    itself down during a drought was considered and rejected as the larger
+    change: it would also retroactively shrink interaction an episode had
+    already legitimately earned before the drought began.
+    """
+    # Long enough for the per-episode drought cap to bind - the same 1,595
+    # substeps the drought-cap test above uses. A shorter run only measures
+    # the ramp, not the steady state a real stuck episode reaches.
+    total = qa_flat.drive(**_at(6800))
+    for i in range(1595):
+        total += qa_flat.drive(**dict(_at(6800), score=2000 * (i + 1)))
+    assert qa_flat.coverage.episode_new == 0, "this episode discovered pixels"
+    assert total < 0.0, (
+        f"standing still and farming score returned {total:+.2f} - it has to "
+        f"be a losing strategy while unexplored pixels remain")
+    assert qa_flat.ep_drought_paid > qa_flat.ep_interaction_paid, (
+        f"drought {qa_flat.ep_drought_paid:.2f} did not outrun interaction "
+        f"{qa_flat.ep_interaction_paid:.2f} - lingering is still profitable")
