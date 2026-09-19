@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -400,6 +401,54 @@ def method_c(solid: Mask, spawn_xy: tuple[int, int], mario_w: int | None = None,
 # reached somewhere Method B allows but Method C's BFS did not find. That is
 # a shortfall in MY reachability model, not a bug in the game, and it must
 # not be reported as either coverage or a glitch.
+#
+# ─── THREE MORE EXPLANATIONS, ADDED FROM MEASURED FALSE POSITIVES ───
+# The 6.02M short validation reported 599 anomalous pixels, all of class
+# deep_penetration, where the 40-episode bootstrap had reported 0. Both
+# clusters turned out to be defects in THIS classifier, not in the game, and
+# they have different causes - so they get different classes rather than one
+# widened tolerance. (Raising PENETRATION_TOL would have buried both without
+# explaining either, and would have blunted the detector everywhere.)
+#
+# A third cause surfaced immediately afterwards, in the controlled
+# COMPLETE-phase validation: 1,079 FLOOR_CLIP pixels in a single episode
+# (9,951 over a longer run) from ordinary pit deaths at x 3708-3744. See the
+# pit rule below - the lesson is the same one all three teach, that a static
+# model of a live engine goes wrong in the direction of crying wolf, so an
+# unexplained anomaly is worth measuring before it is worth believing.
+#
+#   MUTABLE_SOLID   579 px at x 5070-5094, y 371-401: the deep interior of
+#                   brick20 (a 43x43 Brick at 5058,365). The class map is
+#                   built ONCE from the level's opening geometry, but the
+#                   geometry is not constant - level1.py:776 calls
+#                   brick.kill() when big Mario hits a contents-less brick
+#                   from below, and the block is gone for the rest of the
+#                   episode. 29 of the 31 bricks are destructible this way,
+#                   and every brick and coin box also RISES ~18 px while
+#                   BUMPED, freeing the bottom of its own footprint. Standing
+#                   where a destroyed block used to be is not a clip.
+#
+#   SWEEP_ARTIFACT  20 px at x 7748-7751, y 458-462, in pipe6's top-right
+#                   corner - geometry that never moves or dies. This one is
+#                   not about the game at all: coverage.record() marks the
+#                   BOUNDING BOX of the previous and current collider rects,
+#                   which for a diagonal move past a convex corner contains
+#                   pixels NEITHER rect occupied. Measured: prev=(7747,412)
+#                   and cur=(7758,423), dx=+11 dy=+11 (inside the engine's
+#                   14/12 single-frame envelope), both placements entirely
+#                   collision-free, union box x 7747-7787 y 412-462 - which
+#                   covers the whole cluster. The collider never entered the
+#                   pipe; the evidence is simply coarser than a pixel.
+#
+# That is why SWEEP_ARTIFACT is a MODEL GAP and not an EXPECTED class: it
+# describes a limit of how coverage is RECORDED, not something the engine
+# did. Keeping it separate means the report still says out loud that the
+# anomaly detector cannot resolve finer than the recorded box.
+#
+# Both are applied ONLY to pixels this classifier would otherwise call
+# DEEP_PENETRATION, so no other class can move. Together they account for
+# 64,106 of 556,128 deep pixels (11.5%) - the remaining 492,022 stay
+# anomalous, so the detector is corrected, not disarmed.
 # ══════════════════════════════════════════════════════════════════════════
 CLS_TESTABLE = 0            # inside the mask; ordinary coverage
 
@@ -415,6 +464,9 @@ CLS_DEEP_PENETRATION = 7    # ANOMALOUS: inside a solid past the tolerance
 CLS_OUTSIDE_LEVEL = 8       # ANOMALOUS: beyond the level horizontally
 CLS_UNREACHABLE_ALT = 9     # ANOMALOUS: in-world altitude no jump reaches
 
+CLS_MUTABLE_SOLID = 10      # EXPECTED: solid at build time, removable in play
+CLS_SWEEP_ARTIFACT = 11     # MODEL GAP: only the recorded box reaches it
+
 CLASS_NAMES = {
     CLS_TESTABLE: 'testable',
     CLS_JUMP_ARC: 'jump_arc',
@@ -426,9 +478,12 @@ CLASS_NAMES = {
     CLS_DEEP_PENETRATION: 'deep_penetration',
     CLS_OUTSIDE_LEVEL: 'outside_level',
     CLS_UNREACHABLE_ALT: 'unreachable_altitude',
+    CLS_MUTABLE_SOLID: 'mutable_solid',
+    CLS_SWEEP_ARTIFACT: 'sweep_artifact',
 }
-EXPECTED_CLASSES = (CLS_JUMP_ARC, CLS_PIT_FALL, CLS_COLLISION_TOL)
-MODEL_GAP_CLASSES = (CLS_CONNECTIVITY_GAP,)
+EXPECTED_CLASSES = (CLS_JUMP_ARC, CLS_PIT_FALL, CLS_COLLISION_TOL,
+                    CLS_MUTABLE_SOLID)
+MODEL_GAP_CLASSES = (CLS_CONNECTIVITY_GAP, CLS_SWEEP_ARTIFACT)
 ANOMALOUS_CLASSES = (CLS_IMPOSSIBLE_SKY, CLS_FLOOR_CLIP, CLS_DEEP_PENETRATION,
                      CLS_OUTSIDE_LEVEL, CLS_UNREACHABLE_ALT)
 
@@ -439,13 +494,129 @@ def _dilate(mask: Mask, radius: int) -> Mask:
     return _window_any(out, -radius, radius, axis=1)
 
 
+def mutable_solid_mask(level_state: Any) -> Mask:
+    """Solid at build time, but which the ENGINE itself can clear in play.
+
+    The class map is a single static snapshot; the level is not. Two engine
+    behaviours move solid geometry after the mask is built, and a collider
+    standing in the space they vacate is doing nothing wrong:
+
+      destroyed  level1.adjust_mario_for_y_brick_collisions calls
+                 brick.kill() when big Mario hits a brick from below and the
+                 brick has no contents (level1.py:776). The sprite leaves
+                 brick_group permanently, so its ENTIRE footprint is free for
+                 the rest of the episode. Bricks holding coins or a star are
+                 never killed, so only `contents is None` qualifies.
+
+      bumped     Brick.bumped() and the coin boxes run rect.y += y_vel from
+                 y_vel = -6 under gravity 1.2, so the sprite sits up to
+                 BUMP_RISE_PX higher than its rest position for those frames.
+                 The bottom of its resting footprint is genuinely empty then.
+
+    Returns a WORLD-sized mask of exactly those footprints - no collider
+    geometry is applied here. It does not need to be: classify_noncoverage
+    intersects this with the DEEP_PENETRATION set before using it, so the
+    only pixels it can ever excuse are ones already established to be buried
+    more than PENETRATION_TOL inside a solid.
+    """
+    out = np.zeros((config.LEVEL_H, config.LEVEL_W), dtype=bool)
+
+    def burn(top: int, bottom: int, left: int, right: int) -> None:
+        t, b = max(0, top), min(config.LEVEL_H, bottom)
+        left_, right_ = max(0, left), min(config.LEVEL_W, right)
+        if b > t and right_ > left_:
+            out[t:b, left_:right_] = True
+
+    for sprite in getattr(level_state, 'brick_group', ()):
+        r = sprite.rect
+        if getattr(sprite, 'contents', None) is None:
+            burn(r.top, r.bottom, r.left, r.right)       # killable outright
+        burn(r.bottom - config.BUMP_RISE_PX, r.bottom, r.left, r.right)
+    for sprite in getattr(level_state, 'coin_box_group', ()):
+        r = sprite.rect
+        burn(r.bottom - config.BUMP_RISE_PX, r.bottom, r.left, r.right)
+    return out
+
+
+def sweep_coverable(solid: Mask, forms: Sequence[tuple[int, int]] | None = None,
+                    max_dx: int | None = None,
+                    max_dy: int | None = None) -> Mask:
+    """Every pixel a LEGAL recorded sweep box can contain.
+
+    SpatialCoverage.record() does not mark the path the collider traced; it
+    marks the axis-aligned BOUNDING BOX of the previous and current rects
+    (coverage.py:record). For a diagonal move past a convex corner that box
+    contains pixels neither rect ever occupied, and the classifier then reads
+    them as if the collider had been there.
+
+    So this computes the honest resolution limit of that evidence: the union,
+    over every pair of collision-free placements one engine frame apart, of
+    the box record() would mark for them. A pixel inside this set is not
+    proof that anything reached it, and must not be reported as a glitch.
+
+    Build-time only and deliberately exhaustive - it is a few minutes over
+    the (2*max_dx+1) * (2*max_dy+1) displacement envelope per form, run once
+    per mask, rather than an approximation nobody could later audit.
+    """
+    forms = ([(config.MARIO_SMALL_W, config.MARIO_SMALL_H),
+              (config.MARIO_BIG_W, config.MARIO_BIG_H)]
+             if forms is None else list(forms))
+    max_dx = config.MAX_FRAME_DX if max_dx is None else max_dx
+    max_dy = config.MAX_FRAME_DY if max_dy is None else max_dy
+    ah, aw = solid.shape
+    out = np.zeros(solid.shape, dtype=bool)
+
+    for w, h in forms:
+        # An ANCHOR is legal when the whole w x h collider is in-world and
+        # free - the same definition anchor_grids() uses for validity. The
+        # window runs FORWARD from the anchor (it covers rows ay..ay+h-1),
+        # which is the opposite direction to anchors_to_pixels().
+        occupied = _window_any(_window_any(solid, 0, h - 1, axis=0),
+                               0, w - 1, axis=1)
+        anchors = ~occupied
+        anchors[max(0, ah - h + 1):, :] = False
+        anchors[:, max(0, aw - w + 1):] = False
+
+        for dx in range(-max_dx, max_dx + 1):
+            for dy in range(-max_dy, max_dy + 1):
+                # d and -d describe the SAME set of ordered pairs seen from
+                # the other end, and produce the same boxes: pairs_-d is
+                # pairs_d translated by d, and the extra translation by
+                # min(0, -d) lands both on the same origin, with the same
+                # (w+|dx|) x (h+|dy|) size. So half the envelope is redundant
+                # and skipping it halves the build with no change in result.
+                if dy < 0 or (dy == 0 and dx < 0):
+                    continue
+                # Anchors that are free AND whose partner one frame away is
+                # free too - only those pairs can actually occur.
+                pairs = anchors & _shift(anchors, -dy, -dx)
+                if not pairs.any():
+                    continue
+                # record() marks [min(ax,bx), max(ax,bx)+w) x the same in y,
+                # i.e. a (w+|dx|) x (h+|dy|) box whose top-left corner is the
+                # anchor offset by the negative part of the displacement.
+                origin = _shift(pairs, min(0, dy), min(0, dx))
+                box = _window_any(origin, -(h + abs(dy) - 1), 0, axis=0)
+                box = _window_any(box, -(w + abs(dx) - 1), 0, axis=1)
+                out |= box
+    return out
+
+
 def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
-                         mario_w: int | None = None, mario_h: int | None = None) -> np.ndarray:
+                         mario_w: int | None = None, mario_h: int | None = None,
+                         mutable_world: Mask | None = None,
+                         sweep_world: Mask | None = None) -> np.ndarray:
     """Assigns every PADDED-GRID pixel a class code. Built once, with the mask.
 
     Computed at build time rather than per-query so the taxonomy is versioned
     and fingerprinted alongside the denominator it belongs to - a coverage
     state cannot be re-interpreted under a different set of rules later.
+
+    `mutable_world` (mutable_solid_mask) and `sweep_world` (sweep_coverable)
+    are optional because both need inputs this function does not have - the
+    live level state and a few minutes of work respectively. Omitting either
+    only means its explanation is not applied, and the pixels it would have
+    accounted for stay DEEP_PENETRATION; nothing else changes.
     """
     mario_w = config.MARIO_SMALL_W if mario_w is None else mario_w
     mario_h = config.MARIO_SMALL_H if mario_h is None else mario_h
@@ -478,7 +649,23 @@ def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
     # level1.py kills Mario at rect.y > LEVEL_H, so the collider legitimately
     # occupies a band below the floor for the frame or two before the check
     # fires. Falling below through a column that HAS a floor is a clip.
-    pit_col = ~solid_world.any(axis=0)
+    #
+    # "Bottomless" asks about the FLOOR, not about the whole column. The
+    # earlier rule was `~solid.any(axis=0)` - no solid anywhere from sky to
+    # floor - and that is not the same question. The pit at x 3683-3773 has
+    # brick6..brick13 floating at y 193-235 far above it and no ground at all
+    # beneath, so ordinary pit deaths there were classified FLOOR_CLIP, which
+    # is ANOMALOUS: the controlled COMPLETE-phase validation produced 1,079
+    # such pixels in a single episode (x 3708-3744, y 600-646, Mario in
+    # state=fall), and a longer run 9,951. Floating geometry high overhead
+    # cannot catch a falling collider, so it must not make a pit look solid.
+    #
+    # The floor is what the bottom of the column holds: if a big Mario's full
+    # height of it is empty there is nothing left to land on. That is a
+    # strict widening - every column the old rule called bottomless still is
+    # (verified: 367 -> 458 columns, 0 lost) - and it needs no level-specific
+    # constant.
+    pit_col = ~solid_world[config.LEVEL_H - config.MARIO_BIG_H:, :].any(axis=0)
     pit_near = _window_any(pit_col[None, :], -(mario_w - 1), mario_w - 1,
                            axis=1)[0]
     full_pit = np.zeros(config.GRID_W, bool)
@@ -512,7 +699,17 @@ def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
     w[b_world & ~testable_world] = CLS_CONNECTIVITY_GAP
     # Deeper than the engine's resolution ever goes - PENETRATION_TOL is 6
     # and the observed maximum over the whole bootstrap was 5.
-    w[_erode_tol(solid_world, tol)] = CLS_DEEP_PENETRATION
+    deep = _erode_tol(solid_world, tol)
+    w[deep] = CLS_DEEP_PENETRATION
+    # ── the two measured false-positive causes, applied ONLY to `deep` ──
+    # Scoped to the deep set on purpose: these explanations answer "why is
+    # the collider recorded inside a solid", and restricting them there makes
+    # it provable that no other class can move when they are switched on.
+    # Least specific first, so the most concrete explanation survives.
+    if sweep_world is not None:
+        w[deep & sweep_world] = CLS_SWEEP_ARTIFACT
+    if mutable_world is not None:
+        w[deep & mutable_world] = CLS_MUTABLE_SOLID
     w[testable_world] = CLS_TESTABLE
     cls[sl] = w
     return cls
@@ -602,7 +799,10 @@ def build_testable(level_state: Any, spawn_xy: tuple[int, int],
             f"{100 * delta:.2f}%, above the {100 * tolerance:.0f}% tolerance. "
             f"Investigate before adopting either.")
 
-    class_map = classify_noncoverage(solid, adopted, b_px)
+    class_map = classify_noncoverage(
+        solid, adopted, b_px,
+        mutable_world=mutable_solid_mask(level_state),
+        sweep_world=sweep_coverable(solid))
 
     stats = {
         'world_raster_px': world,

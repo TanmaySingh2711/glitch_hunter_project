@@ -117,6 +117,26 @@ decision, not a refactor.
   that switched at 7,335 agent steps is retired and nothing replaced it, so
   an episode that keeps finding pixels - or keeps coherently crossing old
   ground toward the frontier - stays in EXPLORE however long it runs.
+* **An anomaly must be impossible, not merely unexplained.** Out-of-mask
+  pixels are classified once, at mask-build time, and only the genuinely
+  impossible classes reach the glitch system. Three measured false-positive
+  causes have been corrected, none of them by widening `PENETRATION_TOL`:
+  `mutable_solid` (the level's geometry is not constant - 29 of 31 bricks are
+  destroyed outright by big Mario, and every brick and coin box rises 18 px
+  while bumped); `sweep_artifact` (`record()` marks the bounding box of two
+  consecutive collider rects, so a diagonal move past a convex corner records
+  pixels neither rect occupied); and the pit rule, which now asks whether the
+  bottom of a column holds a floor rather than whether the column is empty
+  top to bottom - bricks floating at y 193 were making the pit beneath them
+  look solid, so ordinary pit deaths there read as `floor_clip`.
+  `sweep_artifact` is filed as a MODEL GAP, not as normal engine behaviour,
+  because it describes a limit of the evidence rather than anything the game
+  did.
+* **Console reward statistics describe the objective in force.** SB3 pickles
+  `ep_info_buffer` into the checkpoint and `PPO.load()` restores it, so a QA
+  resume inherits 100 legacy episodes on a completely different reward scale.
+  `build_model` clears it for QA resumes only; legacy resumes keep theirs,
+  since there the episodes are the same objective.
 * **Coverage is exact, reward is best-effort.** The shared bitmap is written
   lock-free by 8 worker processes; metrics are recomputed from it by the
   parent, so they are exact even though two workers can both be paid for the

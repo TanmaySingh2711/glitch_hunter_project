@@ -157,6 +157,116 @@ def test_no_tensorboard_means_no_tensorboard_path(monkeypatch):
     assert ta.build_model("x.zip", None, "cpu").tensorboard_log is None
 
 
+# ── the inherited episode-info buffer ──────────────────────────────────────
+def _loaded_with_legacy_buffer():
+    """A stand-in for what PPO.load() hands back from the 6M zip."""
+    from collections import deque
+    from types import SimpleNamespace
+    legacy = deque([{'r': 2276.4, 'l': 339, 't': 1.0} for _ in range(100)],
+                   maxlen=100)
+    return SimpleNamespace(tensorboard_log="./logs/", target_kl=0.03,
+                           batch_size=256, learning_rate=1e-5, lr_schedule=None,
+                           ep_info_buffer=legacy, ep_success_buffer=deque([1.0]))
+
+
+def test_a_qa_resume_drops_the_legacy_episode_statistics(monkeypatch):
+    """ep_rew_mean must describe QA episodes, not the objective before it.
+
+    The 6M zip carries 100 legacy episodes (mean 2,276.42). SB3 keeps them
+    on a resume, so the console opens the run reporting the wrong objective
+    entirely - the 6.02M validation finished still reading 1,386.61 against
+    a real QA mean of 39.06.
+    """
+    monkeypatch.setattr(ta, "QA_PHASE", True)
+    loaded = _loaded_with_legacy_buffer()
+    monkeypatch.setattr(ta.PPO, "load", lambda *a, **k: loaded)
+    model = ta.build_model("mario_brain_checkpoint.zip", None, "cpu")
+    assert model.ep_info_buffer is None, (
+        "the legacy episodes survived into the QA run; ep_rew_mean will "
+        "describe the wrong objective until 100 QA episodes flush them out")
+    assert model.ep_success_buffer is None
+    # Cleared to None on purpose: _setup_learn() then rebuilds the deque with
+    # SB3's own _stats_window_size instead of a maxlen guessed here.
+
+
+def test_a_legacy_resume_keeps_its_running_statistics(monkeypatch):
+    """Legacy inherits legacy: same objective, same scale, still meaningful."""
+    monkeypatch.setattr(ta, "QA_PHASE", False)
+    loaded = _loaded_with_legacy_buffer()
+    monkeypatch.setattr(ta.PPO, "load", lambda *a, **k: loaded)
+    model = ta.build_model("mario_brain_checkpoint.zip", None, "cpu")
+    assert model.ep_info_buffer is not None and len(model.ep_info_buffer) == 100
+    assert model.ep_success_buffer is not None
+
+
+def test_clearing_the_buffer_touches_nothing_that_trains(monkeypatch):
+    """The reset is a reporting change, not a training one."""
+    monkeypatch.setattr(ta, "QA_PHASE", True)
+    loaded = _loaded_with_legacy_buffer()
+    loaded.num_timesteps = 6_000_000
+    loaded.policy = object()
+    monkeypatch.setattr(ta.PPO, "load", lambda *a, **k: loaded)
+    policy_before = loaded.policy
+    model = ta.build_model("mario_brain_checkpoint.zip", None, "cpu")
+    assert model.num_timesteps == 6_000_000, "the step counter moved"
+    assert model.policy is policy_before, "the policy object was replaced"
+    # and the hyperparameters the resume branch exists to re-apply still are
+    assert model.target_kl == 0.05 and model.batch_size == 512
+
+
+@pytest.mark.slow
+def test_the_buffer_reset_changes_neither_weights_nor_rewards(tmp_path):
+    """End to end on a real PPO: identical rollouts, identical parameters.
+
+    The stand-in tests above prove the plumbing. This proves the claim that
+    matters - that clearing ep_info_buffer is invisible to learning - by
+    running the same seeded model twice and comparing every tensor.
+    """
+    import numpy as np
+    import torch
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.monitor import Monitor
+    from stable_baselines3.common.vec_env import DummyVecEnv
+
+    def make():
+        import gymnasium as gym
+        # Monitor is what puts the 'episode' key in info; without it SB3 has
+        # nothing to put in ep_info_buffer and the test would prove nothing.
+        return Monitor(gym.make("CartPole-v1"))
+
+    def run(clear: bool):
+        torch.manual_seed(7)
+        np.random.seed(7)
+        env = DummyVecEnv([make])
+        env.seed(7)
+        m = PPO("MlpPolicy", env, seed=7, n_steps=64, batch_size=32,
+                n_epochs=1, device="cpu")
+        m.learn(total_timesteps=128)
+        path = tmp_path / f"m_{clear}.zip"
+        m.save(path)
+        del m
+        m2 = PPO.load(path, env=env, device="cpu")
+        assert len(m2.ep_info_buffer) > 0, "nothing to clear - test is vacuous"
+        if clear:
+            m2.ep_info_buffer = None
+            m2.ep_success_buffer = None
+        torch.manual_seed(11)
+        np.random.seed(11)
+        env.seed(11)
+        m2.learn(total_timesteps=128, reset_num_timesteps=False)
+        params = {k: v.clone() for k, v in m2.policy.state_dict().items()}
+        return params, m2.num_timesteps
+
+    kept, kept_steps = run(clear=False)
+    cleared, cleared_steps = run(clear=True)
+    assert kept_steps == cleared_steps
+    assert kept.keys() == cleared.keys()
+    for k in kept:
+        assert torch.equal(kept[k], cleared[k]), (
+            f"clearing ep_info_buffer changed policy parameter {k} - it is "
+            f"supposed to feed nothing but the logger")
+
+
 # ── build_callbacks ────────────────────────────────────────────────────────
 def test_qa_runs_every_callback_and_legacy_only_the_two_it_always_had(monkeypatch, tmp_path):
     monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(tmp_path))

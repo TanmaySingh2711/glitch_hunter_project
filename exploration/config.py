@@ -603,7 +603,25 @@ def assert_reward_balance() -> None:
 # would have fired on 302 of those - a detector that cries wolf during
 # normal play is worse than no detector at all. 6 sits just outside the
 # entire observed envelope.
+#
+# THIS VALUE IS NOT THE PLACE TO ABSORB NEW FALSE POSITIVES. The 599
+# anomalous pixels the 6.02M validation reported sat 7-22 px deep, and
+# raising the tolerance far enough to swallow them would have disarmed the
+# detector across the whole level while explaining neither cluster. Both had
+# specific causes with specific fixes - see CLS_MUTABLE_SOLID and
+# CLS_SWEEP_ARTIFACT in exploration/reachability.py.
 PENETRATION_TOL = 6
+
+# How far a bumped brick or coin box rises above its resting position.
+#
+# Not a guess: Brick.bumped() (mario_clone/data/components/bricks.py) runs
+#   rect.y += y_vel;  y_vel += gravity
+# from y_vel = -6.0 with gravity = 1.2, and settles once rect.y is back to
+# rest_height + 5. Integrating that gives a peak 18 px above rest, so for
+# those frames the bottom 18 px of the sprite's resting footprint are empty
+# and a collider standing there is doing nothing wrong. Bricks AND coin
+# boxes share the behaviour.
+BUMP_RISE_PX = 18
 
 # ═══════════════════════════════════════════════════════════════════════
 # EPISODE LENGTH — ROOT CAUSE OF THE 2,451-STEP CAP, AND THE FIX

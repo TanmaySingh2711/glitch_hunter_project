@@ -432,6 +432,38 @@ def build_model(latest_checkpoint: str | None, vec_env: VecEnv, device: str) -> 
         # not), so it is applied here too. Without this line the optional
         # dependency is effectively mandatory for every resumed run.
         model.tensorboard_log = TENSORBOARD_LOG
+        # ─── the inherited episode-info buffer: QA ONLY ───
+        # ep_info_buffer is not in SB3's _excluded_save_params, so PPO.load()
+        # restores the deque the checkpoint was saved with - 100 LEGACY
+        # episodes, mean return 2,276.42, range 53.2 to 4,844.2. QA returns
+        # live on a completely different scale (mean 37.58, median 22.01),
+        # and _setup_learn() only creates a fresh buffer when the existing
+        # one is None or reset_num_timesteps is set, neither of which is
+        # true on a resume. So the console's ep_rew_mean opens the run
+        # describing episodes from the OTHER objective and only converges
+        # after 100 QA episodes have pushed them out.
+        #
+        # That is not cosmetic. The 6.02M validation ran 39 episodes, so it
+        # never converged: its final buffer held 46 legacy and 42 QA
+        # episodes and reported ep_rew_mean 1,386.61 while the real QA mean
+        # was 39.06 - a number nobody could act on, in the one statistic
+        # most likely to be read as "is this training working".
+        #
+        # Clearing it is not the same as resetting progress: weights, the
+        # optimizer, num_timesteps and coverage are all untouched, and
+        # ep_info_buffer feeds nothing but the rollout logger's summary
+        # statistics. Set to None rather than to a new deque so SB3 builds
+        # it with its own _stats_window_size in _setup_learn().
+        #
+        # LEGACY IS DELIBERATELY LEFT ALONE: a legacy resume inherits legacy
+        # episodes, which are the same objective on the same scale, so the
+        # buffer is genuinely informative there and the running mean should
+        # carry across the resume exactly as it always has.
+        if QA_PHASE:
+            model.ep_info_buffer = None
+            model.ep_success_buffer = None
+            log.info("QA resume: cleared the inherited episode-info buffer "
+                     "so ep_rew_mean reports QA episodes only")
         return model
 
     log.info("Starting fresh training...")

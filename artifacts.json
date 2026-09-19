@@ -72,8 +72,10 @@
   "recorded": "2026-09-11"
  },
  "exploration_data/reachable_mask.npz": {
-  "sha256": "045f0259f3b1a17bf64a65d05e6e8bd9a4ff0bf3b92d3ef82b9c74a968f918ad",
-  "recorded": "2026-09-11"
+  "sha256": "ae3826bb20a13b1bd19b8702a01da7647b92c6fe54fa2ddd271fcac3bf763401",
+  "recorded": "2026-09-19",
+  "supersedes": "045f0259f3b1a17bf64a65d05e6e8bd9a4ff0bf3b92d3ef82b9c74a968f918ad",
+  "note": "class_map ONLY, via tools/build_reachability.py --class-map-only. Three measured false-positive causes, 53,305 px in total: deep_penetration -> mutable_solid (41,381) and -> sweep_artifact (3,552), and floor_clip -> pit_fall (8,372) for the pit at x 3683-3773 that floating bricks hid. No other class changed. solid_packed and testable_packed are byte-identical to the superseded file, so TESTABLE_TOTAL stays 4,013,723 and TESTABLE_FINGERPRINT stays 9a4d666e...e71e. See tests/test_noncoverage_taxonomy.py."
  },
  "exploration_data/coverage_bootstrap_6000000.npz": {
   "sha256": "8a57c737eef4c953af4dd38a44640187f9dff30565c8a53a6bea653fc3916ac4",

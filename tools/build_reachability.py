@@ -71,12 +71,121 @@ def write_config(stats: dict[str, Any], fingerprint: str) -> None:
         fh.write(src)
 
 
+def reclassify_only(level_state: Any, dry_run: bool = False) -> None:
+    """Recompute ONLY the noncoverage taxonomy inside an existing bundle.
+
+    The full build re-derives the denominator from scratch. When the fix is
+    to the TAXONOMY rather than to the geometry - as it was for all three of
+    the measured false-positive causes - re-running it would put a
+    4,013,723-pixel denominator and its fingerprint back on the line for no
+    reason. This path cannot move them: every array in the file except
+    `class_map` is copied straight back out of it, and every pixel whose
+    class changed must match one of `allowed_moves` below or nothing is
+    written at all.
+    """
+    import numpy as np
+
+    path = config.REACHABLE_MASK_PATH
+    with np.load(path, allow_pickle=False) as d:
+        stored = {k: d[k] for k in d.files}
+
+    gh, gw = config.GRID_H, config.GRID_W
+    y0, x0 = -config.GRID_Y0, -config.GRID_X0
+    grid = (gh, gw)
+
+    def unpack(key: str) -> Any:
+        full = np.unpackbits(stored[key])[:gh * gw].reshape(grid).astype(bool)
+        return full[y0:y0 + config.LEVEL_H, x0:x0 + config.LEVEL_W]
+
+    solid = unpack('solid_packed')
+    testable = unpack('testable_packed')
+    old = stored['class_map']
+
+    print(f"  reading             : {path}")
+    print(f"  testable_total      : {int(stored['testable_total']):,}")
+    print(f"  fingerprint         : {str(stored['testable_fingerprint'])[:16]}...")
+    print("  recomputing Method B for the connectivity-gap class...")
+    b_px, _b = reachability.method_b(solid)
+    print("  building mutable-solid mask...")
+    mutable = reachability.mutable_solid_mask(level_state)
+    print("  building sweep-coverable mask (exhaustive; a few minutes)...")
+    sweep = reachability.sweep_coverable(solid)
+
+    new = reachability.classify_noncoverage(
+        solid, testable, b_px, mutable_world=mutable, sweep_world=sweep)
+
+    # Exactly which reclassifications this path may make. Anything else means
+    # the taxonomy moved somewhere nobody intended, and writing it would put a
+    # silently different denominator-adjacent artifact on disk.
+    allowed_moves = (
+        (reachability.CLS_DEEP_PENETRATION, reachability.CLS_MUTABLE_SOLID),
+        (reachability.CLS_DEEP_PENETRATION, reachability.CLS_SWEEP_ARTIFACT),
+        (reachability.CLS_FLOOR_CLIP, reachability.CLS_PIT_FALL),
+    )
+    changed = new != old
+    n_changed = int(changed.sum())
+    legal = np.zeros_like(changed)
+    print()
+    print(f"  pixels reclassified : {n_changed:,}")
+    for src, dst in allowed_moves:
+        move = changed & (old == src) & (new == dst)
+        legal |= move
+        if move.any():
+            print(f"    {reachability.CLASS_NAMES[src]:>18} -> "
+                  f"{reachability.CLASS_NAMES[dst]:<16}{int(move.sum()):>10,}")
+    illegal = int((changed & ~legal).sum())
+    for cls in (reachability.CLS_DEEP_PENETRATION, reachability.CLS_FLOOR_CLIP):
+        print(f"  {reachability.CLASS_NAMES[cls]:<18}: "
+              f"{int((old == cls).sum()):>9,} -> {int((new == cls).sum()):>9,}")
+    if illegal:
+        raise SystemExit(
+            f"REFUSING TO WRITE: {illegal:,} pixels changed class outside the "
+            f"moves this path is allowed to make. The taxonomy change is not "
+            f"confined.")
+    print("  confinement check   : OK (only the allowed moves occurred)")
+
+    if dry_run:
+        print("\n--dry-run: nothing written.")
+        return
+
+    from common.fileio import atomic_write
+    stored['class_map'] = new
+    with atomic_write(path) as fh:
+        np.savez_compressed(fh, **stored)
+
+    with np.load(path, allow_pickle=False) as d:
+        assert int(d['testable_total']) == config.TESTABLE_TOTAL, "denominator moved"
+        assert str(d['testable_fingerprint']) == config.TESTABLE_FINGERPRINT, \
+            "fingerprint moved"
+        assert np.array_equal(d['testable_packed'], stored['testable_packed'])
+        assert np.array_equal(d['solid_packed'], stored['solid_packed'])
+    reachability._CLASS_MAP_CACHE = None
+    print(f"\n  written             : {path}")
+    print(f"  denominator         : {config.TESTABLE_TOTAL:,}  UNCHANGED")
+    print("  fingerprint         : UNCHANGED")
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument("--dry-run", action="store_true",
                     help="build and reconcile the mask, print the result, write nothing")
+    ap.add_argument("--class-map-only", action="store_true",
+                    help="recompute ONLY the noncoverage taxonomy in the "
+                         "existing bundle; the solid mask, the testable mask, "
+                         "the denominator and its fingerprint are copied back "
+                         "unchanged and verified")
     args = ap.parse_args(argv)
     from custom_mario_env import CustomMarioEnv
+
+    if args.class_map_only:
+        print("Recomputing the noncoverage taxonomy only...\n")
+        env = CustomMarioEnv()
+        env.reset()
+        try:
+            reclassify_only(env.game.state, args.dry_run)
+        finally:
+            env.close()
+        return
 
     print("Building the testable-pixel mask from live level geometry...\n")
     env = CustomMarioEnv()
