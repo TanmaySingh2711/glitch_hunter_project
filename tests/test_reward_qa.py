@@ -378,6 +378,60 @@ def _drought(rig, substeps, score=0):
         rig.drive(**dict(_at(6800), score=score))
 
 
+def test_locomotion_is_throttled_once_the_episode_stops_discovering(qa_flat):
+    """The other half of the farm, and the one that actually won.
+
+    Locomotion is direction-agnostic on purpose, so jump-left-jump-right
+    earns momentum credit forever while going nowhere. Measured on-policy
+    over 10 bare-engine episodes, the 6.4M policy spent 66.6% of its actions
+    on Jump (no direction) and 21.3% on Left+Jump, against 10.8% rightward,
+    and its median max_x was 858 where the healthy 6.03M policy reached
+    7,058. The episode cap of 10.0 did not stop that, because 10.0 is
+    enormous against a median episode novelty of 1.00.
+    """
+    from rewards.qa import SPRINT_VEL_THRESHOLD
+    fast = SPRINT_VEL_THRESHOLD + 1.0
+
+    # The momentum payment ramps with sprint_frames, and standing still in
+    # _drought() resets that counter - so both measurements are taken on the
+    # FIRST fast substep after a standstill, or the ramp, not the gate, is
+    # what the comparison would be measuring.
+    qa_flat.drive(**_at(6800))
+    before_fresh = qa_flat.ep_locomotion_paid
+    qa_flat.drive(**dict(_at(6800), x_vel=fast))
+    fresh = qa_flat.ep_locomotion_paid - before_fresh
+
+    _drought(qa_flat, config.DROUGHT_GRACE + config.DROUGHT_STEP)
+    before = qa_flat.ep_locomotion_paid
+    qa_flat.drive(**dict(_at(6800), x_vel=fast))
+    gated = qa_flat.ep_locomotion_paid - before
+
+    assert fresh > 0.0, "momentum paid nothing before any drought"
+    assert gated == pytest.approx(fresh * config.QA_SECONDARY_DROUGHT_SCALE,
+                                  rel=1e-6), (
+        f"a drought-bound sprint substep paid {gated:.8f}; the same substep "
+        f"while discovering paid {fresh:.8f}, so the gate must pay "
+        f"{fresh * config.QA_SECONDARY_DROUGHT_SCALE:.8f}")
+
+
+def test_both_secondary_channels_read_one_shared_gate(qa_flat):
+    """Interaction and locomotion must never disagree about 'exploring'."""
+    qa_flat.drive(**_at(6800))
+    assert qa_flat.secondary_gated is False, \
+        "the gate was already active on a fresh pixel"
+    _drought(qa_flat, config.DROUGHT_GRACE + config.DROUGHT_STEP)
+    assert qa_flat.secondary_gated is True, \
+        "the gate did not engage after the drought grace elapsed"
+
+
+def test_a_fresh_episode_does_not_inherit_the_previous_gate(qa_flat):
+    """reset() must clear the flag, or substep 1 is scored by episode 0."""
+    _drought(qa_flat, config.DROUGHT_GRACE + config.DROUGHT_STEP)
+    assert qa_flat.secondary_gated is True
+    qa_flat.reset()
+    assert qa_flat.secondary_gated is False
+
+
 def test_interaction_is_throttled_once_the_episode_stops_discovering(qa_flat):
     """Lingering next to a scoring object must stop being worth much."""
     # Small deltas on purpose: big ones hit the 10.0 episode ceiling, and
@@ -392,10 +446,10 @@ def test_interaction_is_throttled_once_the_episode_stops_discovering(qa_flat):
     full_pay = 100 * config.QA_SCORE_SCALE
     assert fresh == pytest.approx(full_pay, abs=1e-6), \
         "the first interaction, before any drought, was not paid in full"
-    assert gated == pytest.approx(full_pay * config.QA_INTERACTION_DROUGHT_SCALE,
+    assert gated == pytest.approx(full_pay * config.QA_SECONDARY_DROUGHT_SCALE,
                                   abs=1e-6), (
         f"a drought-bound interaction paid {gated:.4f}; it must be scaled by "
-        f"{config.QA_INTERACTION_DROUGHT_SCALE}")
+        f"{config.QA_SECONDARY_DROUGHT_SCALE}")
 
 
 def test_interaction_still_pays_in_full_while_discovering(qa):

@@ -108,6 +108,10 @@ class QAExplorationReward(RewardState):
         self.ep_drought_paid = 0.0
         self.ep_interaction_paid = 0.0
         self.ep_locomotion_paid = 0.0
+        # Set fresh by the drought block every substep; False here so the
+        # first substep of an episode cannot inherit the last one's gate.
+        self.secondary_gated = False
+        self.secondary_exhausted = False
         self.ep_max_x = 0
         self.ep_progress_paid = 0.0
         self.ep_complete_time_paid = 0.0
@@ -224,8 +228,35 @@ class QAExplorationReward(RewardState):
         # anything that is not demonstrably transit - including the first
         # window of an episode, where there is not yet any evidence either way.
         drought = cov.steps_since_new_pixel
-        if (drought > config.DROUGHT_GRACE and not complete
-                and not lifecycle.in_coherent_transit):
+        # ─── THE SECONDARY-INCOME GATE ───
+        # Computed here, from the drought condition itself, and used by BOTH
+        # secondary channels below (locomotion at 5, interaction at 7). They
+        # share this one flag rather than each re-deriving the condition, so
+        # the two can never disagree about whether this substep counts as
+        # exploring - and so the exemptions calibrated for the drought
+        # (COMPLETE, coherent transit, the grace period) apply to all of it
+        # automatically. See config.QA_SECONDARY_DROUGHT_SCALE for the
+        # measurement that made locomotion part of this.
+        self.secondary_gated = (drought > config.DROUGHT_GRACE and not complete
+                                and not lifecycle.in_coherent_transit)
+        # ─── AND IT HARDENS TO ZERO ONCE THE DROUGHT BUDGET IS SPENT ───
+        # DROUGHT_EPISODE_CAP bounds what an episode can be charged, which is
+        # necessary (an unbounded drought once drove episodes to -685) but it
+        # leaves a tail: after the cap is reached the penalty stops, while a
+        # merely SCALED secondary income keeps trickling in, so farming turns
+        # marginally profitable again. Measured on the direction-agnostic
+        # jump farm: 50 further cycles past the cap moved the episode total
+        # from -5.73 to -5.00, a gain of +0.73 for doing nothing.
+        #
+        # That farm also evades the safety reset on purpose - its bounding
+        # box is wider than STUCK_BBOX_AREA - so nothing else would end it.
+        # An episode that has exhausted its entire drought budget is
+        # unproductive by the system's own measure, so secondary income goes
+        # to exactly zero rather than to a trickle. Penalties are untouched.
+        self.secondary_exhausted = (
+            self.secondary_gated
+            and self.ep_drought_paid >= config.DROUGHT_EPISODE_CAP)
+        if self.secondary_gated:
             over = drought - config.DROUGHT_GRACE
             notch = 1 + over // config.DROUGHT_STEP
             due = min(config.DROUGHT_MAX, config.DROUGHT_NOTCH * notch)
@@ -372,16 +403,12 @@ class QAExplorationReward(RewardState):
             # ─── THROTTLED WHILE THE EPISODE IS FAILING TO EXPLORE ───
             # The per-episode ceiling is absolute but novelty decays with
             # coverage, so the margin that made the ceiling safe inverts on
-            # its own (config.QA_INTERACTION_DROUGHT_SCALE has the measured
-            # numbers and what it cost). The condition is deliberately the
-            # SAME one the drought penalty uses a few blocks above, not a new
-            # signal: it already means "unproductive lingering, and not
-            # merely standing on an old pixel", and it already exempts
-            # COMPLETE and coherent transit. Sharing it means the two can
-            # never disagree about whether this substep counts as exploring.
-            if (drought > config.DROUGHT_GRACE and not complete
-                    and not lifecycle.in_coherent_transit):
-                interaction *= config.QA_INTERACTION_DROUGHT_SCALE
+            # its own (config.QA_SECONDARY_DROUGHT_SCALE has the measured
+            # numbers and what it cost). Only the POSITIVE side is gated;
+            # losing a powerup still costs full price, because scaling a
+            # penalty down would be a loophole rather than a safeguard.
+            if self.secondary_gated:
+                interaction *= self.secondary_scale()
             allowed = min(interaction,
                           config.QA_INTERACTION_EPISODE_CAP
                           - self.ep_interaction_paid)
@@ -459,13 +486,35 @@ class QAExplorationReward(RewardState):
         info['qa_complete_time_paid'] = self.ep_complete_time_paid
         return reward, done
 
+    def secondary_scale(self) -> float:
+        """What a gated secondary payment is worth, in [0, 1].
+
+        QA_SECONDARY_DROUGHT_SCALE while the episode still has drought budget
+        left, and exactly 0.0 once that budget is spent - see the gate block
+        in _qa_reward for the measured tail this closes.
+        """
+        if getattr(self, 'secondary_exhausted', False):
+            return 0.0
+        return config.QA_SECONDARY_DROUGHT_SCALE
+
     def _locomotion_allowance(self, amount: float) -> float:
         """What is left of this episode's locomotion budget, up to `amount`.
 
-        Below the cap this returns `amount` itself, so every ordinary
-        locomotion payment is unchanged to the bit. See
-        config.QA_LOCOMOTION_EPISODE_CAP for the farm that made it necessary.
+        Below the cap, and while the episode is still discovering, this
+        returns `amount` itself - so every ordinary locomotion payment is
+        unchanged to the bit. See config.QA_LOCOMOTION_EPISODE_CAP for the
+        farm that made the cap necessary.
+
+        While the secondary gate is active (the episode has stopped finding
+        pixels, is not in COMPLETE, and is not in coherent transit) the
+        payment is scaled down first. The cap alone was measured to be too
+        weak: 10 per episode is enormous against a median episode novelty of
+        1.00, so jump-left-jump-right still out-earned exploring and the
+        6.4M policy collapsed onto exactly that. Both secondary channels now
+        read one flag set by the drought block in _qa_reward.
         """
+        if getattr(self, 'secondary_gated', False):
+            amount *= self.secondary_scale()
         allowed = max(0.0, min(amount, config.QA_LOCOMOTION_EPISODE_CAP
                                - self.ep_locomotion_paid))
         self.ep_locomotion_paid += allowed

@@ -367,7 +367,44 @@ QA_INTERACTION_EPISODE_CAP = 10.0
 # teaches interaction survives; what dies is the PROFITABILITY of standing
 # still. At this scale a drought-bound episode earns at most 1.0 from
 # interaction against a drought penalty that reaches -15.
-QA_INTERACTION_DROUGHT_SCALE = 0.1
+#
+# ─── IT COVERS LOCOMOTION TOO, BECAUSE LOCOMOTION WAS THE OTHER HALF ───
+# Gating interaction alone was measured and found insufficient. The 6.4M
+# policy was run on-policy in the bare engine for 10 episodes and its action
+# histogram is unambiguous: 66.6% Jump (no direction) and 21.3% Left+Jump
+# against 10.8% rightward, median max_x 858, 8 of 10 episodes timing out.
+# The healthy 6.03M policy on the same seeds is 71.8% rightward with median
+# max_x 7,058.
+#
+# Left+Jump pays because locomotion is direction-agnostic by design (see
+# QA_LOCOMOTION_EPISODE_CAP and the abs(x_vel) note in rewards/qa.py), so
+# jump-left-jump-right earns momentum and clean-jump credit forever while
+# going nowhere. That is the exact farm QA_LOCOMOTION_EPISODE_CAP was
+# written against; the cap bounds it at 10 per episode but 10 is enormous
+# next to a median episode novelty of 1.00, so the farm still won.
+#
+# Replayed against the 367 recorded episodes, withholding the gated
+# fraction of each channel (the drought charge estimates that fraction,
+# since the gate and the drought penalty share one condition):
+#
+#   variant                    zero-yield net  net>0    productive net  net>0
+#   no gate (as at 6.4M)                -5.86  38/129            19.02 150/186
+#   gate on interaction only           -10.43   1/129            15.24 139/186
+#   gate on interaction + loco         -13.15   0/129            12.79 116/186
+#
+# The last row is adopted. It is the only one that takes farming to exactly
+# zero profitable episodes, and it gives the LARGEST gap between productive
+# and zero-yield episodes (25.94, against 25.67 and 24.88) - which is what
+# actually drives learning, because PPO normalises advantages and so responds
+# to the gap rather than the absolute level.
+#
+# A coupled budget (secondary <= COUPLING * novelty earned) was tried first
+# and rejected on measurement: at COUPLING 1.0 it also reached 0/129 but cost
+# far more real signal, leaving only 113/186 productive episodes net positive
+# and untouching just 35.5% of them, because per-episode novelty is heavily
+# skewed (mean 7.31, median 1.00) and a ratio test punishes the median
+# productive episode. Recorded here so it is not reintroduced.
+QA_SECONDARY_DROUGHT_SCALE = 0.1
 
 # ─── CUMULATIVE LOCOMOTION CAP (Phase 4B) ───
 # Momentum and clean running jumps are direction-agnostic on purpose (see

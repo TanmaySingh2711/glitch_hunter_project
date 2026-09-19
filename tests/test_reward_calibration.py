@@ -432,20 +432,48 @@ def _farm_clean_jumps(rig, n_jumps):
         d = -d
 
 
-@pytest.mark.parametrize("phase", ['explore', 'complete'])
-def test_a_locomotion_farm_stops_paying_at_the_cap(empty, phase):
+def test_a_locomotion_farm_stops_paying_at_the_cap_in_complete(empty):
     """Phase 4B measured a real in-place farm at 35.7 per episode, 4.4x the
-    natural maximum. Direction-agnostic jumps stay rewarded - up to the cap."""
+    natural maximum. Direction-agnostic jumps stay rewarded - up to the cap.
+
+    COMPLETE only. In EXPLORE the secondary gate now binds long before the
+    cap does; that is the case below.
+    """
     empty.r(400)
-    if phase == 'complete':
-        empty.complete()
+    empty.complete()
     _farm_clean_jumps(empty, 200)
-    paid = empty.w.ep_channels[phase]['locomotion']
+    paid = empty.w.ep_channels['complete']['locomotion']
     assert paid == pytest.approx(config.QA_LOCOMOTION_EPISODE_CAP)
     before = empty.w.ep_reward_total
     _farm_clean_jumps(empty, 20)
-    assert empty.w.ep_channels[phase]['locomotion'] == paid
+    assert empty.w.ep_channels['complete']['locomotion'] == paid
     assert empty.w.ep_reward_total <= before, "the farm kept paying past the cap"
+
+
+def test_an_explore_locomotion_farm_is_stopped_by_the_gate_not_the_cap(empty):
+    """The farm that actually beat the cap, and what now stops it.
+
+    The cap alone was measured to be too weak: 10.0 per episode is enormous
+    against a median episode novelty of 1.00, so jump-left-jump-right still
+    out-earned exploring. On-policy at 6.4M the collapsed policy spent 66.6%
+    of its actions on Jump and 21.3% on Left+Jump with median max_x 858.
+    Now the farm discovers nothing, so the secondary gate engages and the
+    payout settles well BELOW the cap - the cap is no longer what binds.
+    """
+    empty.r(400)
+    _farm_clean_jumps(empty, 200)
+    paid = empty.w.ep_channels['explore']['locomotion']
+    assert paid < config.QA_LOCOMOTION_EPISODE_CAP, (
+        f"an EXPLORE farm still reached the cap ({paid:.3f}); the gate did "
+        f"not bind")
+    before_paid, before_total = paid, empty.w.ep_reward_total
+    _farm_clean_jumps(empty, 50)
+    gained = empty.w.ep_channels['explore']['locomotion'] - before_paid
+    assert gained == pytest.approx(0.0, abs=1e-12), (
+        f"50 more farm cycles still earned {gained:.6f} of locomotion; once "
+        f"the drought budget is spent the gate must pay exactly nothing")
+    assert empty.w.ep_reward_total <= before_total, (
+        "farming through a drought must never increase the episode total")
 
 
 def test_ordinary_locomotion_is_untouched_by_the_cap(empty, monkeypatch):
