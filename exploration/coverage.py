@@ -458,10 +458,32 @@ class SpatialCoverage:
                    for c in reachability.ANOMALOUS_CLASSES)
 
     def remaining(self) -> int | None:
-        """Testable pixels not yet covered. Exactly total - covered."""
+        """Testable pixels not yet covered. Exactly total - covered.
+
+        ─── THE CACHE IS ONLY SOUND FOR A PRIVATE BITMAP ───
+        record() drops the cache whenever THIS instance claims a pixel, and
+        that is the entire invalidation rule - which is enough only while
+        this instance is the only thing writing. Under shared memory it is
+        not: eight worker processes write one bitmap, so pixels appear with
+        no record() call here at all, and the cached number goes on
+        describing a map that no longer exists.
+
+        Measured, on the first QA run that ever used 8 workers: at the
+        10,000-step report the parent still held the value it cached when the
+        bootstrap map was loaded, while covered_testable() counted the live
+        bitmap, and assert_consistent() stopped training with "remaining !=
+        testable_total - covered". The assertion did its job; had it not been
+        there, the audit trail would have recorded a remaining count that was
+        too high, and episode_target() - which clamps by remaining() - would
+        have sized every episode's target against a stale map.
+
+        So a shared instance always recounts. That is one popcount per call,
+        and the callers are the 10,000-step reports and twice per episode -
+        never per substep, which is what the cache was there to protect.
+        """
         if self.testable_total is None:
             return None
-        if self._remaining_cached is None:
+        if self._remaining_cached is None or self._shm:
             self._remaining_cached = self.testable_total - self.covered_testable()
         return self._remaining_cached
 

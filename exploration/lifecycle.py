@@ -70,11 +70,16 @@ class EpisodePhase(Enum):
 
 
 class Transition:
-    """Which criterion moved the episode into COMPLETE (brief section 5.2)."""
+    """Which criterion moved the episode into COMPLETE (brief section 5.2).
+
+    Each one is EVIDENCE that exploring has stopped paying. There is
+    deliberately no criterion made of elapsed time: the T4 backstop that
+    switched on 7,335 agent steps is retired (config, T4 RETIREMENT NOTE),
+    and a longer constant would be the same rule wearing a bigger number.
+    """
     TARGET_MET = "T1_target_met"
     YIELD_EXHAUSTED = "T2_yield_exhausted"
     NOTHING_AHEAD = "T3_nothing_ahead"
-    EXPLORE_BACKSTOP = "T4_explore_backstop"
 
 
 class EndReason:
@@ -134,7 +139,7 @@ class EpisodeLifecycle:
         self.coverage = coverage
         self.sps = config.SUBSTEPS_PER_AGENT_STEP
         self.window_substeps = config.LIFECYCLE_WINDOW * self.sps
-        # False pins the phase: the natural T1-T4 checks never run, and only
+        # False pins the phase: the natural T1-T3 checks never run, and only
         # force_complete() moves it. For calibration arms and tests that need
         # an episode held in one phase; training never turns it off.
         self.auto_transition = True
@@ -289,7 +294,7 @@ class EpisodeLifecycle:
         # at the COMPLETE tie-breaker rate) against 1,157-1,516 for the same
         # policy once the target was informed - and on the bootstrap map it
         # handed out full completion credit after 69-233 steps. No evidence,
-        # no T1; T2-T4 still apply, exactly as in_coherent_transit refuses to
+        # no T1; T2 and T3 still apply, exactly as in_coherent_transit refuses to
         # waive a penalty before any window has closed.
         #
         # T1 ALSO needs the target's yield to have genuinely dried up (Phase
@@ -305,7 +310,7 @@ class EpisodeLifecycle:
         # 400 agent steps, one window is 240) let T1 wait for a real pause in
         # discovery. Measured on the same trajectories: post-switch discovery
         # 59.3% -> 1.4%, premature switches (>=50% of the episode's total
-        # discovery still ahead) 20/90 -> 0/90. T2/T3/T4 are untouched: on
+        # discovery still ahead) 20/90 -> 0/90. T2 and T3 are untouched: on
         # the same data they never overlapped with T1's old or new firing
         # point.
         #
@@ -328,8 +333,10 @@ class EpisodeLifecycle:
             reason = Transition.YIELD_EXHAUSTED
         elif self.last_window is not None and self.last_window['cells_ahead'] == 0:
             reason = Transition.NOTHING_AHEAD
-        elif self.agent_steps >= config.MAX_EXPLORE_STEPS:
-            reason = Transition.EXPLORE_BACKSTOP
+        # There is no fourth arm, and there must not be one: the retired
+        # backstop fired here on elapsed steps alone, which is the single
+        # thing this method may not do. See Transition above, and the
+        # retirement note in config.
         if reason is not None:
             self.force_complete(reason)
 
@@ -353,12 +360,13 @@ class EpisodeLifecycle:
 
         T1 and T3 mean exploration is genuinely done - the target was met, or
         nothing reachable is left ahead - so completion is worth its full
-        value. T2 and T4 fire on exhaustion or elapsed time, and T2 in
-        particular can be REACHED ON PURPOSE by idling off the frontier for
-        three windows. Paying full completion value there would make "idle,
-        then sprint for the flag" a strategy - the speedrunner rebuilt with a
-        720-step wait bolted on the front. So there the credit is the fraction
-        of the episode's own target actually discovered.
+        value. T2 fires on exhaustion, which can be REACHED ON PURPOSE by
+        idling off the frontier for three windows. Paying full completion
+        value there would make "idle, then sprint for the flag" a strategy -
+        the speedrunner rebuilt with a 720-step wait bolted on the front. So
+        there the credit is the fraction of the episode's own target actually
+        discovered. Any other reason (force_complete, from calibration arms
+        and tests) is scored the same conservative way.
 
         Fixed at the transition and never revised, like the phase itself.
         """

@@ -38,6 +38,7 @@ from training.callbacks import (
     ExactMilestoneCheckpointCallback,
     Level1CompletionCallback,
     LifecycleStatsCallback,
+    RewardTelemetryCallback,
     StagnationCallback,
     ValueWarmupCallback,
     WatchdogCallback,
@@ -47,7 +48,8 @@ from training.value_head import reset_value_head
 
 __all__ = [
     'CoverageStatsCallback', 'ExactMilestoneCheckpointCallback', 'Level1CompletionCallback',
-    'LifecycleStatsCallback', 'StagnationCallback', 'ValueWarmupCallback', 'WatchdogCallback',
+    'LifecycleStatsCallback', 'RewardTelemetryCallback', 'StagnationCallback',
+    'ValueWarmupCallback', 'WatchdogCallback',
     'build_model', 'campaign_coverage_path', 'check_launch_gate',
     'checkpoint_timesteps', 'main', 'make_env', 'prepare_qa_coverage', 'reset_value_head',
     'steps_to_run',
@@ -216,6 +218,12 @@ REMAINING_MAP_PATH = os.path.join(CHECKPOINT_DIR, "level1_remaining_map.png")
 # Append-only history of coverage growth, one JSON line per report, across
 # every run of the campaign.
 COVERAGE_TRAIL_PATH = os.path.join(CHECKPOINT_DIR, "coverage_audit_trail.jsonl")
+# Append-only history of what the REWARD paid, per channel and per phase, one
+# JSON line per finished episode plus an interval summary
+# (RewardTelemetryCallback). Beside the coverage trail, and read the same way:
+# it survives restarts, so the validation run's reward balance can be reviewed
+# from the run itself rather than reconstructed by replaying it afterwards.
+REWARD_TELEMETRY_PATH = os.path.join(CHECKPOINT_DIR, "reward_telemetry.jsonl")
 
 # ═══════════════════════════════════════════════════════════════════════
 # OPTIONAL TENSORBOARD LOGGING
@@ -411,6 +419,19 @@ def build_model(latest_checkpoint: str | None, vec_env: VecEnv, device: str) -> 
         # wasn't actually fixing.
         model.learning_rate = 1.0e-4
         model.lr_schedule = FloatSchedule(1.0e-4)
+        # ─── tensorboard_log: the same trap, and it stopped a run dead ───
+        # The zip also carries the tensorboard_log the 6M brain was trained
+        # with ('./logs/'), and PPO.load() restores it like every other
+        # hyperparameter. SB3 then builds a TensorBoard writer inside
+        # learn() -> _setup_learn(), which raises
+        #     ImportError: Trying to log data to tensorboard but tensorboard
+        #     is not installed
+        # on any machine without the package - before a single step is taken.
+        # The detection at TENSORBOARD_LOG is what should decide this for THIS
+        # machine (curves if tensorboard is installed, a plain console run if
+        # not), so it is applied here too. Without this line the optional
+        # dependency is effectively mandatory for every resumed run.
+        model.tensorboard_log = TENSORBOARD_LOG
         return model
 
     log.info("Starting fresh training...")
@@ -601,6 +622,7 @@ def build_callbacks(model: PPO, coverage: SpatialCoverage | None,
                                   audit_path=REMAINING_AUDIT_PATH, map_path=REMAINING_MAP_PATH,
                                   trail_path=COVERAGE_TRAIL_PATH, checkpoints=checkpoint_callback),
             LifecycleStatsCallback(),
+            RewardTelemetryCallback(REWARD_TELEMETRY_PATH, session_start=session_start),
             StagnationCallback(coverage),
         ]
     return CallbackList(callbacks), completion
@@ -626,6 +648,8 @@ def log_banner(model: PPO, resume: Resume, coverage: SpatialCoverage | None,
                  'none (approved with --unrestricted)' if safety_cap is None
                  else f'{safety_cap:,} (a cut-off, never completion)')
         log.info("coverage trail   : %s (appended every 10,000 steps)", COVERAGE_TRAIL_PATH)
+        log.info("reward telemetry : %s (one line per episode + 10,000-step summaries)",
+                 REWARD_TELEMETRY_PATH)
         nxt = (model.num_timesteps // QA_CHECKPOINT_EVERY + 1) * QA_CHECKPOINT_EVERY
         log.info("checkpoints      : every %s global steps (next %s) -> %s",
                  f"{QA_CHECKPOINT_EVERY:,}", f"{nxt:,}", CHECKPOINT_DIR)

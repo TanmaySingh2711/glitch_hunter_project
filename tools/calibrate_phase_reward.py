@@ -165,8 +165,13 @@ def arm_specs(model: Any) -> dict[str, ArmSpec]:
     def ppo(eps: float = 0.0) -> Policy:
         return Policy(model, eps=eps, rng=rng)
 
-    t1, t2, t4 = (Transition.TARGET_MET, Transition.YIELD_EXHAUSTED,
-                  Transition.EXPLORE_BACKSTOP)
+    t1, t2 = Transition.TARGET_MET, Transition.YIELD_EXHAUSTED
+    # Where the 'late_osc_then_ppo' arm below FORCES its transition. It is a
+    # measurement choice for this tool - "switch very late in the episode" -
+    # and never a rule: the T4 backstop that used to switch here on elapsed
+    # time alone is retired (exploration/config.py). Kept at the step T4 used
+    # so the arm still probes the same point of the episode as in Phase 4B.
+    late_step = int(0.75 * config.QA_EPISODE_CAP_AGENT_STEPS_MEASURED)
     return {
         # natural lifecycle ------------------------------------------------
         'ppo_boot':  {"ctl": ppo(), "n": 30, "map": 'bootstrap'},
@@ -204,11 +209,13 @@ def arm_specs(model: Any) -> dict[str, ArmSpec]:
         'c_backward': {"ctl": Switch(ppo(), Hold(8), _in_complete), "n": 4,
                            "map": 'bootstrap',
                            "force": {"at": 150, "reason": t1, "credit": 1.0}},
-        # T4 by the backstop clock, credit from the real formula
-        't4_osc_then_ppo': {"ctl": Switch(Oscillate(), ppo(), _in_complete),
-                                "n": 2, "map": 'bootstrap',
-                                "force": {"at": config.MAX_EXPLORE_STEPS,
-                                           "reason": t4, "credit": None}},
+        # A very late transition, credit from the real formula (was the T4
+        # backstop before it was retired; forced as T2, which is what a real
+        # episode that stopped exploring reaches).
+        'late_osc_then_ppo': {"ctl": Switch(Oscillate(), ppo(), _in_complete),
+                                  "n": 2, "map": 'bootstrap',
+                                  "force": {"at": late_step,
+                                             "reason": t2, "credit": None}},
         # T2 by hand at the earliest point idling could reach it, real credit
         't2_forced_ppo': {"ctl": ppo(), "n": 8, "map": 'bootstrap',
                               "force": {"at": config.YIELD_WINDOWS

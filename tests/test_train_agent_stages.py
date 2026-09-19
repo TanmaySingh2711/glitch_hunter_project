@@ -123,6 +123,40 @@ def test_cpu_is_used_with_a_warning_when_cuda_is_missing(monkeypatch, caplog):
     assert ta.select_device() == "cuda"
 
 
+# ── build_model ────────────────────────────────────────────────────────────
+def test_resume_applies_this_machines_tensorboard_setting(monkeypatch):
+    """A resumed run must not inherit the 6M brain's TensorBoard path.
+
+    PPO.load() restores every saved hyperparameter, tensorboard_log included
+    ('./logs/' in the 6M zip). SB3 then builds a writer inside learn() and
+    raises ImportError where tensorboard is not installed - which stopped the
+    +20k validation before its first step. The module-level detection is what
+    decides for THIS machine, so build_model re-applies it, exactly as it
+    already does for target_kl, batch_size and the learning rate.
+    """
+    from types import SimpleNamespace
+    loaded = SimpleNamespace(tensorboard_log="./logs/", target_kl=0.03,
+                             batch_size=256, learning_rate=1e-5, lr_schedule=None)
+    monkeypatch.setattr(ta.PPO, "load", lambda *a, **k: loaded)
+    model = ta.build_model("mario_brain_checkpoint.zip", None, "cpu")
+    assert model.tensorboard_log == ta.TENSORBOARD_LOG
+    # The restorations this file already relied on still happen.
+    assert model.target_kl == 0.05
+    assert model.batch_size == 512
+    assert model.learning_rate == 1.0e-4 and model.lr_schedule(1.0) == 1.0e-4
+
+
+def test_no_tensorboard_means_no_tensorboard_path(monkeypatch):
+    """With the package absent, the run is configured for a plain console
+    run rather than for a writer it cannot build."""
+    monkeypatch.setattr(ta, "TENSORBOARD_LOG", None)
+    from types import SimpleNamespace
+    loaded = SimpleNamespace(tensorboard_log="./logs/", target_kl=0.03,
+                             batch_size=256, learning_rate=1e-5, lr_schedule=None)
+    monkeypatch.setattr(ta.PPO, "load", lambda *a, **k: loaded)
+    assert ta.build_model("x.zip", None, "cpu").tensorboard_log is None
+
+
 # ── build_callbacks ────────────────────────────────────────────────────────
 def test_qa_runs_every_callback_and_legacy_only_the_two_it_always_had(monkeypatch, tmp_path):
     monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(tmp_path))
@@ -134,7 +168,7 @@ def test_qa_runs_every_callback_and_legacy_only_the_two_it_always_had(monkeypatc
     assert kinds == [cbs.ExactMilestoneCheckpointCallback, cbs.WatchdogCallback,
                      cbs.Level1CompletionCallback, cbs.ValueWarmupCallback,
                      cbs.CoverageStatsCallback, cbs.LifecycleStatsCallback,
-                     cbs.StagnationCallback]
+                     cbs.RewardTelemetryCallback, cbs.StagnationCallback]
     assert isinstance(completion, cbs.Level1CompletionCallback)
     assert lst.callbacks[0].every == ta.QA_CHECKPOINT_EVERY
 
@@ -145,6 +179,15 @@ def test_qa_runs_every_callback_and_legacy_only_the_two_it_always_had(monkeypatc
                                                 cbs.WatchdogCallback]
     assert completion is None
     assert lst.callbacks[0].targets == ta.LEGACY_CHECKPOINT_MILESTONES
+
+
+def test_the_reward_telemetry_lands_beside_the_coverage_trail():
+    """Both are append-only records of one QA campaign, so they live in the
+    same place - the QA checkpoint directory, which is not tracked by git."""
+    for path in (ta.REWARD_TELEMETRY_PATH, ta.COVERAGE_TRAIL_PATH):
+        assert os.path.dirname(os.path.normpath(path)) == \
+            os.path.normpath(ta.CHECKPOINT_DIR)
+    assert ta.REWARD_TELEMETRY_PATH.endswith("reward_telemetry.jsonl")
 
 
 # ── log_banner ─────────────────────────────────────────────────────────────

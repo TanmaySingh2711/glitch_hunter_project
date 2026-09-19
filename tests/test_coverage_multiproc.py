@@ -115,6 +115,43 @@ def test_set_novelty_mult_is_clamped(shared):
     assert cov.control[CTRL_NOVELTY_MULT] == 1.0
 
 
+def test_remaining_is_never_stale_on_a_shared_bitmap():
+    """A shared instance is NOT the only writer, so it may not cache.
+
+    The bug this pins stopped the first 8-worker QA run at its first
+    10,000-step report: remaining() is invalidated by record() on the same
+    instance, but under shared memory the other workers' pixels arrive with
+    no record() call here at all. The parent went on reporting the count it
+    cached when the bootstrap map loaded, while covered_testable() read the
+    live bitmap, and assert_consistent() refused to continue.
+    """
+    from exploration.coverage import SpatialCoverage
+    mask = np.zeros((config.GRID_H, config.GRID_W), dtype=bool)
+    mask[400:500, 400:9000] = True
+    cov, _names = create_shared(testable_mask=mask, tag="staletest")
+    try:
+        before = cov.remaining()
+        assert before == cov.testable_total
+        # Another worker discovers 1,000 px: the bitmap moves under this
+        # instance, exactly as SubprocVecEnv workers move it.
+        cov.visited[400:410, 400:500] = 1
+        assert cov.remaining() == cov.testable_total - cov.covered_testable()
+        assert cov.remaining() == before - 1_000
+        cov.assert_consistent()
+    finally:
+        cov.close()
+        cov.unlink()
+
+    # A private bitmap has exactly one writer, so it still caches: record()
+    # is the only way its pixels can change, and it invalidates.
+    local = SpatialCoverage(testable_mask=mask)
+    local.remaining()
+    local.visited[400:410, 400:500] = 1          # a direct edit, not a record()
+    assert local.remaining() == local.testable_total, "the local cache was dropped"
+    local.invalidate_remaining()                  # what a direct edit must call
+    assert local.remaining() == local.testable_total - 1_000
+
+
 def test_shared_and_local_backends_agree(shared):
     """One API, two backings - the call sites must not be able to tell."""
     from exploration.coverage import SpatialCoverage

@@ -99,9 +99,12 @@ def test_limit_hierarchy_is_consistent():
         f"{qa_cap}-step QA cap - it is dead code")
     # ...and was not at the old cap, which is why the timer had to move.
     assert legacy_cap < config.SAFETY_MIN_EPISODE_STEPS
-    # T4 is a backstop inside the episode, per the brief: 0.75 x the cap.
-    assert int(0.75 * qa_cap) == config.MAX_EXPLORE_STEPS
     assert config.QA_EPISODE_TIME_UNITS > config.ENGINE_TIME_UNITS_DEFAULT
+    # No limit in this hierarchy governs the PHASE any more: the elapsed-time
+    # T4 backstop is retired and nothing replaced it.
+    assert not hasattr(config, 'MAX_EXPLORE_STEPS'), (
+        "MAX_EXPLORE_STEPS switched EXPLORE -> COMPLETE on elapsed time alone "
+        "and was retired; something has reintroduced it")
 
 
 def test_retired_drought_limit_is_gone():
@@ -696,22 +699,30 @@ def test_transit_with_target_met_does_not_transition():             # [4]
     assert lc.phase is EpisodePhase.EXPLORE, "coherent transit was read as exhaustion"
 
 
-def test_elapsed_steps_alone_cannot_trigger_T1():                   # [8]
-    """No fixed elapsed-step threshold, on its own, can fire T1 - required
-    test 8. Finding new pixels every window (so T2 never sees an exhausted
-    streak) but never reaching an unreachably high target: the episode runs
-    all the way to the T4 backstop, and the transition is T4, never T1."""
+RETIRED_T4_STEPS = int(0.75 * config.QA_EPISODE_CAP_AGENT_STEPS_MEASURED)   # 7,335
+
+
+def test_elapsed_steps_alone_cannot_trigger_a_transition():         # [8]
+    """No elapsed-step threshold, on its own, may change the phase - required
+    test 8, and the rule the retired T4 broke.
+
+    Finding new pixels every window (so T2 never sees an exhausted streak)
+    against an unreachably high target (so T1 cannot fire), for FOUR TIMES the
+    step count at which T4 used to switch. The old backstop fired here at
+    7,335 purely because time had passed; now nothing does.
+    """
     cov = FakeCoverage(target=10 ** 9)
     lc = EpisodeLifecycle(cov)
     x = 0.0
-    for _ in range(config.MAX_EXPLORE_STEPS * SPS):
+    for _ in range(4 * RETIRED_T4_STEPS * SPS):
         x += 3.0
         cov.episode_new += 1            # keeps every window well above YIELD_FLOOR
         lc.observe(_info(x), 1)
-        if lc.phase is EpisodePhase.COMPLETE:
-            break
-    assert lc.phase is EpisodePhase.COMPLETE
-    assert lc.transition_reason == Transition.EXPLORE_BACKSTOP
+        assert lc.phase is EpisodePhase.EXPLORE, (
+            f"elapsed time changed the phase at agent step {lc.agent_steps} "
+            f"({lc.transition_reason})")
+    assert lc.agent_steps >= 4 * RETIRED_T4_STEPS
+    assert lc.transition_reason is None
 
 
 def test_nothing_left_ahead_moves_to_complete():                    # T3
@@ -721,15 +732,71 @@ def test_nothing_left_ahead_moves_to_complete():                    # T3
     assert lc.transition_reason == Transition.NOTHING_AHEAD
 
 
-def test_explore_backstop_fires_only_at_its_limit():                # T4
-    lc = EpisodeLifecycle(FakeCoverage())
-    # Coherent transit the whole way, so nothing but T4 can fire.
-    _walk_straight(lc, config.MAX_EXPLORE_STEPS * SPS - 1, speed=0.3, n_new=0)
+def test_the_time_only_backstop_is_gone():
+    """T4 is retired as a CRITERION, not merely raised to a bigger number.
+
+    Both halves matter: the reason no longer exists, and the transition check
+    reads no step count, clock or episode-length constant at all.
+    """
+    assert not hasattr(Transition, 'EXPLORE_BACKSTOP')
+    assert {v for k, v in vars(Transition).items() if k.isupper()} == {
+        'T1_target_met', 'T2_yield_exhausted', 'T3_nothing_ahead'}
+    # Comments stripped: what the CODE reads is the claim, and the comments
+    # there name the retired rule in order to warn against it.
+    src = "".join(line.split('#')[0] for line
+                  in inspect.getsource(EpisodeLifecycle._check_transition).splitlines(True))
+    # self.agent_steps / self.substeps are HOW LONG THE EPISODE HAS RUN, and
+    # neither may be read here. drought_agent_steps() is a different quantity
+    # - how long since the last discovery, which is evidence, not a clock -
+    # and T1 is allowed to use it.
+    for name in ('MAX_EXPLORE_STEPS', 'QA_EPISODE_CAP_AGENT_STEPS_MEASURED',
+                 'QA_EPISODE_MAX_STEPS', 'QA_EPISODE_TIME_UNITS',
+                 'self.agent_steps', 'self.substeps'):
+        assert name not in src, f"the phase check reads {name}"
+
+
+def test_long_coherent_transit_never_switches_on_time():
+    """Crossing already-covered ground toward unexplored space, for four
+    times the retired backstop: the drought is enormous, every window is
+    transit, and the phase must not move. This is the exact case T4 used to
+    punish - a long haul across the known part of the level."""
+    goal = np.array([500_000.0, 498.0])
+
+    def frontier(_vx, pts):
+        pts = np.asarray(pts, float)
+        return 9, np.hypot(*(pts - goal).T)
+    lc = EpisodeLifecycle(FakeCoverage(frontier=frontier))
+    _walk_straight(lc, 4 * RETIRED_T4_STEPS * SPS, speed=0.3, n_new=0)
+    assert lc.agent_steps >= 4 * RETIRED_T4_STEPS
+    assert lc.drought_agent_steps() >= 4 * RETIRED_T4_STEPS
+    assert lc.last_window['in_transit'] is True
     assert lc.phase is EpisodePhase.EXPLORE
-    lc.observe(_info(9000), 0)
+    assert lc.transition_reason is None
+
+
+def test_a_long_explore_still_ends_on_evidence_when_it_dries_up():
+    """The fallback T4 was standing in for, done with evidence instead.
+
+    The same long productive episode, and then exploration genuinely stops:
+    three exhausted, non-transit windows move it to COMPLETE on T2 - no
+    clock involved, and it would have fired at the same place in an episode
+    of any length.
+    """
+    cov = FakeCoverage(target=10 ** 9)
+    lc = EpisodeLifecycle(cov)
+    x = 0.0
+    for _ in range(2 * RETIRED_T4_STEPS * SPS):
+        x += 3.0
+        cov.episode_new += 1
+        lc.observe(_info(x), 1)
+    assert lc.phase is EpisodePhase.EXPLORE
+    # Paced from where the walk ENDED: restarting at some other x would be a
+    # teleport, and a teleport reads as a huge net displacement, i.e. transit.
+    # One window more than YIELD_WINDOWS, since the walk left the current
+    # window part-used.
+    _pace(lc, WINDOW * (config.YIELD_WINDOWS + 1), x=x, n_new=0)
     assert lc.phase is EpisodePhase.COMPLETE
-    assert lc.transition_reason == Transition.EXPLORE_BACKSTOP
-    assert lc.transition_step == config.MAX_EXPLORE_STEPS
+    assert lc.transition_reason == Transition.YIELD_EXHAUSTED
 
 
 def test_phase_is_in_info_on_every_substep(qa_env):

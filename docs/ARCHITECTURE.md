@@ -110,6 +110,13 @@ decision, not a refactor.
   the safety reset - which needs positive stagnation evidence (a drought,
   consecutive non-transit zero-yield windows, and no progress across them),
   never elapsed steps.
+* **Time alone never changes the OBJECTIVE either.** `EXPLORE -> COMPLETE`
+  fires only on T1 (an informed target met with discovery genuinely
+  declining, off transit), T2 (three consecutive exhausted, non-transit
+  windows) or T3 (nothing reachable left ahead). The time-only T4 backstop
+  that switched at 7,335 agent steps is retired and nothing replaced it, so
+  an episode that keeps finding pixels - or keeps coherently crossing old
+  ground toward the frontier - stays in EXPLORE however long it runs.
 * **Coverage is exact, reward is best-effort.** The shared bitmap is written
   lock-free by 8 worker processes; metrics are recomputed from it by the
   parent, so they are exact even though two workers can both be paid for the
@@ -128,6 +135,8 @@ decision, not a refactor.
 | `exploration_data/reachable_mask.npz` | `tools/build_reachability.py` | no | the testable mask + noncoverage class map |
 | `exploration_data/coverage_bootstrap_6000000.npz` | `tools/bootstrap_coverage.py` | no | the QA campaign's starting map |
 | `checkpoints_qa/`, `glitch_hunter_qa*.{zip,npz}` | QA training | no | matched model/coverage pairs |
+| `checkpoints_qa/coverage_audit_trail.jsonl` | QA training | no | append-only coverage growth, one line per 10k steps |
+| `checkpoints_qa/reward_telemetry.jsonl` | QA training | no | append-only reward books: one line per episode (channels per phase) + 10k-step summaries |
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |
 | `logs/train.log` | QA / legacy training | no | the run's full log |
 | `evaluation/results/`, `coverage_audits/`, `calibration_runs/` | the tools (see `tools/README.md`) | no | one regenerable record per run |

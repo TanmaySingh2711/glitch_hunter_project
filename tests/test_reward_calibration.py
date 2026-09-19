@@ -313,7 +313,7 @@ def test_low_credit_scales_the_whole_payout(empty):
     def payout(credit):
         empty.reset()
         empty.r(110)
-        empty.complete(credit=credit, reason=Transition.EXPLORE_BACKSTOP)
+        empty.complete(credit=credit, reason=Transition.YIELD_EXHAUSTED)
         _rush(empty)
         return _driven(empty, 'complete', ('progress', 'flag'))
     none, half, full_credit = payout(0.0), payout(0.5), payout(1.0)

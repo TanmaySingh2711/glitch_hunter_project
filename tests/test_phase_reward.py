@@ -371,7 +371,10 @@ class _Cov:
     (Transition.NOTHING_AHEAD, 0, 1.0),       # nothing left to find: fully earned
     (Transition.YIELD_EXHAUSTED, 0, 0.0),     # idled into it: nothing earned
     (Transition.YIELD_EXHAUSTED, 5_000, 0.5),
-    (Transition.EXPLORE_BACKSTOP, 2_500, 0.25),
+    (Transition.YIELD_EXHAUSTED, 2_500, 0.25),
+    # A forced transition (calibration arms, tests) is scored the same
+    # conservative way, never at full credit.
+    ('forced_by_hand', 2_500, 0.25),
 ])
 def test_completion_credit(reason, new, credit):
     cov = _Cov()

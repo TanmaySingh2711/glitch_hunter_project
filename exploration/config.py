@@ -722,7 +722,13 @@ QA_END_ON_LEVEL_COMPLETE = True
 #
 # Every episode starts in EXPLORE. It moves to COMPLETE, once and one way,
 # when any transition criterion fires. The transition is a LIFECYCLE event,
-# not a termination: it never ends the episode. What each phase pays is in
+# not a termination: it never ends the episode.
+#
+# EVERY criterion is made of EVIDENCE about exploration - what was found,
+# whether the frontier is being closed on, whether anything is left ahead.
+# None of them reads a step count or a clock: elapsed time alone may not
+# change the objective, exactly as it may not end the episode (THE RESPAWN
+# RULE above). See the T4 retirement note below for the rule this replaced. What each phase pays is in
 # PHASE-GATED REWARD above.
 #
 # All counts below are AGENT steps; the lifecycle converts via
@@ -771,12 +777,36 @@ LIFECYCLE_WINDOW = 240
 # the threshold shrinks toward DROUGHT_GRACE.
 T1_DECLINE_DROUGHT_STEPS = LIFECYCLE_WINDOW
 
-# T2 - novelty yield exhausted and NOT in transit, sustained.
+# T2 - novelty yield exhausted and NOT in transit, sustained. This is the
+# EVIDENCE-BASED fallback: any episode whose exploration genuinely dries up
+# reaches it after YIELD_WINDOWS windows, without consulting a clock.
 YIELD_FLOOR = 200                   # new testable px per window
 YIELD_WINDOWS = 3                   # consecutive exhausted windows
-# T4 - backstop only. 0.75 x the measured QA cap, per the brief. If T4 is
-# the criterion that usually fires, the other thresholds are wrong.
-MAX_EXPLORE_STEPS = int(0.75 * QA_EPISODE_CAP_AGENT_STEPS_MEASURED)    # 7335
+
+# ─── T4 (MAX_EXPLORE_STEPS) IS RETIRED, AND MUST NOT COME BACK ───
+# It moved the episode into COMPLETE after 7,335 agent steps
+# (0.75 x QA_EPISODE_CAP_AGENT_STEPS_MEASURED) for no reason but elapsed
+# time. That is the same category of rule as the engine timeout the respawn
+# rule removed, one layer up: it changed the OBJECTIVE rather than ending the
+# episode, so an agent still finding pixels - or still crossing old ground
+# toward a real frontier - had its novelty cut to the COMPLETE tie-breaker
+# (x0.003) purely for having explored for a long time. A long productive
+# episode is the behaviour this phase exists to produce, not a failure mode
+# to time out.
+#
+# Nothing replaced it, and nothing should: a LARGER constant would be the
+# same rule with a different number. T1, T2 and T3 are each backed by
+# evidence - the target met with discovery genuinely declining, a sustained
+# exhausted yield off the frontier, or nothing reachable left ahead - and T2
+# is the general fallback, since an episode that has stopped exploring
+# productively closes exhausted windows whatever its length. An episode that
+# never meets any of the three is, by construction, one that is still
+# exploring, and it stays in EXPLORE.
+#
+# The consequence, stated plainly: EXPLORE is now unbounded in time. An
+# episode can stay in EXPLORE for as long as it keeps finding pixels or
+# coherently transiting, and only the game (the castle door, a death) or the
+# evidence-backed safety reset ends it. That is intended.
 
 # Transit vs stuck. "No new pixels for a while" is NEVER stuck on its own:
 # crossing covered ground to reach new ground is the job.

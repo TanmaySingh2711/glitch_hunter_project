@@ -23,6 +23,8 @@ from common.logging_setup import write_progress
 from exploration import config as xconfig
 from exploration import level_completion as lc
 from exploration.coverage import SpatialCoverage
+from exploration.lifecycle import EpisodePhase
+from rewards.qa import QA_CHANNELS
 
 log = logging.getLogger(__name__)
 
@@ -487,14 +489,16 @@ class LifecycleStatsCallback(BaseCallback):
 
     Counts per-episode outcomes from the final info of every finished
     episode, across all workers, and reports them on the same cadence as the
-    coverage line. Two numbers here are diagnostic alarms rather than stats:
+    coverage line. One number here is a diagnostic alarm rather than a stat:
 
-      * T4 (the explore backstop) should be RARE. If it is the usual
-        transition, the adaptive criteria are mis-set - the brief says report
-        it rather than tune around it.
-      * safety_reset should be rare too. It is the last-resort ending, after
-        level completion and death. Each is reported with the evidence it
+      * safety_reset should be RARE. It is the last-resort ending, after
+        level completion and death, and it is reported with the evidence it
         fired on (stuck / unproductive_loop).
+
+    Transitions are counted per criterion (T1/T2/T3, and "none" for an
+    episode that stayed in EXPLORE throughout - which is now a legitimate
+    outcome at any episode length, since the time-only T4 backstop is
+    retired).
 
     Also reported: the longest episode, and how many outlived the old QA clock
     (9,781 agent steps) - under the respawn rule those are the episodes the
@@ -549,6 +553,297 @@ class LifecycleStatsCallback(BaseCallback):
         self._transitions, self._ends, self._episodes = {}, {}, 0
         self._outlived_clock, self._longest = 0, 0
         return True
+
+
+class RewardTelemetryCallback(BaseCallback):
+    """The QA reward's own books, appended to a JSONL file as the run happens.
+
+    ─── WHY THIS EXISTS ───
+    rewards/qa.py already accounts for every term it pays as a separate
+    CHANNEL (QA_CHANNELS), accumulated per episode AND per phase, and leaves
+    the finished books in the final info of each episode. Until now nothing
+    read them during training: the only consumer was
+    tools/calibrate_phase_reward.py, offline, on replayed trajectories. So
+    "is the reward balanced?" could be asked of a calibration run but not of
+    the run that actually trained the policy. This writes them down as they
+    happen, which is what the controlled validation needs.
+
+    ─── IT CANNOT CHANGE WHAT PPO LEARNS ───
+    It reads the info dicts SB3 already hands every callback, copies what it
+    needs and appends to a file. It never touches the wrapper, the reward,
+    the observation or the model, and it always returns True, so the rewards
+    PPO sees are bit-identical whether or not it is attached
+    (tests/test_reward_telemetry.py pins both the rewards and the resulting
+    weights). QA only: an info without 'qa_channels' - every legacy episode -
+    is ignored.
+
+    ─── WHAT IS WRITTEN, one JSON object per line ───
+      session   once per run, at training start: where the run resumed from,
+                and the constants these numbers should be read against.
+      episode   one per finished episode, from its final info: every channel
+                summed per phase, the RECONCILIATION below, how the episode
+                ended, and the lifecycle context.
+      interval  every `every` timesteps: the same channels summed over the
+                episodes that closed in that interval, so a long campaign can
+                be read without walking every episode line.
+
+    ─── RECONCILIATION: the record accounts for the reward PPO was given ───
+    rewards/qa.py pays every term into a named channel and nothing outside
+    them, so per substep the channels sum EXACTLY to the reward the wrapper
+    returns; MaxAndSkipObservation then sums four substeps and Monitor sums
+    the episode. Each record therefore carries the chain end to end:
+
+      env_reward            the engine's own reward for the episode. It is
+                            the 'death' channel: custom_mario_env pays 0.0
+                            every substep except -5.0 on a death, which is
+                            what that channel is named for.
+      preclip_total         every channel except 'clip' - the reward before
+                            the backstop clamp.
+      clip_adjustment       the 'clip' channel: what QA_REWARD_CLIP removed.
+                            Zero unless a substep exceeded the clamp.
+      final_reward          preclip_total + clip_adjustment = the sum of ALL
+                            channels = what the wrapper actually returned.
+      monitor_reward        SB3 Monitor's own total for the same episode,
+                            measured independently of the books.
+      unaccounted_residual  monitor_reward - final_reward. Float-summation
+                            noise only (measured ~3e-7 on episode totals in
+                            the hundreds, from summing the same values in a
+                            different order). Anything larger means a reward
+                            term is reaching PPO without being booked, so it
+                            is logged as a warning rather than left in a file
+                            nobody reads.
+
+    One line per EPISODE, not per substep: an episode is hundreds to
+    thousands of agent steps, so this is a few dozen lines for the +20k
+    validation and one small append per episode thereafter.
+
+    Append-only, never rewritten, so a resumed run continues the same file
+    rather than truncating it; every record carries its global_timestep and
+    the session's own id, so two runs in one file stay apart.
+    """
+
+    KINDS = ('session', 'episode', 'interval')
+    # Above this, the residual is no longer float noise and someone must look.
+    RESIDUAL_TOLERANCE = 1e-3
+
+    def __init__(self, path: str, every: int = 10_000,
+                 session_start: dict[str, int] | None = None,
+                 verbose: int = 0) -> None:
+        super().__init__(verbose)
+        self.path = path
+        self.every = every
+        self.session_start = dict(session_start or {})
+        self.session_id = datetime.datetime.now().strftime('%Y%m%dT%H%M%S')
+        self._next = 0
+        self._episodes = 0
+        self._interval_episodes = 0
+        self._acc: dict[str, dict[str, float]] = {}
+        self._ends: dict[str, int] = {}
+        self._transitions: dict[str, int] = {}
+        self._interval_clips = 0
+        self._interval_agent_steps = 0
+        self._interval_started_at = 0
+        self._interval_rewards: list[float] = []
+        self._interval_residual = 0.0
+        self._interval_max_residual = 0.0
+        self.worst_residual = 0.0        # the run's worst, for the final say
+        # qa_clip_events is CUMULATIVE INSIDE EACH WORKER, and workers are
+        # separate processes, so the only way to count them once is per-env
+        # deltas. A value that went DOWN means that worker restarted, so the
+        # new value is itself the delta.
+        self._clip_seen: dict[int, int] = {}
+
+    # ── writing ───────────────────────────────────────────────────────────
+    def _append(self, record: dict[str, Any]) -> None:
+        """One JSON line. A telemetry failure must never stop training."""
+        try:
+            os.makedirs(os.path.dirname(self.path) or '.', exist_ok=True)
+            with open(self.path, 'a', encoding='utf-8') as fh:
+                fh.write(json.dumps(record) + '\n')
+        except Exception as exc:
+            log.warning("[REWARD] could not append telemetry to %s: %s", self.path, exc)
+
+    def _stamp(self, kind: str) -> dict[str, Any]:
+        return {'kind': kind, 'session_id': self.session_id,
+                'global_timestep': int(self.num_timesteps),
+                'written_at': datetime.datetime.now().isoformat(timespec='seconds')}
+
+    def _on_training_start(self) -> None:
+        self._next = self.num_timesteps + self.every
+        self._interval_started_at = int(self.num_timesteps)
+        record = self._stamp('session')
+        record.update({
+            'reward_mode': xconfig.REWARD_MODE,
+            'resumed_at': self.session_start.get('global_timestep'),
+            'channels': list(QA_CHANNELS),
+            'phases': [p.value for p in EpisodePhase],
+            # The constants the channel sums below are produced by, so a
+            # record can be read years later without guessing which tuning
+            # was live. Reward values themselves are never set here.
+            'constants': {
+                'novelty_weight': xconfig.NOVELTY_WEIGHT,
+                'novelty_cap': xconfig.NOVELTY_CAP,
+                'n_ref': xconfig.N_REF,
+                'frontier_weight': xconfig.FRONTIER_WEIGHT,
+                'drought_max': xconfig.DROUGHT_MAX,
+                'drought_episode_cap': xconfig.DROUGHT_EPISODE_CAP,
+                'explore_time_penalty': xconfig.EXPLORE_TIME_PENALTY,
+                'complete_time_penalty': xconfig.COMPLETE_TIME_PENALTY,
+                'complete_progress_per_px': xconfig.COMPLETE_PROGRESS_PER_PX,
+                'complete_novelty_mult': xconfig.COMPLETE_NOVELTY_MULT,
+                'explore_flag_reward': xconfig.EXPLORE_FLAG_REWARD,
+                'complete_flag_reward': xconfig.COMPLETE_FLAG_REWARD,
+                'interaction_episode_cap': xconfig.QA_INTERACTION_EPISODE_CAP,
+                'locomotion_episode_cap': xconfig.QA_LOCOMOTION_EPISODE_CAP,
+                'shortfall_penalty': xconfig.SHORTFALL_PENALTY,
+                'reward_clip': xconfig.QA_REWARD_CLIP,
+            },
+        })
+        self._append(record)
+
+    # ── reconciliation ────────────────────────────────────────────────────
+    def _reconcile(self, totals: dict[str, float],
+                   monitor: dict[str, Any]) -> dict[str, Any]:
+        """The reward chain end to end, from the engine to what PPO was given.
+
+        Nothing here recomputes a reward: every number is read out of the
+        books rewards/qa.py already kept, and `monitor_reward` is SB3's
+        independent total for the same episode. Their difference is the
+        whole point - see RECONCILIATION in the class docstring.
+        """
+        clip_adjustment = totals['clip']
+        final_reward = sum(totals.values())
+        monitor_reward = float(monitor['r']) if 'r' in monitor else None
+        residual = (None if monitor_reward is None
+                    else monitor_reward - final_reward)
+        return {
+            'env_reward': round(totals['death'], 6),
+            'preclip_total': round(final_reward - clip_adjustment, 6),
+            'clip_adjustment': round(clip_adjustment, 6),
+            'final_reward': round(final_reward, 6),
+            'monitor_reward': None if monitor_reward is None else round(monitor_reward, 6),
+            'unaccounted_residual': None if residual is None else residual,
+        }
+
+    # ── per episode ───────────────────────────────────────────────────────
+    def _episode_record(self, info: dict[str, Any], channels: dict[str, Any],
+                        clips: int) -> dict[str, Any]:
+        by_phase = {phase: {ch: float(vals.get(ch, 0.0)) for ch in QA_CHANNELS}
+                    for phase, vals in channels.items()}
+        totals = {ch: sum(p[ch] for p in by_phase.values()) for ch in QA_CHANNELS}
+        monitor = info.get('episode') or {}
+        reconciliation = self._reconcile(totals, monitor)
+        record = self._stamp('episode')
+        record.update({
+            'episode_index': self._episodes,
+            'agent_steps': info.get('lifecycle_agent_steps'),
+            'end_reason': ('time_limit' if info.get('TimeLimit.truncated')
+                           else info.get('episode_end_reason')),
+            'safety_reset_reason': info.get('safety_reset_reason'),
+            'phase_at_end': info.get('episode_phase'),
+            'transition_reason': info.get('phase_transition_reason'),
+            'transition_step': info.get('phase_transition_step'),
+            'completion_credit': info.get('completion_credit'),
+            'flag_get': bool(info.get('flag_get')),
+            'clock_extensions': info.get('clock_extensions'),
+            'channels_by_phase': by_phase,
+            'channels_total': {k: round(v, 6) for k, v in totals.items()},
+            # The engine reward, the clamp and the two independent totals,
+            # end to end - see RECONCILIATION in the class docstring.
+            'reconciliation': reconciliation,
+            'clip_events': clips,
+            'novelty_shape': info.get('qa_novelty_shape'),
+            'coverage_episode_new_px': info.get('coverage_episode_new'),
+            'coverage_episode_target_px': info.get('coverage_episode_target'),
+            'coverage_total_px': info.get('coverage_total'),
+        })
+        return record
+
+    def _accumulate(self, record: dict[str, Any]) -> None:
+        for phase, vals in record['channels_by_phase'].items():
+            into = self._acc.setdefault(phase, dict.fromkeys(QA_CHANNELS, 0.0))
+            for ch, v in vals.items():
+                into[ch] += v
+        end = record['end_reason'] or 'unknown'
+        self._ends[end] = self._ends.get(end, 0) + 1
+        t = record['transition_reason'] or 'none'
+        self._transitions[t] = self._transitions.get(t, 0) + 1
+        self._interval_episodes += 1
+        self._interval_clips += record['clip_events']
+        self._interval_agent_steps += int(record['agent_steps'] or 0)
+        self._interval_rewards.append(record['reconciliation']['final_reward'])
+        residual = record['reconciliation']['unaccounted_residual']
+        if residual is None:
+            return
+        self._interval_residual += residual
+        self._interval_max_residual = max(self._interval_max_residual, abs(residual))
+        self.worst_residual = max(self.worst_residual, abs(residual))
+        if abs(residual) > self.RESIDUAL_TOLERANCE:
+            # Past float noise: a reward term is reaching PPO without being
+            # booked, which is exactly what this file exists to catch.
+            log.warning("[REWARD] episode %d: %.6f of reward is UNACCOUNTED "
+                        "(Monitor %.6f vs channels %.6f). A term is missing "
+                        "from the books.", record['episode_index'], residual,
+                        record['reconciliation']['monitor_reward'],
+                        record['reconciliation']['final_reward'])
+
+    def _flush_interval(self) -> None:
+        if not self._interval_episodes:
+            return
+        steps = self._interval_agent_steps
+        record = self._stamp('interval')
+        record.update({
+            'from_global_timestep': self._interval_started_at,
+            'episodes': self._interval_episodes,
+            'agent_steps': steps,
+            'channels_by_phase': {p: {k: round(v, 6) for k, v in c.items()}
+                                  for p, c in self._acc.items()},
+            'channels_mean_per_episode': {
+                p: {k: round(v / self._interval_episodes, 6) for k, v in c.items()}
+                for p, c in self._acc.items()},
+            'clip_events': self._interval_clips,
+            'clip_events_per_1k_agent_steps': (round(1000.0 * self._interval_clips / steps, 4)
+                                               if steps else None),
+            'episode_reward_mean': round(float(np.mean(self._interval_rewards)), 6),
+            'episode_reward_median': round(float(np.median(self._interval_rewards)), 6),
+            'unaccounted_residual_sum': self._interval_residual,
+            'unaccounted_residual_max_abs': self._interval_max_residual,
+            'ends': dict(self._ends),
+            'transitions': dict(self._transitions),
+        })
+        self._append(record)
+        self._acc, self._ends, self._transitions = {}, {}, {}
+        self._interval_episodes = self._interval_clips = self._interval_agent_steps = 0
+        self._interval_rewards = []
+        self._interval_residual = self._interval_max_residual = 0.0
+        self._interval_started_at = int(self.num_timesteps)
+
+    def _on_step(self) -> bool:
+        for i, (done, info) in enumerate(zip(self.locals.get("dones", []),
+                                             self.locals.get("infos", []), strict=True)):
+            channels = info.get('qa_channels') if done else None
+            if not channels:                  # not done, or a legacy episode
+                continue
+            clips = self._clip_delta(i, int(info.get('qa_clip_events') or 0))
+            record = self._episode_record(info, channels, clips)
+            self._episodes += 1
+            self._append(record)
+            self._accumulate(record)
+        if self.num_timesteps >= self._next:
+            self._next = self.num_timesteps + self.every
+            self._flush_interval()
+        return True
+
+    def _clip_delta(self, idx: int, seen: int) -> int:
+        last = self._clip_seen.get(idx)
+        self._clip_seen[idx] = seen
+        if last is None or seen < last:       # first sight, or a restarted worker
+            return seen
+        return seen - last
+
+    def _on_training_end(self) -> None:
+        """Whatever the last interval had, so nothing is lost to a stop."""
+        self._flush_interval()
 
 
 class StagnationCallback(BaseCallback):
