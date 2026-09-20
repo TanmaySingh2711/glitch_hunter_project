@@ -93,6 +93,17 @@ def migrate(src: str, dst: str, source_mask: str | None = None) -> dict[str, Any
             f"{lost:,} previously covered testable px fall outside the new mask. "
             f"Coverage may never go down; investigate before migrating.")
 
+    try:
+        # Relative to ROOT reads better in the provenance field, but
+        # os.path.relpath raises on Windows when src and ROOT are on
+        # different drives - which happens for real on CI, where the
+        # checkout and pytest's tmp_path fixture can land on different
+        # mounts (observed: checkout on D:, tmp_path on C:). The absolute
+        # path is still correct provenance in that case, just not relative.
+        migrated_from = os.path.relpath(src, ROOT)
+    except ValueError:
+        migrated_from = os.path.abspath(src)
+
     out = {k: d[k] for k in PRESERVED if k in d}
     out.update({
         'covered_testable': np.int64(after),
@@ -100,7 +111,7 @@ def migrate(src: str, dst: str, source_mask: str | None = None) -> dict[str, Any
         'testable_fingerprint': np.str_(config.TESTABLE_FINGERPRINT),
         'config_hash': np.str_(cov_mod._config_hash()),
         # Provenance: where this came from and what it said there.
-        'migrated_from_path': np.str_(os.path.relpath(src, ROOT)),
+        'migrated_from_path': np.str_(migrated_from),
         'migrated_from_sha256': np.str_(canonical_sha256(src)),
         'migrated_from_fingerprint': np.str_(str(d['testable_fingerprint'])),
         'migrated_from_testable_total': np.int64(int(d['testable_total'])),

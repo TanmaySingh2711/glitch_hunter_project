@@ -67,6 +67,27 @@ def test_every_visit_is_preserved_and_the_numerator_is_recounted(tool, tmp_path,
         assert int(d['migrated_from_covered_testable']) == 2000
 
 
+def test_provenance_survives_src_and_root_on_different_drives(tool, tmp_path, monkeypatch):
+    """os.path.relpath raises ValueError when the two paths are on different
+    Windows drive letters - which happens for real on CI (checkout on D:,
+    pytest's tmp_path on C:). migrate() must fall back to an absolute path
+    instead of crashing; only the provenance field's shape changes."""
+    old = _mask(slice(400, 600))
+    src, _ = _source(tmp_path, monkeypatch, old, slice(420, 440))
+    _use_mask(monkeypatch, old)
+    real_relpath = os.path.relpath
+
+    def cross_drive(path, start):
+        if path == src:
+            raise ValueError("path is on mount 'C:', start on mount 'D:'")
+        return real_relpath(path, start)
+    monkeypatch.setattr(tool.os.path, "relpath", cross_drive)
+    dst = str(tmp_path / "dst.npz")
+    tool.migrate(src, dst)
+    with np.load(dst) as d:
+        assert str(d['migrated_from_path']) == os.path.abspath(src)
+
+
 def test_a_migration_that_would_take_coverage_away_is_refused(tool, tmp_path, monkeypatch):
     """Coverage may never go down. Covered pixels leaving the mask means
     something reached space the new mask calls unreachable - investigate."""
