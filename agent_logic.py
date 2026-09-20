@@ -29,7 +29,7 @@ import gymnasium as gym
 import numpy as np
 
 from custom_mario_env import CustomMarioEnv
-from exploration import config
+from exploration import config, reachability
 from exploration import coverage as coverage_mod
 from exploration import lifecycle as lifecycle_mod
 from rewards.legacy import LegacyCompletionReward
@@ -55,6 +55,12 @@ ACTION_NAMES = {
 
 REWARD_MODES = ("qa_exploration", "legacy_completion")
 
+# Why an episode was in COMPLETE from its first substep. Deliberately NOT one
+# of the T1-T3 criteria: those are EVIDENCE that exploring stopped paying, and
+# a rehearsal episode is not evidence of anything - it is a scheduled drill.
+# Keeping it distinct also keeps the transition statistics honest.
+REHEARSAL_TRANSITION = "R_rehearsal"
+
 
 class GlitchHunterWrapper(QAExplorationReward, LegacyCompletionReward,
                           gym.Wrapper[np.ndarray, int, np.ndarray, int]):
@@ -68,8 +74,17 @@ class GlitchHunterWrapper(QAExplorationReward, LegacyCompletionReward,
                  coverage: coverage_mod.SpatialCoverage | None = None,
                  shm_names: dict[str, str] | None = None,
                  testable_mask: np.ndarray | None = None,
-                 attach_coverage: bool | None = None) -> None:
+                 attach_coverage: bool | None = None,
+                 rehearsal_period: int | None = None) -> None:
         super().__init__(env)
+        # Resolved HERE and stored, never re-read from config per episode.
+        # SubprocVecEnv workers are spawned processes that re-import config
+        # from disk, so a value a launcher assigned to config in the PARENT
+        # never reaches them - that exact mistake silently turned a 164k-step
+        # rehearsal experiment into a plain replicate (0 of 173 episodes
+        # rehearsed). The parent passes the value explicitly via make_env().
+        self.rehearsal_period = (config.COMPLETION_REHEARSAL_PERIOD
+                                 if rehearsal_period is None else int(rehearsal_period))
         self.reward_mode = reward_mode or config.REWARD_MODE
         if self.reward_mode not in REWARD_MODES:
             raise ValueError(
@@ -116,6 +131,14 @@ class GlitchHunterWrapper(QAExplorationReward, LegacyCompletionReward,
 
         # Cumulative across episodes: the clamp counter and the death memory.
         self.qa_clip_events = 0
+        # Completion rehearsal: a counter, not a coin, so a run reproduces
+        # exactly and a test can assert WHICH episodes rehearse. See
+        # config.COMPLETION_REHEARSAL_PERIOD for the measurement behind it.
+        self._episode_index = -1
+        self.rehearsal_episode = False
+        # Where a running jump is required, by world column (-1 elsewhere).
+        # Read once here, not per substep: it is pure level geometry.
+        self.runup_zone_ids = (reachability.load_runup_zones() if qa else None)
         self._init_death_memory()
         self._reset_episode_state()
 
@@ -148,6 +171,13 @@ class GlitchHunterWrapper(QAExplorationReward, LegacyCompletionReward,
         # adaptive target is computed from.
         if self.lifecycle is not None:
             self.lifecycle.begin_episode()
+            self._episode_index += 1
+            period = self.rehearsal_period
+            self.rehearsal_episode = bool(period) and self._episode_index % period == 0
+            if self.rehearsal_episode:
+                # Full credit: this episode's job IS to finish, so it is not
+                # being docked for exploration it was never asked to do.
+                self.lifecycle.force_complete(REHEARSAL_TRANSITION, credit=1.0)
         self._decay_danger_zones()
 
         return self.env.reset(seed=seed, options=options)

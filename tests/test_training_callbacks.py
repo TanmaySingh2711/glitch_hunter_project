@@ -193,6 +193,8 @@ def _stagnation(total, remaining):
 
 
 def test_stagnation_escalates_only_after_enough_lean_windows(monkeypatch):
+    """The escalation logic itself, with escalation deliberately switched ON."""
+    monkeypatch.setattr(config, "STAGNATION_ESCALATE", True)
     total = [1_000_000]
     cov = _stagnation(total, remaining=2_000_000)
     model = _Model(0, ent_coef=0.03)
@@ -206,6 +208,42 @@ def test_stagnation_escalates_only_after_enough_lean_windows(monkeypatch):
     _step(cb, t)
     assert cov.novelty_mult == pytest.approx(1.25)
     assert model.ent_coef == pytest.approx(0.03 * 1.15)
+
+
+def test_by_default_stagnation_is_detected_but_changes_nothing(monkeypatch, caplog):
+    """The one-way ratchet is off: a stall is reported, and neither the
+    novelty scale nor the entropy bonus the campaign was validated at moves."""
+    import logging
+    monkeypatch.setattr(config, "STAGNATION_ESCALATE", False)
+    total = [1_000_000]
+    cov = _stagnation(total, remaining=2_000_000)
+    model = _Model(0, ent_coef=0.03)
+    cb = cbs.StagnationCallback(cov, every=10_000)
+    cb.init_callback(model)
+    t = 0
+    with caplog.at_level(logging.WARNING):
+        for _ in range(config.STAGNATION_WINDOW * 3 + 1):
+            _step(cb, t)
+            t += 10_000
+    assert cov.novelty_mult == 1.0, "the novelty scale moved while escalation was off"
+    assert model.ent_coef == 0.03, "ent_coef moved while escalation was off"
+    assert cb.detections >= 1, "a stall that met every condition was not even reported"
+    assert any("Detected only" in r.getMessage() for r in caplog.records)
+
+
+def test_a_qa_resume_pins_ent_coef_to_the_validated_base(monkeypatch):
+    """A checkpoint saved after an escalation must not carry it forward."""
+    import types
+
+    import train_agent as ta
+    loaded = types.SimpleNamespace(ent_coef=0.0529, target_kl=None, batch_size=None,
+                                   learning_rate=None, lr_schedule=None,
+                                   tensorboard_log=None, ep_info_buffer=[1],
+                                   ep_success_buffer=[1])
+    monkeypatch.setattr(ta, "QA_PHASE", True)
+    monkeypatch.setattr(ta.PPO, "load", lambda *a, **k: loaded)
+    model = ta.build_model("x.zip", None, "cpu")
+    assert model.ent_coef == config.ENT_COEF_BASE
 
 
 def test_stagnation_never_escalates_when_the_world_is_nearly_done():
@@ -269,3 +307,217 @@ def test_a_failed_map_never_stops_training(tmp_path, monkeypatch):
     cb.init_callback(_Model())
     assert _step(cb, 10, dones=[]) is True
     assert json.loads(audit.read_text(encoding='utf-8'))['map_error'] == "disk full"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ValueWarmupCallback(freeze_actor=True): the policy must be EXACTLY stationary
+# ══════════════════════════════════════════════════════════════════════════
+def _tiny_ppo():
+    """A real, tiny PPO on a real (tiny) env: CnnPolicy with shared features,
+    the same structure as the campaign's model."""
+    import gymnasium as gym
+    from stable_baselines3 import PPO
+
+    class Pix(gym.Env):
+        observation_space = gym.spaces.Box(0, 255, (4, 84, 84), np.uint8)
+        action_space = gym.spaces.Discrete(10)
+
+        def reset(self, *, seed=None, options=None):
+            super().reset(seed=seed)
+            self.t = 0
+            return self.observation_space.sample(), {}
+
+        def step(self, a):
+            self.t += 1
+            return self.observation_space.sample(), float(a == 3), self.t >= 64, False, {}
+
+    # Seeded: an unseeded init made the anchor tests flaky - how far the
+    # random policy starts from its own saved copy decided whether a large
+    # test step size converged or diverged.
+    return PPO("CnnPolicy", Pix(), n_steps=64, batch_size=32, n_epochs=2,
+               device="cpu", seed=20260920)
+
+
+def _snapshot(model):
+    return {n: p.detach().clone() for n, p in model.policy.named_parameters()}
+
+
+def test_a_frozen_warmup_leaves_every_actor_weight_bit_identical():
+    from training.callbacks import ValueWarmupCallback
+    model = _tiny_ppo()
+    before = _snapshot(model)
+    cb = ValueWarmupCallback(warmup_until=10**9, warmup_lr=1e-3, normal_lr=1e-4,
+                             freeze_actor=True)
+    model.learn(total_timesteps=64 * 3, callback=cb)
+    after = _snapshot(model)
+    moved = {n for n in before if not (before[n] == after[n]).all()}
+    assert moved == {"value_net.weight", "value_net.bias"}, (
+        f"during a frozen warm-up exactly the critic head may change; moved: {sorted(moved)}")
+
+
+def test_the_release_unfreezes_everything_and_the_actor_then_moves():
+    from training.callbacks import ValueWarmupCallback
+    model = _tiny_ppo()
+    cb = ValueWarmupCallback(warmup_until=64 * 2, warmup_lr=1e-3, normal_lr=1e-3,
+                             freeze_actor=True)
+    model.learn(total_timesteps=64, callback=cb)
+    assert cb._frozen, "still inside the warm-up budget, the actor must still be frozen"
+    mid = _snapshot(model)
+    model.learn(total_timesteps=64 * 3, callback=cb, reset_num_timesteps=False)
+    assert not cb._frozen, "the step budget was spent, so the actor must be released"
+    assert all(p.requires_grad for p in model.policy.parameters())
+    after = _snapshot(model)
+    assert any(not (mid[n] == after[n]).all() for n in mid
+               if n.startswith(("features_extractor", "action_net"))), \
+        "after release the actor never trained"
+
+
+def test_the_explained_variance_release_needs_two_consecutive_hits():
+    from stable_baselines3.common.utils import configure_logger
+
+    from training.callbacks import ValueWarmupCallback
+    model = _tiny_ppo()
+    model.set_logger(configure_logger(0, None, "", False))
+    cb = ValueWarmupCallback(warmup_until=10**9, warmup_lr=1e-3, normal_lr=1e-4,
+                             freeze_actor=True, ev_release=0.8)
+    cb.init_callback(model)
+    cb._freeze()
+    model.logger.record("train/explained_variance", 0.9)
+    cb._on_rollout_start()
+    assert cb._frozen, "one good update must not release the actor"
+    model.logger.record("train/explained_variance", 0.5)
+    cb._on_rollout_start()
+    assert cb._frozen and cb._ev_hits == 0, "a bad update must reset the streak"
+    for _ in range(2):
+        model.logger.record("train/explained_variance", 0.85)
+        cb._on_rollout_start()
+    assert not cb._frozen, "two consecutive updates at or above ev_release release it"
+
+
+def test_without_freeze_actor_the_warmup_only_changes_the_learning_rate():
+    """The default must stay exactly what it was: nothing frozen, ever."""
+    from training.callbacks import ValueWarmupCallback
+    model = _tiny_ppo()
+    cb = ValueWarmupCallback(warmup_until=10**9, warmup_lr=1e-5, normal_lr=1e-4)
+    model.learn(total_timesteps=64, callback=cb)
+    assert not cb._frozen
+    assert all(p.requires_grad for p in model.policy.parameters())
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# AnchorConsolidationCallback: bound the drift from the healthy policy
+# ══════════════════════════════════════════════════════════════════════════
+def _anchor_rig(tmp_path, perturb):
+    """A tiny PPO, a saved copy of it as the reference, an anchor set recorded
+    for that reference, and optionally the live policy pushed away from it."""
+    import torch
+    from stable_baselines3.common.utils import configure_logger
+
+    from common.fileio import canonical_sha256
+    model = _tiny_ppo()
+    model.set_logger(configure_logger(0, None, "", False))
+    ref_path = str(tmp_path / "ref.zip")
+    model.save(ref_path)
+    rng = np.random.default_rng(1)
+    states = rng.integers(0, 255, (300, 4, 84, 84), dtype=np.uint8)
+    anchor_path = str(tmp_path / "anchors.npz")
+    np.savez_compressed(anchor_path, states=states,
+                        reference_sha256=np.str_(canonical_sha256(ref_path)))
+    if perturb:
+        with torch.no_grad():
+            model.policy.action_net.bias.add_(torch.linspace(-3, 3, 10))
+    return model, ref_path, anchor_path
+
+
+def _cb(model, ref_path, anchor_path, target, max_steps=200):
+    from training.callbacks import AnchorConsolidationCallback
+    cb = AnchorConsolidationCallback(ref_path, anchor_path, target, batch=64,
+                                     max_steps=max_steps, lr=5e-3, measure_n=300)
+    cb.init_callback(model)
+    cb._on_training_start()
+    return cb
+
+
+def test_consolidation_pulls_a_drifted_policy_back_under_budget(tmp_path):
+    model, ref, anchors = _anchor_rig(tmp_path, perturb=True)
+    cb = _cb(model, ref, anchors, target=0.05)
+    rec = cb.consolidate()
+    assert rec['kl_before'] > 0.05, "the rig did not actually drift the policy"
+    assert rec['kl_after'] <= 0.05, (
+        f"KL went {rec['kl_before']:.4f} -> {rec['kl_after']:.4f}; it must end "
+        f"under the budget")
+    assert rec['steps'] > 0
+
+
+def test_under_budget_it_changes_nothing(tmp_path):
+    model, ref, anchors = _anchor_rig(tmp_path, perturb=False)
+    before = _snapshot(model)
+    cb = _cb(model, ref, anchors, target=0.05)
+    rec = cb.consolidate()
+    assert rec['steps'] == 0, "a policy already under budget was trained anyway"
+    after = _snapshot(model)
+    assert all((before[n] == after[n]).all() for n in before)
+
+
+def test_it_never_trains_the_value_head_or_the_reference(tmp_path):
+    model, ref, anchors = _anchor_rig(tmp_path, perturb=True)
+    value_before = {n: p.detach().clone() for n, p in model.policy.named_parameters()
+                    if n.startswith("value_net")}
+    cb = _cb(model, ref, anchors, target=0.01)
+    ref_before = {n: p.detach().clone() for n, p in cb.reference.named_parameters()}
+    cb.consolidate()
+    for n, p in model.policy.named_parameters():
+        if n in value_before:
+            assert (value_before[n] == p).all(), f"consolidation trained {n}"
+    for n, p in cb.reference.named_parameters():
+        assert (ref_before[n] == p).all(), f"the frozen reference changed: {n}"
+
+
+def test_it_refuses_an_anchor_set_recorded_for_another_reference(tmp_path):
+    from training.callbacks import AnchorConsolidationCallback
+    model, _ref, anchors = _anchor_rig(tmp_path, perturb=False)
+    other = str(tmp_path / "other.zip")
+    _tiny_ppo().save(other)
+    cb = AnchorConsolidationCallback(other, anchors, 0.1)
+    cb.init_callback(model)
+    with pytest.raises(RuntimeError, match="recorded for reference"):
+        cb._on_training_start()
+
+
+def test_the_first_rollout_is_skipped_because_nothing_was_trained_yet(tmp_path):
+    model, ref, anchors = _anchor_rig(tmp_path, perturb=True)
+    cb = _cb(model, ref, anchors, target=0.05)
+    cb._on_rollout_start()
+    assert cb.history == [], "consolidated before any PPO update had happened"
+    cb._on_rollout_start()
+    assert len(cb.history) == 1
+
+
+def test_the_final_update_is_consolidated_before_the_model_is_saved(tmp_path):
+    """Consolidation runs at rollout START, so nothing follows the last update.
+    train_agent saves as soon as learn() returns, so the budget has to be
+    enforced once more at training end or the saved checkpoint can exceed it."""
+    model, ref, anchors = _anchor_rig(tmp_path, perturb=True)
+    cb = _cb(model, ref, anchors, target=0.05)
+    cb._on_rollout_start()                   # first rollout: nothing trained yet
+    assert cb.history == []
+    cb._on_training_end()
+    assert len(cb.history) == 1, "the final update was never consolidated"
+    assert cb.history[-1]['kl_after'] <= 0.05
+
+
+def test_consolidation_never_makes_the_drift_worse(tmp_path):
+    """Minimising KL can overshoot. If it ends worse than it started, the
+    actor is restored - the callback may only help or do nothing."""
+    model, ref, anchors = _anchor_rig(tmp_path, perturb=True)
+    cb = _cb(model, ref, anchors, target=1e-9, max_steps=200)
+    cb.lr = 50.0                              # absurd on purpose: forces divergence
+    import torch
+    cb._opt = torch.optim.Adam(cb._params, lr=cb.lr)
+    before = cb.measure()
+    rec = cb.consolidate()
+    assert rec['kl_after'] <= rec['kl_before'] + 1e-9, (
+        f"consolidation left the policy worse: {rec['kl_before']:.4f} -> "
+        f"{rec['kl_after']:.4f}")
+    assert cb.measure() == pytest.approx(before, rel=1e-6), \
+        "a diverged consolidation was not rolled back exactly"

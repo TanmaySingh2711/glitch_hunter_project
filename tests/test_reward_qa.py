@@ -536,3 +536,267 @@ def test_a_zero_yield_episode_cannot_be_farmed_into_profit(qa_flat):
     assert qa_flat.ep_drought_paid > qa_flat.ep_interaction_paid, (
         f"drought {qa_flat.ep_drought_paid:.2f} did not outrun interaction "
         f"{qa_flat.ep_interaction_paid:.2f} - lingering is still profitable")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# COMPLETION REHEARSAL
+#
+# Undiscounted, finishing pays best (+27.02 mean return against -4.20 for a
+# death). The policy drifts away from it anyway, because GAMMA 0.99 gives a
+# 100-agent-step horizon and a completing episode takes 451, so the flag is
+# worth 1% of face value at the first action. The skill is EXTINGUISHED, not
+# corrupted. A minority of episodes therefore start in COMPLETE, where the
+# reward is already dense in forward progress.
+# ══════════════════════════════════════════════════════════════════════════
+def test_no_episode_rehearses_when_the_period_is_zero(qa_flat, monkeypatch):
+    """The default must be exactly the behaviour that shipped before."""
+    qa_flat.rehearsal_period = 0
+    for _ in range(6):
+        qa_flat.reset()
+        assert qa_flat.rehearsal_episode is False
+        assert qa_flat.lifecycle.phase is EpisodePhase.EXPLORE
+
+
+def test_every_nth_episode_starts_in_complete(qa_flat, monkeypatch):
+    qa_flat.rehearsal_period = 4
+    # The fixture already reset once, which consumed an index. Rewind so the
+    # test states which episode NUMBERS rehearse rather than depending on how
+    # many times the fixture happened to reset.
+    qa_flat._episode_index = -1
+    phases = []
+    for _ in range(8):
+        qa_flat.reset()
+        phases.append(qa_flat.lifecycle.phase is EpisodePhase.COMPLETE)
+    assert phases == [True, False, False, False, True, False, False, False], (
+        f"rehearsal did not land on every 4th episode: {phases}")
+    assert sum(phases) == 2, "a period of 4 must rehearse exactly 1 episode in 4"
+
+
+def test_a_rehearsal_episode_is_in_complete_from_its_very_first_substep(qa_flat, monkeypatch):
+    """The whole point is density INSIDE the discount horizon, so the phase
+    must be COMPLETE before any action is scored - not after a transition."""
+    qa_flat.rehearsal_period = 1
+    qa_flat.reset()
+    assert qa_flat.lifecycle.is_complete
+    assert qa_flat.lifecycle.transition_step == 0
+    qa_flat.drive(**_at(500))
+    paid = qa_flat.ep_channels['complete']
+    assert qa_flat.ep_channels['explore'] == dict.fromkeys(qa_flat.ep_channels['explore'], 0.0), \
+        "a rehearsal episode scored something into the EXPLORE phase"
+    assert paid is not None
+
+
+def test_a_rehearsal_episode_is_paid_full_completion_credit(qa_flat, monkeypatch):
+    """Credit 1.0: the episode was never asked to explore, so it must not be
+    docked the way a T2 exhaustion transition deliberately is."""
+    qa_flat.rehearsal_period = 1
+    qa_flat.reset()
+    assert qa_flat.lifecycle.completion_credit == pytest.approx(1.0)
+
+
+def test_rehearsal_uses_its_own_transition_reason(qa_flat, monkeypatch):
+    """It must not masquerade as T1/T2/T3, which are evidence about
+    exploration having dried up. A drill is not evidence."""
+    from agent_logic import REHEARSAL_TRANSITION
+    qa_flat.rehearsal_period = 1
+    qa_flat.reset()
+    assert qa_flat.lifecycle.transition_reason == REHEARSAL_TRANSITION
+    assert not qa_flat.lifecycle.transition_reason.startswith("T")
+
+
+def test_rehearsal_still_records_coverage(qa, monkeypatch):
+    """Recording is global and never phase-gated: a rehearsal episode must
+    still paint the map, or rehearsal would cost real coverage progress."""
+    qa.rehearsal_period = 1
+    qa.reset()
+    before = qa.coverage.total_unique()
+    for i in range(12):
+        qa.drive(**_at(3000 + i * 12))
+    assert qa.coverage.total_unique() > before, \
+        "a rehearsal episode recorded no coverage at all"
+
+
+def test_rehearsal_does_not_pay_explore_novelty_rates(qa, monkeypatch):
+    """COMPLETE novelty is a tie-breaker. Rehearsal must not become the
+    cheapest way to earn novelty, or it would be farmable in its own right."""
+    qa.rehearsal_period = 0
+    qa.reset()
+    explore_pay = sum(qa.drive(**_at(4000 + i * 12)) for i in range(12))
+    qa.rehearsal_period = 1
+    qa.reset()
+    rehearsal_pay = sum(qa.drive(**_at(5000 + i * 12)) for i in range(12))
+    assert rehearsal_pay < explore_pay, (
+        f"rehearsal paid {rehearsal_pay:.3f} for fresh ground against "
+        f"{explore_pay:.3f} in EXPLORE; novelty must stay an EXPLORE signal")
+
+
+def test_the_rehearsal_period_travels_through_make_env_not_through_config(monkeypatch):
+    """The regression that invalidated a whole experiment.
+
+    SubprocVecEnv workers are spawned processes that re-import config from
+    disk, so a launcher that assigned config.COMPLETION_REHEARSAL_PERIOD in
+    the PARENT changed nothing the workers could see: 0 of 173 episodes
+    rehearsed in a run that was meant to rehearse 1 in 4. The value must be
+    carried by make_env()'s argument into the wrapper's constructor, which is
+    what a spawned worker actually executes.
+    """
+    import train_agent
+    monkeypatch.setattr(config, "COMPLETION_REHEARSAL_PERIOD", 0)   # what a worker reads
+    env = train_agent.make_env(0, reward_mode="legacy_completion", rehearsal_period=4)()
+    try:
+        wrapper = env
+        while not hasattr(wrapper, "rehearsal_period"):
+            wrapper = wrapper.env
+        assert wrapper.rehearsal_period == 4, (
+            "make_env's rehearsal_period did not reach the wrapper; a spawned "
+            "worker would silently fall back to the file default")
+    finally:
+        env.close()
+
+
+def test_the_wrapper_reads_its_period_once_not_per_episode(qa_flat, monkeypatch):
+    """Changing config after construction must not change behaviour - that
+    is what a spawned worker sees, so the tests must see it too."""
+    qa_flat.rehearsal_period = 0
+    monkeypatch.setattr(config, "COMPLETION_REHEARSAL_PERIOD", 1)
+    for _ in range(4):
+        qa_flat.reset()
+        assert qa_flat.lifecycle.phase is EpisodePhase.EXPLORE
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# RUN-UP: the 172 px walls every policy times out against
+#
+# 85 of 500 healthy-policy episodes end in a TIMEOUT with max_x exactly 32 px
+# short of a 172 px obstacle. A standing jump rises 166 px and a running one
+# 183 px, so pressed flat against the wall Mario can never clear it - and
+# nothing in the reward asked him to back off and run.
+# ══════════════════════════════════════════════════════════════════════════
+def _zones(wrapper, columns, zone=0):
+    """Mark `columns` as belonging to run-up zone `zone`."""
+    ids = np.full(config.LEVEL_W, -1, np.int64)
+    for c in columns:
+        ids[c] = zone
+    wrapper.runup_zone_ids = ids
+    return ids
+
+
+def _takeoff(rig, x, vel):
+    """One grounded substep, then one airborne substep: a take-off."""
+    rig.drive(**dict(_at(x), x_vel=vel, on_ground=True))
+    return rig.drive(**dict(_at(x), x_vel=vel, on_ground=False))
+
+
+def test_a_fast_take_off_at_a_tall_wall_is_paid(qa_flat):
+    _zones(qa_flat, [4000])
+    _takeoff(qa_flat, 4000, config.RUNUP_THRESHOLD_VEL + 1.0)
+    assert qa_flat.last_channels['runup'] == pytest.approx(config.QA_RUNUP_REWARD)
+
+
+def test_a_standing_jump_at_the_same_wall_is_not_paid(qa_flat):
+    """Below the engine's own 4.5 threshold the jump rises 166 px and fails,
+    so there is nothing to reward."""
+    _zones(qa_flat, [4000])
+    _takeoff(qa_flat, 4000, config.RUNUP_THRESHOLD_VEL - 0.5)
+    assert qa_flat.last_channels['runup'] == 0.0
+
+
+def test_speed_where_no_run_up_is_needed_is_not_paid(qa_flat):
+    """Short pipes, staircases and flat ground are outside every zone."""
+    _zones(qa_flat, [4000])
+    _takeoff(qa_flat, 6000, config.RUNUP_THRESHOLD_VEL + 1.0)
+    assert qa_flat.last_channels['runup'] == 0.0
+
+
+def test_a_zone_pays_once_per_episode_however_often_it_is_jumped(qa_flat):
+    """The anti-farming property. It is NOT drought-gated - a Mario stuck at
+    a wall is by definition in drought - so this is what bounds it."""
+    _zones(qa_flat, [4000, 4010, 4020])
+    fast = config.RUNUP_THRESHOLD_VEL + 1.0
+    paid = 0.0
+    for _ in range(25):
+        _takeoff(qa_flat, 4000, fast)
+        paid += qa_flat.last_channels['runup']
+        _takeoff(qa_flat, 4010, fast)
+        paid += qa_flat.last_channels['runup']
+    assert paid == pytest.approx(config.QA_RUNUP_REWARD), (
+        f"50 take-offs in one zone paid {paid}; a zone may pay once an episode")
+
+
+def test_each_zone_pays_separately_and_a_new_episode_resets_them(qa_flat):
+    ids = np.full(config.LEVEL_W, -1, np.int64)
+    ids[4000], ids[5000] = 0, 1
+    qa_flat.runup_zone_ids = ids
+    fast = config.RUNUP_THRESHOLD_VEL + 1.0
+    total = 0.0
+    for x in (4000, 5000):
+        _takeoff(qa_flat, x, fast)
+        total += qa_flat.last_channels['runup']
+    assert total == pytest.approx(2 * config.QA_RUNUP_REWARD)
+    qa_flat.reset()
+    qa_flat.runup_zone_ids = ids
+    _takeoff(qa_flat, 4000, fast)
+    assert qa_flat.last_channels['runup'] == pytest.approx(config.QA_RUNUP_REWARD)
+
+
+def test_the_zones_come_from_geometry_not_from_a_list_of_places():
+    """Derived from the solid mask: exactly the obstacles between a standing
+    jump (166 px) and a running one (183 px). Short pipes, staircases and the
+    344 px steps - which no jump clears - must all be excluded."""
+    from exploration import reachability as reach
+    ids = reach.load_runup_zones()
+    if ids is None:
+        pytest.skip("exploration_data/reachable_mask.npz is not built")
+    for x in (1943, 2415, 5971):        # measured timeout points, all 172 px
+        assert ids[x] >= 0, f"x={x} is a known stuck point but not a run-up zone"
+    for x in (1200, 7900, 3300, 8057):  # 86 px pipe, staircase, bricks, 344 px
+        assert ids[x] == -1, f"x={x} needs no running jump but was marked one"
+
+
+def test_backing_away_from_a_tall_wall_is_paid(qa_flat):
+    """The missing move. Measured: placed flush against each of the three
+    172 px walls with room to spare, the healthy, anchorB and run-up policies
+    backed off at most 3, 13 and 0 px over 18 trials each and cleared a wall
+    0 times in 54 - the retreat is absent, not rare."""
+    _zones(qa_flat, range(3900, 4001))
+    qa_flat.drive(**dict(_at(4000), on_ground=True))          # reaches the wall
+    before = qa_flat.ep_channels['explore']['runup']
+    qa_flat.drive(**dict(_at(4000 - config.RUNUP_RUN_PX), on_ground=True))
+    gained = qa_flat.ep_channels['explore']['runup'] - before
+    assert gained == pytest.approx(config.QA_RETREAT_REWARD, rel=1e-6), (
+        f"backing off the full {config.RUNUP_RUN_PX} px paid {gained}")
+
+
+def test_the_retreat_pays_pro_rata_and_stops_at_the_measured_run_up(qa_flat):
+    _zones(qa_flat, range(3800, 4001))
+    qa_flat.drive(**dict(_at(4000), on_ground=True))
+    qa_flat.drive(**dict(_at(4000 - config.RUNUP_RUN_PX // 2), on_ground=True))
+    half = qa_flat.ep_channels['explore']['runup']
+    assert half == pytest.approx(config.QA_RETREAT_REWARD / 2, rel=0.02)
+    # Still inside the zone - a real zone is RUNUP_LOOK_PX wide, so there is
+    # always room for the 70 px the run-up needs; past its left edge the
+    # column is no longer in any zone and nothing more accrues.
+    qa_flat.drive(**dict(_at(4000 - 2 * config.RUNUP_RUN_PX), on_ground=True))
+    full = qa_flat.ep_channels['explore']['runup']
+    assert full == pytest.approx(config.QA_RETREAT_REWARD, rel=1e-6), (
+        "retreating beyond the run-up requirement kept paying")
+
+
+def test_pacing_back_and_forth_collects_the_retreat_only_once(qa_flat):
+    """The anti-farming property: the payment tracks a MONOTONE high-water
+    mark, so an oscillation earns nothing after the first pass."""
+    _zones(qa_flat, range(3900, 4001))
+    fullback = 4000 - config.RUNUP_RUN_PX
+    for _ in range(20):
+        qa_flat.drive(**dict(_at(4000), on_ground=True))
+        qa_flat.drive(**dict(_at(fullback), on_ground=True))
+    total = qa_flat.ep_channels['explore']['runup']
+    assert total == pytest.approx(config.QA_RETREAT_REWARD, rel=1e-6), (
+        f"20 back-and-forth cycles paid {total}, not one retreat's worth")
+
+
+def test_no_retreat_reward_outside_a_run_up_zone(qa_flat):
+    _zones(qa_flat, [4000])
+    qa_flat.drive(**dict(_at(6000), on_ground=True))
+    qa_flat.drive(**dict(_at(6000 - config.RUNUP_RUN_PX), on_ground=True))
+    assert qa_flat.ep_channels['explore']['runup'] == 0.0

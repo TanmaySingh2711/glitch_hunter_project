@@ -60,6 +60,21 @@ WORLD_RASTER_PX = LEVEL_W * LEVEL_H          # 5,452,200
 JUMP_RISE_PX = 183
 JUMP_REACH_PX = 480
 
+# ─── THE OTHER JUMP HEIGHT: no run-up, no 183 ───
+# Measured in the engine (docs/evidence/jump_physics.py, runup.py): the rise
+# is BINARY, not a range. mario.py sets y_vel = JUMP_VEL - 0.5 only when
+# |x_vel| > 4.5 at take-off, and JUMP_VEL otherwise, giving exactly 183 px or
+# exactly 166 px and nothing between. Reaching 4.5 from a standstill takes 29
+# frames and 70 px of ground - walk and sprint accelerate identically, so
+# RUN_ACCEL never applies to a take-off.
+#
+# This is why every policy, the 6M baseline included, loses episodes at the
+# same three 172 px obstacles: pressed flat against the wall there is no room
+# to run, a standing jump falls 6 px short, and it fails forever.
+JUMP_RISE_STANDING = 166
+RUNUP_THRESHOLD_VEL = 4.5
+RUNUP_LOOK_PX = 120          # how far ahead the next barrier is looked for
+
 # ─── METHOD C LATTICE — settled by a convergence study, not chosen ───
 # Method C's BFS runs on an anchor lattice of this pitch. A coarse cell is
 # open if ANY fine anchor inside it is open, so a coarser pitch rounds
@@ -405,6 +420,43 @@ QA_INTERACTION_EPISODE_CAP = 10.0
 # skewed (mean 7.31, median 1.00) and a ratio test punishes the median
 # productive episode. Recorded here so it is not reintroduced.
 QA_SECONDARY_DROUGHT_SCALE = 0.1
+
+# ─── RUN-UP: paying for the take-off speed a 172 px wall demands ───
+# The measured failure: 85 of 500 healthy-policy episodes end in a TIMEOUT
+# with max_x exactly 32 px short of a 172 px obstacle (x 1,943 / 2,415 /
+# 5,971) - Mario pressed flat against the wall, jumping from a standstill
+# (166 px) forever. Nothing in the reward ever asked him to back off and run,
+# and the only payoff for doing so - the space beyond - arrives so rarely
+# that it never bootstraps.
+#
+# Paid at TAKE-OFF, inside a zone where reachability says the next barrier
+# needs a running jump (exploration/reachability.runup_zones), and only when
+# |x_vel| clears the engine's own 4.5 threshold. NOT drought-gated, unlike
+# the other secondary channels: a Mario stuck at a wall is by definition in
+# drought, so gating it would silence the signal exactly where the skill is
+# missing. It is unfarmable a different way - ONCE PER ZONE PER EPISODE, so
+# the level's five zones cap it at 5.0, the same as the EXPLORE flag reward.
+QA_RUNUP_REWARD = 1.0
+
+# ─── AND THE RETREAT, WHICH IS THE PART HE CANNOT ALREADY DO ───
+# QA_RUNUP_REWARD alone was measured and found INEFFECTIVE: over 164k steps it
+# left wall failures at 15.4% of episodes, inside the 12-16% band of runs
+# without it. The reason is a chicken-and-egg. It pays at take-off for having
+# |x_vel| > 4.5, which the agent already manages when it happens to ARRIVE
+# running - and never manages from a standstill at the wall, so in exactly the
+# situation that needs fixing the reward can never fire.
+#
+# Measured directly: placed flush against each of the three walls with room to
+# spare, the healthy, anchorB and run-up policies backed off at most 3, 13 and
+# 0 px in 18 trials each, and cleared the wall 0 times out of 54. The retreat
+# is not rare, it is absent - so it is what has to be paid for.
+#
+# Paid for NEW maximum retreat from the furthest point reached inside a zone,
+# pro rata up to the 70 px the engine needs to reach take-off speed. Monotone
+# per zone, so pacing back and forth cannot collect it twice, and capped per
+# zone like the take-off bonus above.
+QA_RETREAT_REWARD = 1.0
+RUNUP_RUN_PX = 70            # measured: ground needed to reach |x_vel| 4.5
 
 # ─── CUMULATIVE LOCOMOTION CAP (Phase 4B) ───
 # Momentum and clean running jumps are direction-agnostic on purpose (see
@@ -948,6 +1000,132 @@ SAFETY_MEANINGFUL_NEW_PX = 1
 VF_WARMUP_STEPS = 200_000
 VF_WARMUP_LR = 2.5e-5
 
+# Freeze the actor (features + action head) during the critic warm-up, so the
+# policy is exactly stationary while the critic re-fits. See
+# training.callbacks.ValueWarmupCallback for the measured drift this stops.
+# Off by default until the experiment that sets VF_WARMUP_LR / VF_WARMUP_EV_RELEASE
+# from measurement has run; nothing here is a guess that ships enabled.
+# ═══════════════════════════════════════════════════════════════════════
+# COMPLETION REHEARSAL
+#
+# ─── WHY THE COMPLETION SKILL DECAYS, MEASURED ───
+# Undiscounted, finishing the level is by far the best thing a QA episode can
+# do: mean return +27.02 against -4.20 for a death and -6.20 for a safety
+# reset. The policy nonetheless drifts AWAY from finishing - completion
+# retention fell 47% -> 27% over 164k steps on identical seeds - which means
+# it is moving against the undiscounted gradient. It is not, because that is
+# not the objective PPO optimises.
+#
+# GAMMA is 0.99 per AGENT step, so the effective horizon is 1/(1-gamma) = 100
+# agent steps and the signal half-life is 69. A completing episode takes a
+# median of 451 agent steps, so from the first action the +5 flag is worth
+# 5 * 0.99^451 = 0.054 - about 1% of face value. Novelty is paid CONTINUOUSLY
+# and therefore lands almost entirely inside the horizon. Discounted, novelty
+# outweighs the flag by roughly 146:1.
+#
+# So completion is not being corrupted or forgotten through interference. It
+# is being EXTINGUISHED: nothing reinforces it inside the discount horizon.
+# The legacy reward that built the skill was dense in max-x - about 2,180 of
+# a ~2,200-point episode was a monotone function of how far right Mario got,
+# paid at every step - and QA/EXPLORE pays exactly 0 for moving right.
+#
+# ─── THE FIX IS DENSITY, NOT A BIGGER TERMINAL BONUS ───
+# Raising EXPLORE_FLAG_REWARD cannot work: at 0.99^451 it would need to be
+# ~460 to be worth +5 at the first action, which would dwarf every other term
+# and simply restore "rush the flag" as the dominant strategy. Raising GAMMA
+# was rejected as the first move because it changes the value target for
+# every channel at once and invalidates the fitted critic.
+#
+# Instead a MINORITY of episodes begin in COMPLETE, where the reward is
+# already dense in forward progress (COMPLETE_PROGRESS_PER_PX, ~12.96 paid
+# continuously across the level). Those episodes rehearse the skill inside
+# the horizon, exactly as legacy training did, while the majority still
+# explore under the unchanged EXPLORE objective. Coverage is still recorded
+# on rehearsal episodes - recording is global and never phase-gated - so the
+# only cost is the novelty those steps would have been PAID.
+#
+# 0 disables it. N means every Nth episode per worker, chosen by a counter
+# rather than a coin so a run is reproducible and a test can assert it.
+# The value is set by experiment; see the runs recorded in the report.
+COMPLETION_REHEARSAL_PERIOD = 0
+# ─── REFUTED AS A RETENTION FIX (kept, default off, for the record) ───
+# Measured at period 4 over 164k steps from the healthy 6.03M pair, with the
+# rehearsal VERIFIED to reach the workers (45 of 162 episodes): the official
+# 500-episode retention came back 30.2% (CI 26.3-34.4), REGRESSED - no
+# different from the same run without rehearsal (pooled 32.5%). Training-time
+# completion had looked healthy (40-52%); it overstates the protocol by 12+
+# points even for the healthy policy. See ANCHOR CONSOLIDATION below for what
+# the drift actually tracks.
+
+# ═══════════════════════════════════════════════════════════════════════
+# ANCHOR CONSOLIDATION - holding completion retention during training
+#
+# ─── WHAT RETENTION ACTUALLY TRACKS, MEASURED ───
+# Mean KL(healthy || candidate), taken on 9,175 states from the healthy
+# 6,032,768 policy's own retention-protocol trajectories, against the official
+# retention of six checkpoints:
+#
+#     6.03M healthy   KL 0.000   43.8%      run 2        KL 0.323   27.0%
+#     6M baseline     KL 0.117   46.8%      rehearsal B  KL 0.392   30.2%
+#     replicate       KL 0.253   38.0%      6.4M         KL 0.750    6.0%
+#
+# Pearson r = -0.962. A least-squares fit over the drift products gives
+# retention ~= 46.7% - 51.5 * KL, so the WARNING line (40.46%) falls at
+# KL ~0.12 and the REGRESSED line (34.12%) at KL ~0.24. The 6M baseline, a
+# different but HEALTHY policy, sits at 0.117 - independent confirmation.
+#
+# Every cause-targeted fix (reward gate, critic warm-up, learning rate,
+# rehearsal) left the drift in place. This targets the drift itself: after
+# every PPO update, AnchorConsolidationCallback measures that same KL on a
+# fixed anchor set and, when it exceeds the budget, takes gradient steps that
+# pull the policy back toward the frozen healthy reference ON THOSE STATES
+# ONLY. Exploration learning is free everywhere else.
+#
+# ─── THE BUDGET IS ON THE ANCHOR SET'S OWN SCALE ───
+# The callback measures KL on the ANCHOR set (tools/build_anchor_set.py,
+# seeds 1000-1023, disjoint from the retention protocol's so the metric is
+# never trained on directly), and KL there runs HIGHER than on the eval-seed
+# states the table above used - the 6M baseline reads 0.146 against 0.117.
+# A budget taken from the table would have been on the wrong scale. Refitted
+# on the anchor set itself, same six checkpoints:
+#
+#     6.03M 0.000 43.8% | 6M 0.146 46.8% | replicate 0.357 38.0%
+#     run 2 0.394 27.0% | rehearsal B 0.578 30.2% | 6.4M 0.855 6.0%
+#
+# r = -0.924; retention ~= 47.3% - 42.0 * KL_anchor, so WARNING at ~0.164 and
+# REGRESSED at ~0.315, with the 6M baseline (0.146, HEALTHY) inside the
+# boundary again. 0.13 kept a ~17% margin below it (predicted retention 41.9%).
+#
+# That prediction was then TESTED at 164k steps rather than trusted, and 0.13
+# was refuted as a default. Measured 500-episode retention:
+#
+#     KL 0.13 (anchorA)  40.2%  prog 0.700  WARNING   +219,727 px
+#     KL 0.08 (anchorB)  49.2%  prog 0.730  HEALTHY   +282,915 px
+#     KL 0.08 (anchorC)  43.8%  prog 0.670  WARNING   +303,397 px
+#     KL 0.08 (runup)    44.2%  prog 0.680  HEALTHY   +288,742 px
+#
+# The fit was accurate (0.13 predicted 41.9%, measured 40.2%) but the margin it
+# left was thinner than run-to-run variance, so the budget it licensed lands on
+# the wrong side of the WARNING line (0.4046). 0.08 predicts 43.9% and measures
+# 45.7% over three runs.
+#
+# The decisive part is the right-hand column: the TIGHTER budget also explored
+# MORE. Anchor KL is not a straight exploration-vs-retention trade at this
+# scale - a policy that keeps its completion skill travels further into the
+# level and therefore reaches more new pixels, so loosening the budget bought
+# neither retention nor coverage. Default is 0.08 accordingly; a future run
+# that wants 0.13 has to ask for it explicitly.
+ANCHOR_CONSOLIDATION = False            # switched on per run with --anchor-kl
+ANCHOR_KL_TARGET = 0.08
+ANCHOR_REFERENCE = "checkpoints_qa/pre_main_6032768/glitch_hunter_qa.zip"
+ANCHOR_STATES_PATH = "exploration_data/anchor_states.npz"
+ANCHOR_BATCH = 256
+ANCHOR_MAX_STEPS = 64                   # per update: a cap, never a target
+ANCHOR_LR = 1.0e-4
+
+VF_WARMUP_FREEZE_ACTOR = False
+VF_WARMUP_EV_RELEASE: float | None = None
+
 # ─── QA FINE-TUNING RUNS AT THE WARM-UP RATE, NOT ABOVE IT ───
 # This was 1.0e-4, inherited from the legacy completion phase, and the
 # 6.03M -> 6.4M campaign measured what it does to a QA resume. Per PPO
@@ -981,6 +1159,25 @@ STAGNATION_REMAINING_MIN = 100_000
 ENT_COEF_BASE = 0.03                # a fresh model's ent_coef (train_agent.build_model)
 ENT_COEF_MAX = 0.06                 # StagnationCallback never escalates past this
 
+# ─── STAGNATION DETECTS; IT NO LONGER ESCALATES BY DEFAULT ───
+# StagnationCallback used to answer a slow new-pixel rate by multiplying the
+# novelty weight by 1.25 (to 2.5x) and ent_coef by 1.15 (to 0.06). Both were
+# ONE-WAY: nothing ever stepped them back down, and ent_coef lives on the
+# model, so it was also saved into every checkpoint and inherited on resume.
+#
+# Measured on the run that tripped it (resumed 6,163,840): it fired on
+# "0 new px per 10k for 3 windows" while all eight workers sat in 5,000-step
+# stuck episodes waiting for the safety reset - a training-efficiency stall,
+# not exploration running out. And it answered by raising entropy, the knob
+# most directly tied to erasing a learned motor skill, in exactly the regime
+# where completion was already decaying. There is no measurement in this
+# project in which the escalation helped.
+#
+# So the campaign's objective and optimiser stay the ones that were
+# validated. The callback still DETECTS stagnation and logs it loudly; it
+# changes nothing unless this is set True deliberately.
+STAGNATION_ESCALATE = False
+
 # ═══════════════════════════════════════════════════════════════════════
 # PATHS
 # ═══════════════════════════════════════════════════════════════════════
@@ -989,7 +1186,11 @@ REACHABLE_MASK_PATH = f"{EXPLORATION_DATA_DIR}/reachable_mask.npz"
 CHECKPOINT_DIR_QA = "checkpoints_qa"
 CHECKPOINT_NAME_QA = "glitch_hunter_qa"
 BASELINE_MODEL = "backup_6M/mario_brain_checkpoint.zip"
-BOOTSTRAP_COVERAGE = f"{EXPLORATION_DATA_DIR}/coverage_bootstrap_6000000.npz"
+# The bootstrap map, re-stamped to the flag-trigger-corrected mask by
+# tools/migrate_coverage.py (visited bitmap byte-identical, 1,872,441 covered
+# unchanged). The original, stamped with the retired 4,013,723 mask, is kept
+# beside it as a verified historical artifact and would be refused on load.
+BOOTSTRAP_COVERAGE = f"{EXPLORATION_DATA_DIR}/coverage_bootstrap_6000000_mask_v3.npz"
 BOOTSTRAP_EPISODES = 40
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1012,14 +1213,16 @@ EXPECTED_SOLID_PX = 733_176
 #   standable anchors   = 11,613
 #
 #   Method A (geometric)  = 4,699,146   informational; no gravity, no jump limit
-#   Method B (jump env.)  = 4,097,097
-#   Method C (BFS)        = 4,013,723   <- ADOPTED
-#   B vs C delta          = 2.03%
+#   Method B (jump env.)  = 4,252,679
+#   Method C (BFS)        = 4,169,305
+#   B vs C delta          = 1.96%
+#   flag trigger          = -167,210   past x 8504, off the scripted path
+#   ADOPTED               = 4,002,095   (Method C + flag trigger)
 #
 # Coverage percentage is ALWAYS covered_testable / TESTABLE_TOTAL.
 # Pixels outside this mask are noncoverage_px, never coverage. Most
 # of that is NORMAL (jump arcs, pit deaths, collision tolerance);
 # only the genuinely impossible subset is anomalous_px.
-TESTABLE_TOTAL = 4013723
-TESTABLE_FINGERPRINT = "9a4d666eba4751adb38f53ddfc3cf8ac79cafca68857489d343635fa9092e71e"
+TESTABLE_TOTAL = 4002095
+TESTABLE_FINGERPRINT = "ded5cd19a477a8ed309c91074b8bc7a0197c5576fac1c680178ab4bde3ee6b5b"
 ADOPTED_METHOD = "C"

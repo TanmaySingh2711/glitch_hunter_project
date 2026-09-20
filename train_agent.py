@@ -35,6 +35,7 @@ from exploration.coverage import SpatialCoverage
 # Re-exported: the callbacks and helpers moved to training/ but remain part of
 # this module's surface (tests and tools address them as train_agent.X).
 from training.callbacks import (
+    AnchorConsolidationCallback,
     CoverageStatsCallback,
     ExactMilestoneCheckpointCallback,
     Level1CompletionCallback,
@@ -64,7 +65,8 @@ log = logging.getLogger(__name__)
 
 
 def make_env(rank: int, shm_names: dict[str, str] | None = None,
-             reward_mode: str | None = None) -> Callable[[], gym.Env[Any, Any]]:
+             reward_mode: str | None = None,
+             rehearsal_period: int | None = None) -> Callable[[], gym.Env[Any, Any]]:
     """Returns a function that creates a single wrapped env instance.
 
     `shm_names` is a dict of multiprocessing.shared_memory block NAMES, not
@@ -100,7 +102,8 @@ def make_env(rank: int, shm_names: dict[str, str] | None = None,
         from agent_logic import GlitchHunterWrapper
         from custom_mario_env import CustomMarioEnv, wrap_observation
         env: gym.Env[Any, Any] = wrap_observation(GlitchHunterWrapper(
-            CustomMarioEnv(), reward_mode=reward_mode, shm_names=shm_names), skip=skip)
+            CustomMarioEnv(), reward_mode=reward_mode, shm_names=shm_names,
+            rehearsal_period=rehearsal_period), skip=skip)
         if max_steps is not None:
             env = TimeLimit(env, max_episode_steps=max_steps)
         return Monitor(env)
@@ -343,6 +346,16 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--dry-run-resume", action="store_true",
                     help="print which checkpoint and coverage file this launch would "
                          "resume from, verify the pair, and exit without training.")
+    ap.add_argument("--anchor-kl", type=float, metavar="KL", nargs="?", const=-1.0,
+                    default=None,
+                    help="QA: hold KL(healthy || policy) on the anchor states under KL "
+                         "after every update (AnchorConsolidationCallback). With no "
+                         "value, uses config.ANCHOR_KL_TARGET.")
+    ap.add_argument("--rehearsal-period", type=int, metavar="N", default=None,
+                    help="QA: every Nth episode per worker starts in COMPLETE "
+                         "(completion rehearsal); 0 turns it off. Defaults to "
+                         "config.COMPLETION_REHEARSAL_PERIOD. Passed to the "
+                         "workers explicitly - see GlitchHunterWrapper.")
     ap.add_argument("--resume-from", metavar="CHECKPOINT", default=None,
                     help="resume this exact checkpoint instead of the automatic "
                          "choice. Its coverage pair is still verified, and a "
@@ -526,6 +539,17 @@ def build_model(latest_checkpoint: str | None, vec_env: VecEnv, device: str) -> 
         # buffer is genuinely informative there and the running mean should
         # carry across the resume exactly as it always has.
         if QA_PHASE:
+            # ─── ent_coef is PINNED, not inherited ───
+            # PPO.load() restores ent_coef from the zip like every other
+            # hyperparameter, and StagnationCallback (when escalation was on)
+            # ratcheted it upward and never back down - so a checkpoint saved
+            # after an escalation would smuggle a higher entropy bonus into
+            # every later run. The campaign runs at the validated base value.
+            inherited = getattr(model, "ent_coef", None)
+            if inherited is not None and float(inherited) != xconfig.ENT_COEF_BASE:
+                log.warning("QA resume: checkpoint ent_coef %s reset to the validated %s.",
+                            inherited, xconfig.ENT_COEF_BASE)
+            model.ent_coef = xconfig.ENT_COEF_BASE
             model.ep_info_buffer = None
             model.ep_success_buffer = None
             log.info("QA resume: cleared the inherited episode-info buffer "
@@ -803,7 +827,8 @@ def select_device() -> str:
 
 
 def build_callbacks(model: PPO, coverage: SpatialCoverage | None,
-                    session_start: dict[str, int] | None
+                    session_start: dict[str, int] | None,
+                    anchor_kl: float | None = None
                     ) -> tuple[CallbackList, Level1CompletionCallback | None]:
     """Every callback of the run, and the completion stop (QA only)."""
     # Auto-save at exact milestones (see ExactMilestoneCheckpointCallback
@@ -830,7 +855,9 @@ def build_callbacks(model: PPO, coverage: SpatialCoverage | None,
             completion,
             ValueWarmupCallback(warmup_until=model.num_timesteps + xconfig.VF_WARMUP_STEPS,
                                 warmup_lr=xconfig.VF_WARMUP_LR,
-                                normal_lr=xconfig.NORMAL_LR),
+                                normal_lr=xconfig.NORMAL_LR,
+                                freeze_actor=xconfig.VF_WARMUP_FREEZE_ACTOR,
+                                ev_release=xconfig.VF_WARMUP_EV_RELEASE),
             CoverageStatsCallback(coverage,
                                   session_start_covered=session_start['covered_testable_px'],
                                   audit_path=REMAINING_AUDIT_PATH, map_path=REMAINING_MAP_PATH,
@@ -839,6 +866,11 @@ def build_callbacks(model: PPO, coverage: SpatialCoverage | None,
             RewardTelemetryCallback(REWARD_TELEMETRY_PATH, session_start=session_start),
             StagnationCallback(coverage),
         ]
+        if anchor_kl is not None:
+            callbacks.append(AnchorConsolidationCallback(
+                xconfig.ANCHOR_REFERENCE, xconfig.ANCHOR_STATES_PATH, anchor_kl,
+                batch=xconfig.ANCHOR_BATCH, max_steps=xconfig.ANCHOR_MAX_STEPS,
+                lr=xconfig.ANCHOR_LR))
     return CallbackList(callbacks), completion
 
 
@@ -858,6 +890,16 @@ def log_banner(model: PPO, resume: Resume, coverage: SpatialCoverage | None,
                  f"{total:,}")
         log.info("covered          : %s  (%s), %s remaining", f"{covered:,}",
                  lc.pct_text(covered, total), f"{coverage.remaining() or 0:,}")
+        # Where that coverage came from: the bootstrap replay of the 6M brain,
+        # or genuinely discovered by QA training since. Without the split the
+        # headline number flatters the campaign by ~1.87M px it was handed.
+        origin = lc.provenance(coverage)
+        if origin.get('available'):
+            log.info("  of which       : %s bootstrap, %s discovered by QA training",
+                     f"{origin['bootstrap_px_still_covered']:,}",
+                     f"{origin['qa_discovered_testable_px']:,}")
+        log.info("anomalous px     : %s  (coverage outside the testable mask that "
+                 "nothing normal explains)", f"{coverage.anomalous_px():,}")
         log.info("safety cap       : %s",
                  'none (approved with --unrestricted)' if safety_cap is None
                  else f'{safety_cap:,} (a cut-off, never completion)')
@@ -871,6 +913,7 @@ def log_banner(model: PPO, resume: Resume, coverage: SpatialCoverage | None,
     else:
         log.info("lifetime target  : %s", f"{TOTAL_TIMESTEPS_LEGACY:,}")
         log.info("remaining        : %s", f"{n_steps:,}")
+    log.info("workers          : %s parallel envs (one shared coverage bitmap)", NUM_ENVS)
     log.info("writes model to  : %s.zip and %s", FINAL_MODEL_PATH, CHECKPOINT_DIR)
     if QA_PHASE:
         log.info("master preserved : %s.zip and %s are NOT written in this phase",
@@ -1007,8 +1050,14 @@ def main(argv: Sequence[str] = ()) -> None:
         configure_logging(log_file=TRAIN_LOG_PATH)
 
         limit_worker_blas_threads()
+        rehearsal = (args.rehearsal_period if args.rehearsal_period is not None
+                     else xconfig.COMPLETION_REHEARSAL_PERIOD)
+        if QA_PHASE:
+            log.info("rehearsal        : %s", f"every {rehearsal}th episode per worker "
+                     f"starts in COMPLETE" if rehearsal else "off")
         vec_env = SubprocVecEnv([make_env(i, shm_names=shm_names,
-                                          reward_mode=xconfig.REWARD_MODE)
+                                          reward_mode=xconfig.REWARD_MODE,
+                                          rehearsal_period=rehearsal)
                                  for i in range(NUM_ENVS)])
         model = build_model(resume.checkpoint, vec_env, select_device())
         if session_start is not None and model.num_timesteps != session_start['global_timestep']:
@@ -1026,7 +1075,14 @@ def main(argv: Sequence[str] = ()) -> None:
         if QA_PHASE and resume.seeded_from_legacy and RESET_VALUE_HEAD:
             reset_value_head(model)
 
-        callback_list, completion = build_callbacks(model, coverage, session_start)
+        anchor_kl = None
+        if QA_PHASE and (args.anchor_kl is not None or xconfig.ANCHOR_CONSOLIDATION):
+            anchor_kl = (xconfig.ANCHOR_KL_TARGET
+                         if args.anchor_kl is None or args.anchor_kl < 0 else args.anchor_kl)
+            log.info("anchor           : KL(healthy || policy) <= %.3f after every update",
+                     anchor_kl)
+        callback_list, completion = build_callbacks(model, coverage, session_start,
+                                                    anchor_kl=anchor_kl)
 
         # Computed automatically: True only when we're actually starting a
         # brand-new model (no checkpoint found, or FRESH_START forced it).

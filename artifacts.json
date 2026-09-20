@@ -72,10 +72,10 @@
   "recorded": "2026-09-11"
  },
  "exploration_data/reachable_mask.npz": {
-  "sha256": "ae3826bb20a13b1bd19b8702a01da7647b92c6fe54fa2ddd271fcac3bf763401",
-  "recorded": "2026-09-19",
-  "supersedes": "045f0259f3b1a17bf64a65d05e6e8bd9a4ff0bf3b92d3ef82b9c74a968f918ad",
-  "note": "class_map ONLY, via tools/build_reachability.py --class-map-only. Three measured false-positive causes, 53,305 px in total: deep_penetration -> mutable_solid (41,381) and -> sweep_artifact (3,552), and floor_clip -> pit_fall (8,372) for the pit at x 3683-3773 that floating bricks hid. No other class changed. solid_packed and testable_packed are byte-identical to the superseded file, so TESTABLE_TOTAL stays 4,013,723 and TESTABLE_FINGERPRINT stays 9a4d666e...e71e. See tests/test_noncoverage_taxonomy.py."
+  "sha256": "9080f13178052c17a101824c6643acd0a01ac1cf22417cc5aa50c75cc73c3a82",
+  "recorded": "2026-09-20",
+  "supersedes": "ae3826bb20a13b1bd19b8702a01da7647b92c6fe54fa2ddd271fcac3bf763401",
+  "note": "Denominator 4,013,723 -> 4,002,095, from two independent corrections that nearly cancel. (1) BOTH OF MARIO'S FORMS: A/B/C and the noncoverage classifier ran on the small collider (30x40) only, while coverage records the real per-form collider; big Mario (40x80) reaches 40 px higher, so ordinary big-Mario play was classified ANOMALOUS - 25,356 px in one measured run, every one inside the big envelope. Method B 4,097,097 -> 4,252,679. (2) FLAG TRIGGER: checkpoint '11' is a 6x600 rect at x 8504 spanning the whole level height; past it Mario is under the scripted flag sequence, so only the grab band (to x 8564) and the recorded slide-and-walk corridor are reachable - removes 167,210 px. Acceptance: no coverage state lost a covered pixel, and the worst anomalous count across 9 states fell from 25,356 to 2. Superseded masks kept under exploration_data/archive_*. Fingerprint ded5cd19..."
  },
  "exploration_data/coverage_bootstrap_6000000.npz": {
   "sha256": "8a57c737eef4c953af4dd38a44640187f9dff30565c8a53a6bea653fc3916ac4",
@@ -88,5 +88,10 @@
  "evaluation/completion_baseline_6M.json": {
   "sha256": "c8b4ec126651db8cd895118893f745c1b0427416ed6343eab02b382659fd6cbc",
   "recorded": "2026-09-11"
+ },
+ "exploration_data/coverage_bootstrap_6000000_mask_v3.npz": {
+  "sha256": "b73e54bc70535af1ba3725c25180785b6cc5f40617d3cdb388c36a1e9afbeddc",
+  "recorded": "2026-09-20",
+  "note": "coverage_bootstrap_6000000.npz re-stamped to the two-form + flag-trigger mask by tools/migrate_coverage.py. visited_packed byte-identical; covered_testable 1,872,441 unchanged; testable_total 4,013,723 -> 4,002,095. config.BOOTSTRAP_COVERAGE points here."
  }
 }

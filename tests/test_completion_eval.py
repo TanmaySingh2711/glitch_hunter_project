@@ -66,8 +66,12 @@ def _files_digest(paths):
 
 def _campaign_files():
     """Every file a QA campaign keeps between runs, as far as it exists."""
-    paths = [os.path.join('exploration_data', f)
-             for f in sorted(os.listdir(os.path.join(ROOT, 'exploration_data')))]
+    # Files only, and into sub-folders: exploration_data/ and checkpoints_qa/
+    # both now hold archive directories (the superseded mask, the per-run
+    # telemetry), and hashing a directory raises PermissionError on Windows.
+    paths = []
+    for folder, _dirs, names in sorted(os.walk(os.path.join(ROOT, 'exploration_data'))):
+        paths += [os.path.relpath(os.path.join(folder, n), ROOT) for n in sorted(names)]
     qa_dir = os.path.join(ROOT, config.CHECKPOINT_DIR_QA)
     if os.path.isdir(qa_dir):
         # Walk into sub-folders: checkpoints_qa/pre_main_6032768/ holds the

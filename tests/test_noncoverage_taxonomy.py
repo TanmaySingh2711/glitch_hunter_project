@@ -275,9 +275,14 @@ def test_both_observed_clusters_are_explained_and_neither_is_anomalous(class_map
 
 
 def test_the_short_validation_coverage_now_reports_zero_anomalies(class_map):
-    """The end-to-end claim, against the real 6,032,768-step coverage file."""
+    """The end-to-end claim, against the real 6,032,768-step coverage file.
+
+    The PROTECTED copy, not the root file: every training run overwrites the
+    root pair when it saves, so a test reading it would score whatever the
+    last experiment happened to leave there. The bitmap is identical.
+    """
     import os
-    path = "glitch_hunter_qa_coverage.npz"
+    path = os.path.join("checkpoints_qa", "pre_main_6032768", "glitch_hunter_qa_coverage.npz")
     if not os.path.exists(path):
         pytest.skip("the short-validation coverage file is not in this checkout")
     from exploration.coverage import load_testable
@@ -291,9 +296,13 @@ def test_the_short_validation_coverage_now_reports_zero_anomalies(class_map):
         f"still {cov.anomalous_px()} anomalous px: {b['anomalous']}")
     assert b['expected']['mutable_solid'] == 579
     assert b['model_gap']['sweep_artifact'] == 20
-    # The coverage numerator itself must not have moved.
+    # The coverage numerator itself must not have moved - not by the taxonomy
+    # corrections, and not by the flag-trigger correction either, which only
+    # removed pixels no trajectory had ever covered.
     assert cov.covered_testable() == 2_225_509
-    assert config.TESTABLE_TOTAL == 4_013_723
+    # 4,013,723 before two corrections that nearly cancel: +155,582 px for
+    # big Mario's collider, -167,210 px past the flag trigger.
+    assert config.TESTABLE_TOTAL == 4_002_095
 
 
 def test_the_detector_still_fires_on_a_real_deep_clip(class_map):
@@ -352,3 +361,89 @@ def test_the_bootstrap_baseline_is_unchanged_by_the_correction(class_map):
     assert b['expected']['jump_arc'] == 7_578
     assert b['expected']['pit_fall'] == 1_410
     assert b['expected']['collision_tolerance'] == 699
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# THE FLAG TRIGGER
+#
+# Checkpoint '11' is a 6 x 600 rect at x 8504, y 5 - the whole level height.
+# Touching it at any height hands Mario to the scripted flag sequence, so
+# past it he can occupy only the grab band (free reachability, unchanged)
+# and the recorded slide-and-walk corridor. Reachability Methods B and C
+# model solids only, and flooded 147,060 unreachable px into the old
+# denominator.
+# ══════════════════════════════════════════════════════════════════════════
+TRIGGER = (8504, 5, 6, 600)
+
+
+def _world(fill=False):
+    m = np.zeros((config.LEVEL_H, config.LEVEL_W), dtype=bool)
+    if fill:
+        m[:] = True
+    return m
+
+
+def test_the_flag_trigger_is_read_from_the_level_itself(level_state):
+    """Not hard-coded: a layout change must move or remove it, loudly."""
+    rect = reach.flag_trigger_rect(level_state)
+    assert rect == TRIGGER, (
+        f"checkpoint '11' is at {rect}; the flag-trigger correction and the "
+        f"denominator were derived for {TRIGGER}")
+    assert rect[1] <= 5 and rect[1] + rect[3] >= config.LEVEL_H, \
+        "the trigger no longer spans the full level height, so it can be bypassed"
+
+
+def test_nothing_before_the_trigger_is_touched():
+    testable = _world(fill=True)
+    corrected, removed = reach.apply_flag_trigger(testable, TRIGGER, _world())
+    assert corrected[:, :TRIGGER[0]].all()
+    assert not removed[:, :TRIGGER[0]].any()
+
+
+def test_the_grab_band_keeps_free_reachability_at_every_height():
+    """The grab can happen at any height free movement reaches, so the band
+    is never thinned - that is what makes the rule a superset."""
+    testable = _world(fill=True)
+    corrected, _ = reach.apply_flag_trigger(testable, TRIGGER, _world())
+    band_right = reach.flag_grab_band_right(TRIGGER)
+    assert band_right == TRIGGER[0] + TRIGGER[2] + config.MARIO_BIG_W + config.MAX_FRAME_DX
+    assert corrected[:, TRIGGER[0]:band_right].all()
+    assert not corrected[:, band_right:].any(), \
+        "with no recorded corridor nothing past the band may stay testable"
+
+
+def test_beyond_the_band_only_the_filled_corridor_survives():
+    testable = _world(fill=True)
+    corridor = _world()
+    corridor[458, 8700] = True          # one recorded collider pixel...
+    corridor[520, 8700] = True
+    corrected, removed = reach.apply_flag_trigger(testable, TRIGGER, corridor)
+    col = corrected[:, 8700]
+    assert col[458:].all(), "the column is not filled down from the recorded top edge"
+    assert not col[:458].any(), "the fill reached ABOVE where a collider was recorded"
+    assert not corrected[:, 8701].any(), "a column with no recording was kept"
+    assert int(corrected.sum() + removed.sum()) == int(testable.sum())
+
+
+def test_the_correction_only_ever_removes_pixels():
+    """It never invents testable space the geometry did not already allow."""
+    rng = np.random.default_rng(0)
+    testable = rng.random((config.LEVEL_H, config.LEVEL_W)) < 0.5
+    corridor = rng.random((config.LEVEL_H, config.LEVEL_W)) < 0.01
+    corrected, removed = reach.apply_flag_trigger(testable, TRIGGER, corridor)
+    assert not (corrected & ~testable).any()
+    assert not (corrected & removed).any()
+    assert np.array_equal(corrected | removed, testable)
+
+
+def test_a_rebuild_without_the_corridor_is_refused(level_state):
+    """Silently rebuilding the pre-correction mask would put back 147,060
+    unreachable px, and an exact-equality success rule could never fire."""
+    with pytest.raises(reach.ReconciliationError, match="flag corridor"):
+        reach.build_testable(level_state, (110, 498))
+
+
+def test_beyond_the_flag_is_anomalous_not_a_model_gap():
+    """Coverage there means Mario passed the flagpole without the script."""
+    assert reach.CLS_BEYOND_FLAG in reach.ANOMALOUS_CLASSES
+    assert reach.CLS_BEYOND_FLAG not in reach.MODEL_GAP_CLASSES

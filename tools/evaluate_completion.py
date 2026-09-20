@@ -31,7 +31,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.cli import prepare_tool
 
-ROOT = prepare_tool(headless=False)
+
+# ─── HEADLESS BY DEFAULT ───
+# This used to force a visible window (headless=False), and with --workers 12
+# every worker opened its own - twelve game windows filling the screen for the
+# length of a 500-episode run. The window never affected the result, and that
+# was measured rather than assumed: the healthy 6,032,768-step checkpoint
+# replayed headless (SDL dummy driver, 8 worker processes) over the first 40
+# protocol seeds reproduced the stored WINDOWED result exactly, 40 of 40
+# episodes identical in end reason, agent steps, substeps and max_x.
+# --windowed restores the old behaviour for anyone who wants to watch.
+# Read from argv directly because the driver must be chosen before pygame
+# is imported, i.e. before argparse runs; spawned workers inherit it.
+def wants_window(argv: list[str]) -> bool:
+    return '--windowed' in argv
+
+
+ROOT = prepare_tool(headless=not wants_window(sys.argv[1:]))
 
 from evaluation import completion as ce
 from exploration import config
@@ -78,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument('--episodes', type=int, help='baseline only')
     ap.add_argument('--seed', type=int, help='baseline only')
     ap.add_argument('--force', action='store_true', help='overwrite an existing baseline')
+    ap.add_argument('--windowed', action='store_true',
+                    help='show the game window(s); results are identical either way')
     args = ap.parse_args(argv)
 
     if args.make_baseline:

@@ -466,6 +466,7 @@ CLS_UNREACHABLE_ALT = 9     # ANOMALOUS: in-world altitude no jump reaches
 
 CLS_MUTABLE_SOLID = 10      # EXPECTED: solid at build time, removable in play
 CLS_SWEEP_ARTIFACT = 11     # MODEL GAP: only the recorded box reaches it
+CLS_BEYOND_FLAG = 12        # ANOMALOUS: past the flag trigger, off the scripted path
 
 CLASS_NAMES = {
     CLS_TESTABLE: 'testable',
@@ -480,12 +481,13 @@ CLASS_NAMES = {
     CLS_UNREACHABLE_ALT: 'unreachable_altitude',
     CLS_MUTABLE_SOLID: 'mutable_solid',
     CLS_SWEEP_ARTIFACT: 'sweep_artifact',
+    CLS_BEYOND_FLAG: 'beyond_flag_trigger',
 }
 EXPECTED_CLASSES = (CLS_JUMP_ARC, CLS_PIT_FALL, CLS_COLLISION_TOL,
                     CLS_MUTABLE_SOLID)
 MODEL_GAP_CLASSES = (CLS_CONNECTIVITY_GAP, CLS_SWEEP_ARTIFACT)
 ANOMALOUS_CLASSES = (CLS_IMPOSSIBLE_SKY, CLS_FLOOR_CLIP, CLS_DEEP_PENETRATION,
-                     CLS_OUTSIDE_LEVEL, CLS_UNREACHABLE_ALT)
+                     CLS_OUTSIDE_LEVEL, CLS_UNREACHABLE_ALT, CLS_BEYOND_FLAG)
 
 
 def _dilate(mask: Mask, radius: int) -> Mask:
@@ -605,7 +607,8 @@ def sweep_coverable(solid: Mask, forms: Sequence[tuple[int, int]] | None = None,
 def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
                          mario_w: int | None = None, mario_h: int | None = None,
                          mutable_world: Mask | None = None,
-                         sweep_world: Mask | None = None) -> np.ndarray:
+                         sweep_world: Mask | None = None,
+                         beyond_flag_world: Mask | None = None) -> np.ndarray:
     """Assigns every PADDED-GRID pixel a class code. Built once, with the mask.
 
     Computed at build time rather than per-query so the taxonomy is versioned
@@ -618,9 +621,19 @@ def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
     only means its explanation is not applied, and the pixels it would have
     accounted for stay DEEP_PENETRATION; nothing else changes.
     """
-    mario_w = config.MARIO_SMALL_W if mario_w is None else mario_w
-    mario_h = config.MARIO_SMALL_H if mario_h is None else mario_h
-    _valid, standable = anchor_grids(solid_world, mario_w, mario_h)
+    # ─── THE CEILING IS THE MOST PERMISSIVE OF MARIO'S FORMS ───
+    # Coverage records the collider at its real per-form size, and big Mario
+    # (40x80) reaches 40 px higher than small (30x40) from the same footing.
+    # A small-only ceiling therefore called ordinary big-Mario play
+    # IMPOSSIBLE: 25,356 px in one measured run, every one of them inside the
+    # big envelope. Explicit arguments still override, for tests.
+    forms = ([(mario_w or config.MARIO_SMALL_W, mario_h or config.MARIO_SMALL_H)]
+             if (mario_w is not None or mario_h is not None) else
+             [(config.MARIO_SMALL_W, config.MARIO_SMALL_H),
+              (config.MARIO_BIG_W, config.MARIO_BIG_H)])
+    mario_w = min(w for w, _h in forms)
+    mario_h = min(h for _w, h in forms)
+    widest = max(w for w, _h in forms)
 
     cls = np.full((config.GRID_H, config.GRID_W), CLS_OUTSIDE_LEVEL, np.uint8)
     ys = np.arange(config.GRID_H) + config.GRID_Y0
@@ -631,12 +644,16 @@ def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
     # The anchor ceiling is indexed by anchor column; a PIXEL column x is
     # covered by anchors x-mario_w+1 .. x, so take the lowest ceiling of any
     # anchor that could put a collider pixel there.
-    ceil_anchor = column_ceiling(standable)
-    per_col = np.full(config.LEVEL_W, NO_CEILING, np.int32)
-    per_col[:ceil_anchor.shape[0]] = ceil_anchor
-    ceil_px = np.lib.stride_tricks.sliding_window_view(
-        np.pad(per_col, (mario_w - 1, 0), constant_values=NO_CEILING),
-        mario_w).min(axis=1).astype(np.int64)
+    ceil_px = np.full(config.LEVEL_W, NO_CEILING, np.int64)
+    for fw, fh in forms:
+        _v, f_standable = anchor_grids(solid_world, fw, fh)
+        ceil_anchor = column_ceiling(f_standable)
+        per_col = np.full(config.LEVEL_W, NO_CEILING, np.int32)
+        per_col[:ceil_anchor.shape[0]] = ceil_anchor
+        form_ceil = np.lib.stride_tricks.sliding_window_view(
+            np.pad(per_col, (fw - 1, 0), constant_values=NO_CEILING),
+            fw).min(axis=1).astype(np.int64)
+        ceil_px = np.minimum(ceil_px, form_ceil)      # lower y = reaches higher
 
     full_ceil = np.full(config.GRID_W, NO_CEILING, np.int64)
     full_ceil[in_x] = ceil_px
@@ -666,7 +683,7 @@ def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
     # (verified: 367 -> 458 columns, 0 lost) - and it needs no level-specific
     # constant.
     pit_col = ~solid_world[config.LEVEL_H - config.MARIO_BIG_H:, :].any(axis=0)
-    pit_near = _window_any(pit_col[None, :], -(mario_w - 1), mario_w - 1,
+    pit_near = _window_any(pit_col[None, :], -(widest - 1), widest - 1,
                            axis=1)[0]
     full_pit = np.zeros(config.GRID_W, bool)
     full_pit[in_x] = pit_near
@@ -697,6 +714,15 @@ def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
     # within 6 px of something solid, so letting collision tolerance absorb
     # these would hide the one signal that says the denominator is too small.
     w[b_world & ~testable_world] = CLS_CONNECTIVITY_GAP
+    # Past the flag trigger and off the scripted path (apply_flag_trigger).
+    # NOT a model gap: the engine hands Mario to a script there, so coverage
+    # recorded in this set means he got past the flagpole without the flag
+    # sequence - a real glitch. Only overrides the two labels that would
+    # otherwise claim open air (gap / unreachable altitude), so no collision
+    # or penetration explanation can move.
+    if beyond_flag_world is not None:
+        w[beyond_flag_world & ((w == CLS_CONNECTIVITY_GAP)
+                               | (w == CLS_UNREACHABLE_ALT))] = CLS_BEYOND_FLAG
     # Deeper than the engine's resolution ever goes - PENETRATION_TOL is 6
     # and the observed maximum over the whole bootstrap was 5.
     deep = _erode_tol(solid_world, tol)
@@ -732,8 +758,207 @@ class ReconciliationError(RuntimeError):
     """The three methods disagree in a way that means a bug, not a result."""
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# RUN-UP ZONES — where a standing jump is not enough
+#
+# Engine ground truth (docs/evidence/jump_physics.py, runup.py): a jump rises
+# 166 px below take-off |x_vel| 4.5 and 183 px at or above it, and reaching
+# 4.5 from a standstill takes 29 frames and exactly 70 px of ground.
+#
+# Every policy measured - including the 6M baseline - loses episodes to the
+# same three places, always by TIMEOUT, always with max_x exactly 32 px short
+# of a 172 px obstacle (x 1,943 / 2,415 / 5,971; 85 of 500 healthy episodes).
+# Mario walks up, presses flat against the wall, and jumps from a standstill
+# forever: 166 px against 172. The way past is to back off and run, and
+# nothing in the reward ever asked for that.
+#
+# A zone is where the NEXT barrier ahead is higher than a standing jump but
+# still inside a running one. Deliberately not "the tallest thing ahead":
+# a staircase is climbed step by step, so what matters is the next step up.
+# Nothing here names a pipe or a location - it is read from the geometry, so
+# it transfers to any level.
+# ══════════════════════════════════════════════════════════════════════════
+def barrier_tops(solid_world: Mask, fit_h: int | None = None) -> np.ndarray:
+    """Per column, the top of the barrier standing on the ground (NO_CEILING
+    where the column has none).
+
+    Gaps shorter than Mario's height are filled first. Measured cause: the
+    tall pipe at x 1975 occupies y 366-535 while the floor starts at 538, so
+    a strict "contiguous with the ground" walk treated a 172 px pipe as
+    floating scenery over a 2 px gap. A gap he cannot fit through is a wall.
+    Floating brick rows, which have a real gap beneath, stay excluded.
+    """
+    fit_h = config.MARIO_SMALL_H if fit_h is None else fit_h
+    h = solid_world.shape[0]
+    closed = solid_world | (_window_any(solid_world, -fit_h, -1, axis=0)
+                            & _window_any(solid_world, 1, fit_h, axis=0))
+    rows = np.arange(h)[:, None]
+    has = closed.any(axis=0)
+    bottom = np.where(has, h - 1 - np.argmax(closed[::-1], axis=0), -1)
+    air_below_top = np.where(~closed & (rows <= bottom[None, :]), rows, -1).max(axis=0)
+    return np.where(has, air_below_top + 1, NO_CEILING).astype(np.int64)
+
+
+def runup_rise(solid_world: Mask, look: int | None = None) -> np.ndarray:
+    """Per column, how much higher the FIRST barrier ahead stands (0 if none)."""
+    look = config.RUNUP_LOOK_PX if look is None else look
+    bt = barrier_tops(solid_world)
+    w = bt.shape[0]
+    pad = np.full(w + look, NO_CEILING, np.int64)
+    pad[:w] = bt
+    seg = np.lib.stride_tricks.sliding_window_view(pad, look + 1)[:w, 1:]
+    higher = seg < bt[:, None]
+    first_idx = np.argmax(higher, axis=1)
+    found = higher.any(axis=1) & (bt < NO_CEILING)
+    rise = bt - seg[np.arange(w), first_idx]
+    return np.where(found, rise, 0).astype(np.int64)
+
+
+_RUNUP_CACHE: dict[str, np.ndarray] = {}
+
+
+def load_runup_zones(path: str | None = None) -> np.ndarray | None:
+    """Per world column, the ZONE ID a run-up is needed for (-1 where not).
+
+    Derived from the stored solid mask, cached per process. Zone IDs make the
+    reward payable once per zone per episode, which is what makes it
+    unfarmable without needing the drought gate - and the drought gate would
+    be wrong here anyway: Mario stuck against a wall IS in drought, so gating
+    would silence the signal exactly where the skill is missing.
+    """
+    path = config.REACHABLE_MASK_PATH if path is None else path
+    if path in _RUNUP_CACHE:
+        return _RUNUP_CACHE[path]
+    if not os.path.exists(path):
+        return None
+    with np.load(path, allow_pickle=False) as d:
+        n = config.GRID_W * config.GRID_H
+        solid = np.unpackbits(d['solid_packed'])[:n].reshape(
+            config.GRID_H, config.GRID_W).astype(bool)
+    y0, x0 = -config.GRID_Y0, -config.GRID_X0
+    world = solid[y0:y0 + config.LEVEL_H, x0:x0 + config.LEVEL_W]
+    zones = runup_zones(world)
+    ids = np.full(zones.shape, -1, np.int64)
+    zone_id = 0
+    x = 0
+    while x < zones.shape[0]:
+        if zones[x]:
+            start = x
+            while x < zones.shape[0] and zones[x]:
+                x += 1
+            ids[start:x] = zone_id
+            zone_id += 1
+        else:
+            x += 1
+    _RUNUP_CACHE[path] = ids
+    return ids
+
+
+def runup_zones(solid_world: Mask) -> np.ndarray:
+    """Per column: does getting past what is ahead REQUIRE a running jump?
+
+    Between the two measured jump heights. Below `JUMP_RISE_STANDING` a
+    standstill clears it and no speed is needed; above `JUMP_RISE_PX` no jump
+    clears it at all (those are climbed, not leapt) and asking for speed there
+    would be wrong.
+    """
+    rise = runup_rise(solid_world)
+    return (rise > config.JUMP_RISE_STANDING) & (rise <= config.JUMP_RISE_PX)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# THE FLAG TRIGGER — reachability past the flagpole
+#
+# Methods B and C model SOLID geometry, and the flagpole is not a solid - so
+# they flooded straight past it into the castle area and counted 200,832 px
+# at x >= 8504 as testable. The engine says otherwise:
+#
+#   level1.py setup_checkpoints: Checkpoint(8504, '11', 5, 6), and
+#   checkpoint.py's default height is 600, so the trigger is a 6 x 600 rect
+#   at x 8504, y 5 - the WHOLE height of the level. Touching it at any height
+#   sets mario.state = FLAGPOLE: the scripted slide, the walk to the castle,
+#   and mario.kill() at checkpoint '12' (x 8775). A collider cannot pass it
+#   underneath (the pole stands on a 43 px base block and the trigger reaches
+#   y 605) or overhead (it would have to be entirely above y 5).
+#
+# So beyond the trigger Mario is never under player control. What he can
+# occupy there is exactly two things:
+#
+#   the GRAB BAND   on the grab frame the collider overlaps the trigger at
+#                   whatever height free movement brought it to, so its right
+#                   edge can reach trigger.right + MARIO_BIG_W, plus one
+#                   frame's sweep. Free reachability is kept there unchanged.
+#   the CORRIDOR    the scripted slide-and-walk, which is not a geometric
+#                   question at all. It is RECORDED from the engine by
+#                   tools/build_reachability.py, and passed in.
+#
+# Everything else at x >= trigger.x is unreachable and leaves the denominator.
+# Measured: 147,060 px, 3.66% of the old 4,013,723. Two independent checks
+# agree: the recorded corridor reproduces every past-trigger pixel that real
+# play ever covered (0 of 22,542 across the bootstrap, 6.03M, 6.4M and a
+# further candidate fell outside), and real-play coverage past the pole was
+# FROZEN at the same count across all of them while everything before the
+# pole kept growing.
+# ══════════════════════════════════════════════════════════════════════════
+FLAG_TRIGGER_NAME = '11'
+
+
+def flag_trigger_rect(level_state: Any) -> tuple[int, int, int, int] | None:
+    """(x, y, w, h) of the checkpoint that hands Mario to the flag script.
+
+    Read from the level itself rather than hard-coded, so a layout change
+    moves it (or removes it) instead of silently leaving a stale barrier.
+    """
+    for cp in getattr(level_state, 'check_point_group', ()):
+        if getattr(cp, 'name', None) == FLAG_TRIGGER_NAME:
+            r = cp.rect
+            return (int(r.x), int(r.y), int(r.w), int(r.h))
+    return None
+
+
+def flag_grab_band_right(trigger: tuple[int, int, int, int]) -> int:
+    """First world x beyond the grab band: trigger.right + big collider + one frame."""
+    x, _y, w, _h = trigger
+    return x + w + config.MARIO_BIG_W + config.MAX_FRAME_DX
+
+
+def fill_corridor(corridor_world: Mask) -> Mask:
+    """Per column, everything from the highest recorded pixel to the bottom.
+
+    The corridor is swept by a SOLID collider, so a pixel between its top edge
+    and the ground in a column it passed through was covered by some frame.
+    Filling makes that explicit and closes any gap between replay samples,
+    without ever reaching above where a collider was actually recorded.
+    """
+    filled = np.zeros_like(corridor_world)
+    cols = np.nonzero(corridor_world.any(axis=0))[0]
+    if cols.size:
+        top = corridor_world[:, cols].argmax(axis=0)
+        rows = np.arange(corridor_world.shape[0])[:, None]
+        filled[:, cols] = rows >= top[None, :]
+    return filled
+
+
+def beyond_flag_region(trigger: tuple[int, int, int, int], corridor_world: Mask) -> Mask:
+    """Every world pixel past the trigger that is neither in the grab band nor
+    on the (filled) scripted corridor - where Mario can never be."""
+    xs = np.arange(corridor_world.shape[1])
+    past = xs >= trigger[0]
+    band = past & (xs < flag_grab_band_right(trigger))
+    region: Mask = (past & ~band)[None, :] & ~fill_corridor(corridor_world)
+    return region
+
+
+def apply_flag_trigger(testable_world: Mask, trigger: tuple[int, int, int, int],
+                       corridor_world: Mask) -> tuple[Mask, Mask]:
+    """(corrected testable mask, pixels removed), both WORLD-raster masks."""
+    region = beyond_flag_region(trigger, corridor_world)
+    return testable_world & ~region, testable_world & region
+
+
 def build_testable(level_state: Any, spawn_xy: tuple[int, int],
-                   tolerance: float = 0.05) -> tuple[Mask, Mask, np.ndarray, Stats]:
+                   tolerance: float = 0.05,
+                   flag_corridor: Mask | None = None) -> tuple[Mask, Mask, np.ndarray, Stats]:
     """Runs all three methods, reconciles them, and returns the adopted mask.
 
     Adoption rule, from the brief and enforced here:
@@ -742,10 +967,57 @@ def build_testable(level_state: Any, spawn_xy: tuple[int, int],
         more physically meaningful of the two.
       * If they diverge by more, raise rather than silently pick one.
     """
+    # Checked FIRST, before minutes of reachability work: a level with a flag
+    # trigger cannot be scored without the recorded scripted corridor, and
+    # building the pre-correction mask instead would silently put back
+    # 147,060 px that no trajectory can reach.
+    trigger = flag_trigger_rect(level_state)
+    if trigger is not None and flag_corridor is None:
+        raise ReconciliationError(
+            f"the level has a flag trigger at {trigger} but no recorded flag "
+            f"corridor was supplied; tools/build_reachability.py records it "
+            f"from the engine")
     solid, n_rects = rasterize_solids(level_state)
-    a_px, a = method_a(solid)
-    b_px, b = method_b(solid)
-    c_raw, c = method_c(solid, spawn_xy)
+
+    # ─── BOTH OF MARIO'S FORMS, UNIONED ───
+    # The methods used to run on the SMALL collider (30x40) only, while
+    # coverage records the collider at its real per-form size. Big Mario is
+    # 40x80: standing in the same place his head is 40 px higher than any
+    # small-Mario anchor, so ordinary big-Mario play lands OUTSIDE a
+    # small-only mask and was classified ANOMALOUS. Measured on one 164k-step
+    # run: 25,356 px flagged, of which the big envelope explains every one
+    # (16,037 unreachable_altitude at y 100-160, and 9,319 impossible_sky at
+    # y -80..-20, the same cause via the sky ceiling).
+    #
+    # The definition at the top of this file is "some physically reachable
+    # placement of Mario's COLLIDER covers it", and both forms are reachable
+    # placements, so the answer is the union over forms. The agent had in fact
+    # COVERED those pixels - the engine demonstrating what the model denied.
+    forms = ((config.MARIO_SMALL_W, config.MARIO_SMALL_H),
+             (config.MARIO_BIG_W, config.MARIO_BIG_H))
+    per_form = {}
+    _base_w, base_h = forms[0]
+    for mw, mh in forms:
+        # The spawn ANCHOR is the collider's top-left, so a taller form
+        # standing in the same place has a HIGHER anchor. Passing the small
+        # form's anchor for big Mario puts his feet through the floor, and
+        # method_c refuses it - correctly, and loudly.
+        form_spawn = (spawn_xy[0], spawn_xy[1] + base_h - mh)
+        fa_px, fa = method_a(solid, mw, mh)
+        fb_px, fb = method_b(solid, mw, mh)
+        fc_raw, fc = method_c(solid, form_spawn, mw, mh)
+        per_form[(mw, mh)] = (fa_px, fa, fb_px, fb, fc_raw, fc)
+    a_px = np.logical_or.reduce([v[0] for v in per_form.values()])
+    b_px = np.logical_or.reduce([v[2] for v in per_form.values()])
+    c_raw = np.logical_or.reduce([v[4] for v in per_form.values()])
+    a = {'px': int(a_px.sum()), 'anchors': sum(v[1]['anchors'] for v in per_form.values())}
+    b = {'px': int(b_px.sum()),
+         'anchors': sum(v[3]['anchors'] for v in per_form.values()),
+         'valid_anchors': per_form[forms[0]][3]['valid_anchors'],
+         'standable_anchors': per_form[forms[0]][3]['standable_anchors']}
+    c = {'px': int(c_raw.sum()),
+         'anchors': sum(v[5]['anchors'] for v in per_form.values()),
+         'coarse': per_form[forms[0]][5]['coarse']}
 
     # ─── LATTICE TRIM — measured across three resolutions, not assumed ───
     # A coarse Method-C cell is open if ANY fine anchor inside it is open,
@@ -799,10 +1071,24 @@ def build_testable(level_state: Any, spawn_xy: tuple[int, int],
             f"{100 * delta:.2f}%, above the {100 * tolerance:.0f}% tolerance. "
             f"Investigate before adopting either.")
 
+    # ─── THE FLAG TRIGGER (see the block above apply_flag_trigger) ───
+    # Refuses to go on without the recorded corridor when the level HAS a
+    # flag trigger: silently building the pre-correction mask would put back
+    # 147,060 px that no trajectory can reach, and a campaign whose success
+    # rule is an exact equality could then never finish.
+    c_total = int(adopted.sum())
+    beyond_flag = np.zeros_like(adopted)
+    region = None
+    if trigger is not None:
+        assert flag_corridor is not None          # refused up front, above
+        adopted, beyond_flag = apply_flag_trigger(adopted, trigger, flag_corridor)
+        region = beyond_flag_region(trigger, flag_corridor)
+
     class_map = classify_noncoverage(
         solid, adopted, b_px,
         mutable_world=mutable_solid_mask(level_state),
-        sweep_world=sweep_coverable(solid))
+        sweep_world=sweep_coverable(solid),
+        beyond_flag_world=region)
 
     stats = {
         'world_raster_px': world,
@@ -820,6 +1106,11 @@ def build_testable(level_state: Any, spawn_xy: tuple[int, int],
         'c_lattice_overshoot_px': overshoot,
         'connectivity_excluded_px': b['px'] - c['px'],
         'spawn_xy': list(spawn_xy),
+        'method_c_trimmed_px': c_total,
+        'flag_trigger': list(trigger) if trigger is not None else None,
+        'flag_band_right': flag_grab_band_right(trigger) if trigger is not None else None,
+        'flag_removed_px': int(beyond_flag.sum()),
+        'flag_corridor': flag_corridor,
     }
     return solid, adopted, class_map, stats
 
@@ -885,7 +1176,26 @@ def _write_mask_bundle(fh: Any, solid: Mask, testable: Mask,
         bc_delta_pct=np.float64(stats['bc_delta_pct']),
         testable_fingerprint=np.str_(mask_fingerprint(testable)),
         format_version=np.int64(config.COVERAGE_FORMAT_VERSION),
+        # Stored so every input to the denominator is auditable: the scripted
+        # flag corridor is recorded from the engine, not derived from
+        # geometry, and a rebuild must be checkable against it.
+        **_flag_fields(stats),
     )
+
+
+def _flag_fields(stats: Stats) -> dict[str, Any]:
+    if stats.get('flag_trigger') is None:
+        return {}
+    corridor = stats.get('flag_corridor')
+    fields: dict[str, Any] = {
+        'flag_trigger': np.array(stats['flag_trigger'], dtype=np.int64),
+        'flag_band_right': np.int64(stats['flag_band_right']),
+        'flag_removed_px': np.int64(stats['flag_removed_px']),
+        'method_c_trimmed_px': np.int64(stats['method_c_trimmed_px']),
+    }
+    if corridor is not None:
+        fields['flag_corridor_packed'] = np.packbits(_embed_in_grid(corridor))
+    return fields
 
 
 def load_masks(path: str | None = None) -> tuple[Mask, Mask, Stats]:

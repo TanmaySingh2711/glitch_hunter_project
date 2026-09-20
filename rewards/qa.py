@@ -39,6 +39,8 @@ explorer needs both.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from exploration import config
 from exploration import lifecycle as lifecycle_mod
 from exploration.coverage import SpatialCoverage
@@ -65,7 +67,7 @@ from .shared import (
 # clock is held above zero - see config QA_TIMEOUT_ENDS_EPISODE.)
 QA_CHANNELS = ('death', 'novelty', 'frontier', 'drought', 'safety_reset',
                'locomotion', 'time', 'progress', 'interaction', 'flag',
-               'shortfall', 'clip')
+               'shortfall', 'runup', 'clip')
 
 Channels = dict[str, float]
 
@@ -87,6 +89,9 @@ class QAExplorationReward(RewardState):
     # Provided by the wrapper; a QA wrapper always has both.
     coverage: SpatialCoverage | None
     lifecycle: lifecycle_mod.EpisodeLifecycle | None
+    # Per world column, the run-up zone ID (-1 where none). Level geometry,
+    # read once by the wrapper; None in legacy mode or with no mask built.
+    runup_zone_ids: Any
 
     last_frontier_phi: float
     last_frontier_version: int
@@ -113,6 +118,19 @@ class QAExplorationReward(RewardState):
         self.secondary_gated = False
         self.secondary_exhausted = False
         self.ep_max_x = 0
+        # Run-up zones already paid this episode. A set, not a counter: the
+        # payment is once per ZONE, which is what makes it unfarmable.
+        self.ep_runup_paid: set[int] = set()
+        # Per run-up zone: the furthest x reached in it, and how much retreat
+        # from that peak has already been paid. Monotone, so a back-and-forth
+        # pace collects nothing the second time.
+        self.ep_zone_peak: dict[int, int] = {}
+        self.ep_zone_retreat_paid: dict[int, float] = {}
+        # Where Mario had got to when the episode entered COMPLETE. Without
+        # it there is no way to tell a COMPLETE phase that began next to the
+        # flag from one that began at the spawn screen, and those are
+        # completely different things to have rehearsed.
+        self.ep_max_x_at_transition: int | None = None
         self.ep_progress_paid = 0.0
         self.ep_complete_time_paid = 0.0
         # A NEW dict, not cleared in place: the previous episode's final info
@@ -299,6 +317,46 @@ class QAExplorationReward(RewardState):
         else:
             self.sprint_frames = 0
 
+        # ─── 5a. THE RETREAT THAT MAKES A RUN-UP POSSIBLE ───
+        # Pressed against the wall there is no room to reach take-off speed,
+        # so the only way past is to go BACK first. Measured: no policy ever
+        # backs off more than 13 px unaided (0 of 54 trials cleared a wall),
+        # which is why paying only for the take-off below did nothing.
+        # Paid for new maximum retreat from the zone's own high-water mark,
+        # pro rata to the 70 px the engine needs, once per zone.
+        if on_ground and self.runup_zone_ids is not None:
+            col = int(x_pos)
+            if 0 <= col < self.runup_zone_ids.shape[0]:
+                zone = int(self.runup_zone_ids[col])
+                if zone >= 0:
+                    peak = max(self.ep_zone_peak.get(zone, col), col)
+                    self.ep_zone_peak[zone] = peak
+                    retreat = min(peak - col, config.RUNUP_RUN_PX)
+                    earned = config.QA_RETREAT_REWARD * retreat / config.RUNUP_RUN_PX
+                    already = self.ep_zone_retreat_paid.get(zone, 0.0)
+                    if earned > already:
+                        self.ep_zone_retreat_paid[zone] = earned
+                        reward += earned - already
+                        ch['runup'] += earned - already
+
+        # ─── 5b. THE RUN-UP A TALL WALL DEMANDS ───
+        # Paid at TAKE-OFF, in a zone where the next barrier is higher than a
+        # standing jump (166 px) but inside a running one (183 px), and only
+        # when |x_vel| clears the engine's own 4.5 threshold - i.e. exactly
+        # when this take-off will actually rise the extra 17 px. Once per
+        # zone per episode, so the level's five zones cap it at 5 x the
+        # reward; see config.QA_RUNUP_REWARD for the 85-of-500 timeouts that
+        # made it necessary. Deliberately NOT drought-gated.
+        if self.was_on_ground and not on_ground and self.runup_zone_ids is not None:
+            col = int(x_pos)
+            if 0 <= col < self.runup_zone_ids.shape[0]:
+                zone = int(self.runup_zone_ids[col])
+                if (zone >= 0 and zone not in self.ep_runup_paid
+                        and abs(x_vel) > config.RUNUP_THRESHOLD_VEL):
+                    self.ep_runup_paid.add(zone)
+                    reward += config.QA_RUNUP_REWARD
+                    ch['runup'] = config.QA_RUNUP_REWARD
+
         # Clean jump, in either direction, for the same reason.
         if self.was_on_ground and not on_ground:
             self.jump_start_x = x_pos
@@ -480,6 +538,16 @@ class QAExplorationReward(RewardState):
             # A snapshot, so the final info survives the next reset().
             info['qa_channels'] = {p: dict(c) for p, c in self.ep_channels.items()}
 
+        if complete and self.ep_max_x_at_transition is None:
+            self.ep_max_x_at_transition = int(self.ep_max_x)
+
+        # Behavioural position, exported every substep so the episode record
+        # can close over it. Training telemetry had no spatial field at all,
+        # which is why a policy whose median max_x had collapsed to 858 still
+        # looked healthy in every training statistic that was being written.
+        info['qa_rehearsal'] = getattr(self, 'rehearsal_episode', False)
+        info['qa_max_x'] = self.ep_max_x
+        info['qa_max_x_at_transition'] = self.ep_max_x_at_transition
         info['qa_novelty_shape'] = self.ep_novelty_shape
         info['qa_clip_events'] = self.qa_clip_events
         info['qa_progress_paid'] = self.ep_progress_paid

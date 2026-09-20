@@ -31,6 +31,95 @@ from exploration import config, reachability
 CONFIG_PATH = os.path.join(ROOT, "exploration", "config.py")
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# THE SCRIPTED FLAG CORRIDOR - recorded from the engine, not derived
+#
+# Past the flag trigger Mario is under script control (slide, walk to the
+# door), so what he can occupy there is not a geometry question. It is
+# recorded here by replaying the grab in the real engine through the real
+# coverage recorder, and passed to reachability.build_testable, which keeps
+# the grab band unchanged and only this corridor beyond it.
+#
+# The approach set is deliberately dense. A two-replay version (one small
+# and one big Mario) was measured and REJECTED: it missed 3,871 of the
+# 22,524 corridor px, because the approach - not only Mario's size - changes
+# where the script walks him. These 672 approaches (small and big, ground
+# hops and leaps from the three upper staircase steps, 7 run-ups x 6 jump
+# lengths) reproduce every past-trigger pixel real play has ever covered.
+# ══════════════════════════════════════════════════════════════════════════
+FLAG_LAUNCHES = ((8300, 538), (8360, 538), (8420, 538),
+                 (8070, 194), (8100, 194), (8110, 194),
+                 (8025, 237), (7980, 280))
+FLAG_RUNUPS = (0, 3, 6, 10, 14, 20, 30)
+FLAG_JUMPS = (0, 4, 8, 14, 22, 30)
+
+
+def flag_approaches() -> list[tuple[bool, int, int, int, int]]:
+    """(big, start_x, surface_y, run-up frames, jump frames) for every replay."""
+    return [(big, x, surf, pre, jf)
+            for big in (False, True) for x, surf in FLAG_LAUNCHES
+            for pre in FLAG_RUNUPS for jf in FLAG_JUMPS]
+
+
+def replay_flag_approach(args: tuple[bool, int, int, int, int]) -> Any:
+    """One approach to the pole; returns the packed visited GRID bitmap.
+
+    Mario is placed ON a surface (rect.bottom), never inside a solid - a
+    teleport into the staircase is resolved by the engine in ways that do not
+    correspond to any real trajectory.
+    """
+    import numpy as np
+
+    from custom_mario_env import CustomMarioEnv
+    from exploration.coverage import SpatialCoverage
+    big, start_x, surface, pre, jf = args
+    run, run_jump = 3, 4
+    env = CustomMarioEnv()
+    try:
+        env.episode_time_units = config.QA_EPISODE_TIME_UNITS
+        env.end_on_level_complete = config.QA_END_ON_LEVEL_COMPLETE
+        env.reset()
+        mario = env.game.state.mario
+        mario.rect.x = start_x
+        if big:
+            mario.become_big()
+        mario.rect.bottom = surface
+        mario.y_vel = 0
+        for _ in range(30):
+            env.step(0)
+        cov = SpatialCoverage(testable_mask=None)
+        for action in [run] * pre + [run_jump] * jf + [run] * 1200:
+            _o, _r, term, trunc, info = env.step(action)
+            rect = info.get("mario_rect")
+            if rect:
+                cov.record({"cur_rect": tuple(rect),
+                            "viewport_x": info.get("viewport_x", 0),
+                            "x_vel": info.get("x_vel", 0.0),
+                            "on_ground": info.get("on_ground", True)})
+            if term or trunc:
+                break
+        return np.packbits(cov.visited.astype(bool))
+    finally:
+        env.close()
+
+
+def record_flag_corridor(workers: int = 8) -> Any:
+    """Union of every approach, as a WORLD-raster mask."""
+    import multiprocessing as mp
+
+    import numpy as np
+    n = config.GRID_W * config.GRID_H
+    union = np.zeros((config.GRID_H, config.GRID_W), dtype=bool)
+    approaches = flag_approaches()
+    with mp.get_context("spawn").Pool(workers) as pool:
+        for i, packed in enumerate(pool.imap_unordered(replay_flag_approach, approaches)):
+            union |= np.unpackbits(packed)[:n].reshape(config.GRID_H, config.GRID_W).astype(bool)
+            if (i + 1) % 96 == 0:
+                print(f"    flag corridor: {i + 1}/{len(approaches)} approaches replayed")
+    y0, x0 = -config.GRID_Y0, -config.GRID_X0
+    return union[y0:y0 + config.LEVEL_H, x0:x0 + config.LEVEL_W]
+
+
 def write_config(stats: dict[str, Any], fingerprint: str) -> None:
     """Records the adopted denominator and its provenance in config.py."""
     with open(CONFIG_PATH, encoding="utf-8") as fh:
@@ -47,9 +136,11 @@ def write_config(stats: dict[str, Any], fingerprint: str) -> None:
         (f"#   Method A (geometric)  = {stats['method_a_px']:,}"
         f"   informational; no gravity, no jump limit"),
         f"#   Method B (jump env.)  = {stats['method_b_px']:,}",
-        (f"#   Method C (BFS)        = {stats['method_c_px']:,}"
-        f"   <- ADOPTED"),
+        f"#   Method C (BFS)        = {stats['method_c_px']:,}",
         f"#   B vs C delta          = {stats['bc_delta_pct']:.2f}%",
+        (f"#   flag trigger          = -{stats.get('flag_removed_px') or 0:,}"
+        f"   past x {(stats.get('flag_trigger') or [0])[0]}, off the scripted path"),
+        f"#   ADOPTED               = {stats['testable_total']:,}   (Method C + flag trigger)",
         "#",
         "# Coverage percentage is ALWAYS covered_testable / TESTABLE_TOTAL.",
         "# Pixels outside this mask are noncoverage_px, never coverage. Most",
@@ -111,8 +202,17 @@ def reclassify_only(level_state: Any, dry_run: bool = False) -> None:
     print("  building sweep-coverable mask (exhaustive; a few minutes)...")
     sweep = reachability.sweep_coverable(solid)
 
+    region = None
+    if 'flag_trigger' in stored and 'flag_corridor_packed' in stored:
+        tx, ty, tw, th = (int(v) for v in stored['flag_trigger'])
+        trigger = (tx, ty, tw, th)
+        corridor = unpack('flag_corridor_packed')
+        region = reachability.beyond_flag_region(trigger, corridor)
+        print(f"  flag trigger        : {trigger} (stored corridor re-applied)")
+
     new = reachability.classify_noncoverage(
-        solid, testable, b_px, mutable_world=mutable, sweep_world=sweep)
+        solid, testable, b_px, mutable_world=mutable, sweep_world=sweep,
+        beyond_flag_world=region)
 
     # Exactly which reclassifications this path may make. Anything else means
     # the taxonomy moved somewhere nobody intended, and writing it would put a
@@ -169,6 +269,8 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument("--dry-run", action="store_true",
                     help="build and reconcile the mask, print the result, write nothing")
+    ap.add_argument("--workers", type=int, default=8,
+                    help="processes for the flag-corridor engine replays")
     ap.add_argument("--class-map-only", action="store_true",
                     help="recompute ONLY the noncoverage taxonomy in the "
                          "existing bundle; the solid mask, the testable mask, "
@@ -200,8 +302,11 @@ def main(argv: list[str] | None = None) -> None:
         print(f"  lattice             : {config.REACHABILITY_LATTICE} px"
               f"   (1 = exact, no discretisation)\n")
 
+        print(f"  recording the scripted flag corridor "
+              f"({len(flag_approaches())} engine replays)...")
+        corridor = record_flag_corridor(args.workers)
         solid, testable, class_map, stats = reachability.build_testable(
-            env.game.state, spawn)
+            env.game.state, spawn, flag_corridor=corridor)
 
         for label, got, want in (
             ("solid rects", stats['n_solid_rects'], config.EXPECTED_SOLID_RECTS),
@@ -234,7 +339,12 @@ def main(argv: list[str] | None = None) -> None:
         print(f"  C overshoot above B     "
               f"{stats['c_lattice_overshoot_px']:>11,} px"
               f"   {'(exact - no lattice term)' if stats['lattice'] == 1 else ''}")
-        print(f"  ADOPTED                 Method {stats['adopted_method']}"
+        print(f"  Method C (trimmed)      {stats['method_c_trimmed_px']:>12,} px")
+        if stats.get('flag_trigger') is not None:
+            print(f"  flag trigger            {stats['flag_trigger']}   grab band to x "
+                  f"{stats['flag_band_right']}")
+            print(f"  - past it, off the scripted path  {stats['flag_removed_px']:>9,} px")
+        print(f"  ADOPTED                 Method {stats['adopted_method']} + flag trigger"
               f"  =  {stats['testable_total']:,} px")
         print("=" * 70)
 

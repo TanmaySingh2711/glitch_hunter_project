@@ -50,3 +50,19 @@ def test_check_runs_the_same_gates_as_ci():
     full_tests = dict(check.gates(full=True))["tests"]
     assert "not slow" in fast_tests
     assert f"--cov-fail-under={check.COVERAGE_FLOOR}" in full_tests
+
+
+def test_the_retention_evaluator_is_headless_unless_asked_for_a_window():
+    """--workers 12 used to open twelve game windows for a whole run. Headless
+    was measured identical to windowed (40/40 episodes), so it is the default."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "evaluate_completion_cli", os.path.join(ROOT, "tools", "evaluate_completion.py"))
+    with open(spec.origin, encoding="utf-8") as fh:
+        src = fh.read()
+    assert "prepare_tool(headless=not wants_window(sys.argv[1:]))" in src
+    ns: dict = {}
+    exec(src[src.index("def wants_window"):src.index("ROOT = prepare_tool")], ns)
+    assert ns["wants_window"]([]) is False
+    assert ns["wants_window"](["ckpt.zip", "--workers", "12"]) is False
+    assert ns["wants_window"](["ckpt.zip", "--windowed"]) is True

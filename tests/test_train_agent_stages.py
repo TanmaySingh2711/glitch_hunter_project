@@ -34,7 +34,13 @@ class _Model:
 
 
 class _Cov:
-    testable_total = 4_013_723
+    testable_total = ta.xconfig.TESTABLE_TOTAL
+    # No mask, so lc.provenance() reports "unavailable" instead of splitting
+    # bootstrap from QA-discovered - the banner must survive that.
+    testable = None
+
+    def anomalous_px(self):
+        return 0
 
     def __init__(self, remaining=100):
         self._remaining = remaining

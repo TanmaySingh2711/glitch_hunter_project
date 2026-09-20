@@ -69,7 +69,8 @@ explicit = true
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["mario_clone", "venv_gpu"]   # vendored / generated
+exclude = ["mario_clone", "venv_gpu",   # vendored / generated
+           "docs/evidence"]             # preserved anomaly reproductions, kept as recorded
 
 [tool.ruff.lint]
 select = [

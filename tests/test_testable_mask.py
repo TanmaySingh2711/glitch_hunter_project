@@ -206,8 +206,20 @@ def test_methods_reproduce_and_reconcile(env):
     """
     env.reset()
     mario = env.game.state.mario
+    # The recorded flag corridor is an INPUT to the denominator - it is
+    # measured in the engine, not derived from geometry - so a reproducibility
+    # check feeds back the one stored in the bundle. Whether the replay itself
+    # reproduces that corridor is a separate claim, and the builder's own
+    # acceptance check (every past-trigger px real play covered must be inside
+    # it) is what establishes it.
+    n = config.GRID_H * config.GRID_W
+    with np.load(config.REACHABLE_MASK_PATH, allow_pickle=False) as d:
+        corridor_g = np.unpackbits(d['flag_corridor_packed'])[:n].reshape(
+            config.GRID_H, config.GRID_W).astype(bool)
+    wy0, wx0 = -config.GRID_Y0, -config.GRID_X0
+    corridor = corridor_g[wy0:wy0 + config.LEVEL_H, wx0:wx0 + config.LEVEL_W]
     _solid, testable, _cls, stats = reachability.build_testable(
-        env.game.state, (mario.rect.x, mario.rect.y))
+        env.game.state, (mario.rect.x, mario.rect.y), flag_corridor=corridor)
 
     assert stats['testable_total'] == config.TESTABLE_TOTAL, (
         "a clean rebuild produced a different denominator - it is not "
@@ -221,6 +233,10 @@ def test_methods_reproduce_and_reconcile(env):
         f"Methods B and C differ by {stats['bc_delta_pct']:.2f}% - too far "
         f"apart to adopt either")
     assert stats['adopted_method'] == 'C'
+    # The flag-trigger correction ran, and its arithmetic closes exactly.
+    assert stats['flag_trigger'] is not None and stats['flag_removed_px'] > 0
+    assert (stats['method_c_trimmed_px'] - stats['flag_removed_px']
+            == stats['testable_total'])
     assert stats['solid_px'] == config.EXPECTED_SOLID_PX
     assert stats['n_solid_rects'] == config.EXPECTED_SOLID_RECTS
     for key in ('method_a_px', 'method_b_px', 'method_c_px'):
@@ -246,22 +262,37 @@ def test_lattice_does_not_change_the_denominator(masks):
     solid_g, _testable, _meta = masks
     wy0, wx0 = -config.GRID_Y0, -config.GRID_X0
     solid = solid_g[wy0:wy0 + config.LEVEL_H, wx0:wx0 + config.LEVEL_W]
-    b_px, _b = reachability.method_b(solid)
+    # Unioned over BOTH of Mario's forms, exactly as build_testable does -
+    # the stored method_c_px is that union, and a small-only rebuild here
+    # would be comparing two different quantities. The spawn ANCHOR is the
+    # collider's top-left, so a taller form stands at a higher anchor.
+    forms = ((config.MARIO_SMALL_W, config.MARIO_SMALL_H),
+             (config.MARIO_BIG_W, config.MARIO_BIG_H))
+    base_h = forms[0][1]
+    b_px = np.logical_or.reduce(
+        [reachability.method_b(solid, mw, mh)[0] for mw, mh in forms])
 
     trimmed, overshoot = {}, {}
     for pitch in (4, 2):
-        raw, _ = reachability.method_c(solid, (110, 498), coarse=pitch)
+        raw = np.logical_or.reduce(
+            [reachability.method_c(solid, (110, 498 + base_h - mh), mw, mh,
+                                   coarse=pitch)[0] for mw, mh in forms])
         trimmed[pitch] = int((raw & b_px).sum())
         overshoot[pitch] = int((raw & ~b_px).sum())
 
     assert overshoot[2] < overshoot[4], (
         "the Method C overshoot did not shrink with a finer lattice, so it is "
         "not a discretisation artifact")
+    # Against METHOD C's own total, not TESTABLE_TOTAL: the flag-trigger
+    # correction is applied AFTER Method C and removes a fixed set of pixels
+    # that has nothing to do with the lattice, so including it here would
+    # compare two different quantities.
+    method_c = int(_meta['method_c_px'])
     for pitch, got in trimmed.items():
-        assert abs(got - config.TESTABLE_TOTAL) <= 200, (
-            f"a {pitch} px lattice gives {got:,} against the adopted "
-            f"{config.TESTABLE_TOTAL:,} - the denominator depends on the "
-            f"lattice, not just the level")
+        assert abs(got - method_c) <= 200, (
+            f"a {pitch} px lattice gives {got:,} against Method C's "
+            f"{method_c:,} - the denominator depends on the lattice, not "
+            f"just the level")
 
 
 # ── Item 12: a stale denominator must not load silently ───────────────────

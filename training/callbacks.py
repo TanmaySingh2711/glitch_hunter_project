@@ -224,6 +224,157 @@ class WatchdogCallback(BaseCallback):
         return True
 
 
+class AnchorConsolidationCallback(BaseCallback):
+    """Holds completion retention by bounding drift from a healthy policy.
+
+    ─── WHY ───
+    Official completion retention across six checkpoints is predicted almost
+    exactly by the mean KL(healthy || current) on the states the healthy policy
+    visits when it plays Level 1-1 (Pearson r = -0.962; see config ANCHOR
+    CONSOLIDATION for the table and the fit). Every attempt to remove the CAUSE
+    of the drift left the drift in place, so this bounds the drift itself.
+
+    ─── WHAT ───
+    After every PPO update (i.e. at the start of each rollout but the first)
+    it measures that KL on a fixed ANCHOR set recorded by
+    tools/build_anchor_set.py. Over budget, it takes gradient steps minimising
+    KL(reference || policy) on anchor minibatches until the measured KL is back
+    under the budget or the step cap is reached. It then records what it did.
+
+    It is a separate phase, not a term inside PPO's loss, so the PPO update is
+    untouched. It uses its OWN optimiser, so PPO's Adam moments never see its
+    gradients. It trains only what the action distribution depends on - the
+    shared features and the action head - and never the value head. Under
+    budget it does nothing at all. The reference is frozen and never trained.
+    """
+
+    def __init__(self, reference_path: str, anchor_path: str, kl_target: float,
+                 batch: int = 256, max_steps: int = 64, lr: float = 1.0e-4,
+                 measure_n: int = 2048, seed: int = 0, verbose: int = 0) -> None:
+        super().__init__(verbose)
+        self.reference_path = reference_path
+        self.anchor_path = anchor_path
+        self.kl_target = float(kl_target)
+        self.batch = int(batch)
+        self.max_steps = int(max_steps)
+        self.lr = float(lr)
+        self.measure_n = int(measure_n)
+        self._rng = np.random.default_rng(seed)
+        self._first = True
+        self.history: list[dict[str, float]] = []
+
+    def _on_training_start(self) -> None:
+        import torch
+        from stable_baselines3 import PPO as _PPO
+
+        from common.fileio import canonical_sha256
+        with np.load(self.anchor_path, allow_pickle=False) as d:
+            self.anchors = d['states']
+            recorded_for = str(d['reference_sha256'])
+        actual = canonical_sha256(self.reference_path)
+        if recorded_for != actual:
+            raise RuntimeError(
+                f"{self.anchor_path} was recorded for reference {recorded_for[:12]}..., "
+                f"not {self.reference_path} ({actual[:12]}...). Rebuild it with "
+                f"tools/build_anchor_set.py --reference {self.reference_path}.")
+        policy = self.model.policy
+        self.reference = _PPO.load(self.reference_path, device=policy.device).policy
+        self.reference.set_training_mode(False)
+        for p in self.reference.parameters():
+            p.requires_grad_(False)
+        self._params = (list(policy.features_extractor.parameters())
+                        + list(policy.mlp_extractor.policy_net.parameters())
+                        + list(policy.action_net.parameters()))
+        self._opt = torch.optim.Adam(self._params, lr=self.lr)
+        log.info("[ANCHOR] Holding KL(healthy || policy) <= %.3f on %s anchor states "
+                 "(reference %s).", self.kl_target, f"{len(self.anchors):,}",
+                 self.reference_path)
+
+    def _kl(self, idx: np.ndarray, grad: bool) -> Any:
+        import torch
+        obs, _ = self.model.policy.obs_to_tensor(self.anchors[idx])
+        # A Categorical for Discrete(10); SB3 types .distribution as a union
+        # that also admits MultiCategorical's list, so it is read through Any.
+        with torch.no_grad():
+            ref_dist: Any = self.reference.get_distribution(obs)
+            ref = ref_dist.distribution.probs
+        with torch.set_grad_enabled(grad):
+            cur_dist: Any = self.model.policy.get_distribution(obs)
+            cur = cur_dist.distribution.probs
+            return (ref * (torch.log(ref + 1e-12) - torch.log(cur + 1e-12))).sum(-1).mean()
+
+    def measure(self) -> float:
+        n = min(self.measure_n, len(self.anchors))
+        idx = self._rng.choice(len(self.anchors), n, replace=False)
+        return float(self._kl(idx, grad=False))
+
+    def consolidate(self) -> dict[str, float]:
+        """Pull the policy back under budget. Never makes anchor KL worse.
+
+        Minimising KL is itself an optimisation and can overshoot: measured in
+        a test rig with a deliberately large step size, 200 steps took anchor
+        KL from 1.42 to 22.55. So the actor is snapshotted first and restored
+        if the result is worse than the start - consolidation can only help or
+        do nothing, and a divergence is reported rather than saved.
+        """
+        import torch
+        before = self.measure()
+        snapshot = [p.detach().clone() for p in self._params]
+        steps = 0
+        after = before
+        while after > self.kl_target and steps < self.max_steps:
+            idx = self._rng.choice(len(self.anchors), min(self.batch, len(self.anchors)),
+                                   replace=False)
+            loss = self._kl(idx, grad=True)
+            self._opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self._params, 0.5)
+            self._opt.step()
+            steps += 1
+            if steps % 8 == 0 or steps == self.max_steps:
+                after = self.measure()
+        reverted = after > before
+        if reverted:
+            with torch.no_grad():
+                for p, saved in zip(self._params, snapshot, strict=True):
+                    p.copy_(saved)
+            after = self.measure()
+            log.error("[ANCHOR] Consolidation diverged over %d steps; the actor was "
+                      "restored (anchor KL %.4f). Lower ANCHOR_LR.", steps, after)
+        rec = {'timestep': float(self.num_timesteps), 'kl_before': before,
+               'kl_after': after, 'steps': float(steps), 'reverted': float(reverted)}
+        self.history.append(rec)
+        self.logger.record("anchor/kl_before", before)
+        self.logger.record("anchor/kl_after", after)
+        self.logger.record("anchor/steps", steps)
+        if after > self.kl_target:
+            log.warning("[ANCHOR] KL %.4f still over the %.3f budget after %d steps "
+                        "(was %.4f).", after, self.kl_target, steps, before)
+        return rec
+
+    def _on_rollout_start(self) -> None:
+        if self._first:                     # nothing has been trained yet
+            self._first = False
+            return
+        self.consolidate()
+
+    def _on_training_end(self) -> None:
+        # ─── THE LAST UPDATE WOULD OTHERWISE BE SAVED UNCONSOLIDATED ───
+        # Consolidation runs at the START of each rollout, i.e. after the
+        # previous update - but no rollout follows the final one, and
+        # train_agent saves the model as soon as learn() returns. Without
+        # this the saved checkpoint carries one update that was never checked
+        # against the budget. (Milestone saves are safe: they happen during a
+        # rollout, after that rollout's consolidation.) Measured on the first
+        # run: the final update took anchor KL 0.079 -> 0.116, inside the
+        # 0.13 budget by luck rather than by design.
+        if not self._first:
+            self.consolidate()
+
+    def _on_step(self) -> bool:
+        return True
+
+
 class ValueWarmupCallback(BaseCallback):
     """Runs the first stretch of the QA phase at a reduced learning rate.
 
@@ -246,19 +397,66 @@ class ValueWarmupCallback(BaseCallback):
     lr_schedule CLOSURE built from the checkpoint's saved rate, and the
     optimizer reads the schedule, not the attribute - so assigning
     model.learning_rate alone silently does nothing at all.
+
+    ─── A LOWER LEARNING RATE DID NOT DO WHAT THE PARAGRAPH ABOVE CLAIMS ───
+    Lowering the rate slows the critic and the actor equally, so the actor
+    still walks on the critic's wrong estimates - just more slowly. Measured
+    on the 6,032,768-step seed, in two independent 10-update runs, the policy
+    began drifting immediately: episode length 334 -> 1,010 and episode
+    return 14.9 -> 6.5 within 8 updates, with the first minibatch of the
+    first update already at approx_kl 0.08. And once NORMAL_LR was set equal
+    to VF_WARMUP_LR the warm-up became a literal no-op.
+
+    So `freeze_actor` does what the docstring always intended: the shared
+    features and the action head are frozen (requires_grad False), leaving
+    only the critic's value head to fit. The policy is then EXACTLY stationary
+    while the critic re-fits - the weights cannot move, so neither can the
+    action distribution - and the drift the actor accumulated on wrong
+    advantages cannot happen at all. It is released when the critic's
+    explained variance reaches `ev_release` on two consecutive updates, or
+    when `warmup_until` is reached, whichever comes first.
     """
 
     def __init__(self, warmup_until: int, warmup_lr: float, normal_lr: float,
+                 freeze_actor: bool = False, ev_release: float | None = None,
                  verbose: int = 0) -> None:
         super().__init__(verbose)
         self.warmup_until = warmup_until
         self.warmup_lr = warmup_lr
         self.normal_lr = normal_lr
+        self.freeze_actor = freeze_actor
+        self.ev_release = ev_release
         self._restored = False
+        self._frozen = False
+        self._ev_hits = 0
 
     def _apply(self, lr: float) -> None:
         self.model.learning_rate = lr
         self.model.lr_schedule = FloatSchedule(lr)
+
+    def _actor_params(self) -> list[Any]:
+        """Everything the ACTION distribution depends on. With shared features
+        that includes the feature extractor: training the critic through it
+        would move the logits, so it is frozen along with the action head."""
+        policy = self.model.policy
+        params = list(policy.features_extractor.parameters())
+        params += list(policy.action_net.parameters())
+        params += list(policy.mlp_extractor.policy_net.parameters())
+        return params
+
+    def _freeze(self) -> None:
+        for p in self._actor_params():
+            p.requires_grad_(False)
+        self._frozen = True
+        trainable = sum(p.numel() for p in self.model.policy.parameters() if p.requires_grad)
+        log.info("[WARMUP] Actor FROZEN: only the critic head trains (%s parameters). "
+                 "The policy cannot move until release.", f"{trainable:,}")
+
+    def _release(self, why: str) -> None:
+        for p in self.model.policy.parameters():
+            p.requires_grad_(True)
+        self._frozen = False
+        log.info("[WARMUP] Actor RELEASED at %s steps: %s.", f"{self.num_timesteps:,}", why)
 
     def _on_training_start(self) -> None:
         if self.num_timesteps >= self.warmup_until:
@@ -270,11 +468,29 @@ class ValueWarmupCallback(BaseCallback):
             self._apply(self.warmup_lr)
             log.info("[WARMUP] Value-function warm-up active: lr=%g until %s steps, then %g.",
                      self.warmup_lr, f"{self.warmup_until:,}", self.normal_lr)
+            if self.freeze_actor:
+                self._freeze()
+
+    def _on_rollout_start(self) -> None:
+        # The previous update's statistics are in the logger by now: the order
+        # is collect -> train -> next rollout, so this is the first moment the
+        # critic's explained variance for the update just finished is readable.
+        if not self._frozen:
+            return
+        ev = self.model.logger.name_to_value.get("train/explained_variance")
+        if ev is None:
+            return
+        self._ev_hits = self._ev_hits + 1 if (
+            self.ev_release is not None and float(ev) >= self.ev_release) else 0
+        if self._ev_hits >= 2:
+            self._release(f"explained variance {float(ev):.3f} >= {self.ev_release} twice running")
 
     def _on_step(self) -> bool:
         if not self._restored and self.num_timesteps >= self.warmup_until:
             self._restored = True
             self._apply(self.normal_lr)
+            if self._frozen:
+                self._release("warm-up step budget spent")
             log.info("[WARMUP] Warm-up complete at %s steps; learning rate restored to %g.",
                      f"{self.num_timesteps:,}", self.normal_lr)
         return True
@@ -746,6 +962,9 @@ class RewardTelemetryCallback(BaseCallback):
             'completion_credit': info.get('completion_credit'),
             'flag_get': bool(info.get('flag_get')),
             'clock_extensions': info.get('clock_extensions'),
+            'rehearsal': info.get('qa_rehearsal'),
+            'max_x': info.get('qa_max_x'),
+            'max_x_at_transition': info.get('qa_max_x_at_transition'),
             'channels_by_phase': by_phase,
             'channels_total': {k: round(v, 6) for k, v in totals.items()},
             # The engine reward, the clamp and the two independent totals,
@@ -878,6 +1097,7 @@ class StagnationCallback(BaseCallback):
         self._last_total: int | None = None
         self._last_step = 0
         self._lean_windows = 0
+        self.detections = 0
 
     def _on_step(self) -> bool:
         if self.coverage is None or self.num_timesteps < self._next:
@@ -905,6 +1125,15 @@ class StagnationCallback(BaseCallback):
         if self._lean_windows < xconfig.STAGNATION_WINDOW:
             return True
         self._lean_windows = 0
+
+        if not xconfig.STAGNATION_ESCALATE:
+            self.detections += 1
+            log.warning("[STAGNATION] %s new px per 10k for %d windows with %s px still "
+                        "unexplored. Detected only - the objective and optimiser are "
+                        "left as validated (config.STAGNATION_ESCALATE is False).",
+                        f"{rate:,.0f}", xconfig.STAGNATION_WINDOW,
+                        f"{remaining:,}" if remaining is not None else "?")
+            return True
 
         model = cast(PPO, self.model)
         mult = min(xconfig.NOVELTY_MULT_MAX, self.coverage.novelty_mult * self.NOVELTY_STEP)
