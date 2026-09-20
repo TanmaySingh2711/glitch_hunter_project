@@ -358,6 +358,40 @@ explored more); anchorB was pre-migrated to mask v3 at
 `checkpoints_qa/candidate_anchorB_6196608_mask_v3` as a ready fallback; and
 `docs/OBJECTIVE2_HANDOFF.md` holds the 17-section report.
 
+**A live coverage table was added** (`training/callbacks.py`,
+`CoverageStatsCallback._print_table_row`) — a column-aligned, human-readable
+Step/Covered/Testable/Coverage%/Remaining/New(sess)/New per 10k table printed
+every `every` steps (header repeats every 10 rows), routed through `log.info`
+rather than raw `print` so it respects the console handler's pending-progress-
+line coordination and lands in the run log too. Covered by two new tests.
+
+**First real campaign milestone, run with the user's explicit go-ahead**
+(2026-09-20, ~16:14-16:28): `--resume-from
+checkpoints_qa/candidate_retreat_6196608/glitch_hunter_qa.zip --anchor-kl
+--safety-cap-timesteps 6360000`, 163,392 steps. Stopped cleanly at the cap
+(actual final step 6,360,448 - PPO's rollout granularity, not a bug). Coverage
+64.59% -> 66.84% (+89,993 px), zero anomalous px throughout, anchor KL never
+needed a pullback (stayed inside the 0.08 budget the whole run). Two
+`WATCHDOG ALERT` lines fired (steps 6,256,560 and 6,307,800) but both times
+coverage kept climbing and level completions stayed strong in the same window
+(10/15 and 9/12) - checked and judged benign, not stopped. Preserved as
+`checkpoints_qa/pre_unlimited_6360000/` and retention-tested at the full 500
+episodes: **43.6% [39.3%, 48.0%], progress 0.690, HEALTHY** (sha `32465cfe`).
+Nominally below the retreat checkpoint's own 48.0%, but the CIs overlap
+heavily (43.6-48.0 overlap region) - consistent with the run-to-run noise
+already measured between anchorB/anchorC (49.2% vs 43.8%), not a regression.
+No rollback triggered.
+
+**A real, unrelated bug was found via GitHub CI and fixed**: `tools/
+migrate_coverage.py` used `os.path.relpath(src, ROOT)` for a provenance field,
+which raises `ValueError` on Windows when the two paths are on different
+drive letters - exactly what happens on the GitHub Windows runner (checkout on
+`D:`, pytest's `tmp_path` on `C:`). Never surfaced locally (one drive here).
+Fixed with a try/except falling back to `os.path.abspath`; added a test that
+monkeypatches `os.path.relpath` to simulate the exact cross-drive failure.
+Verified locally (ruff, mypy, the 6-test file). **Not yet committed or
+pushed** - the user was asked and hasn't answered yet.
+
 **Objective 2 is complete and awaiting the user's launch.** Nothing is
 committed. The campaign has NOT been started.
 
