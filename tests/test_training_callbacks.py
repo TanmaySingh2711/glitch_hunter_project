@@ -292,6 +292,41 @@ def test_the_plateau_audit_and_map_are_written_near_the_end(tmp_path, caplog):
     assert rec.values["coverage/remaining_px"] == 2000
 
 
+def test_the_live_table_prints_covered_remaining_and_percent(caplog):
+    mask = np.zeros((config.GRID_H, config.GRID_W), dtype=bool)
+    mask[400:440, 400:500] = True                   # 40*100 = 4,000 testable px
+    cov = SpatialCoverage(testable_mask=mask)
+    cov.visited[400:440, 400:500] = 1                # fully covered - no [PLATEAU] noise
+    cov.invalidate_remaining()
+    cov.anomalous_px = lambda: 0
+    cb = cbs.CoverageStatsCallback(cov, every=10)
+    cb.init_callback(_Model())
+    with caplog.at_level(logging.INFO):
+        _step(cb, 10, dones=[])
+    table = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("  "))
+    header, rule, row = table.splitlines()
+    assert header.split() == ["Step", "Covered", "Testable", "Coverage%", "Remaining",
+                               "New(sess)", "New/10k"]
+    assert set(rule) == {"-"}
+    # first-ever call: session_new and rate both baseline to 0, not covered
+    assert row.split() == ["10", "4,000", "4,000", "100%", "0", "0", "0"]
+
+
+def test_the_live_table_header_repeats_every_ten_rows(caplog):
+    mask = np.zeros((config.GRID_H, config.GRID_W), dtype=bool)
+    mask[400:440, 400:500] = True
+    cov = SpatialCoverage(testable_mask=mask)
+    cov.anomalous_px = lambda: 0
+    cb = cbs.CoverageStatsCallback(cov, every=1)
+    cb.init_callback(_Model())
+    with caplog.at_level(logging.INFO):
+        for i in range(1, 12):
+            _step(cb, i, dones=[])
+    tables = [r.getMessage() for r in caplog.records if r.getMessage().lstrip().startswith("Step")]
+    # header repeats every 10 rows: row 1 and row 11 of 11 total
+    assert len(tables) == 2
+
+
 def test_a_failed_map_never_stops_training(tmp_path, monkeypatch):
     mask = np.zeros((config.GRID_H, config.GRID_W), dtype=bool)
     mask[400:440, 400:500] = True

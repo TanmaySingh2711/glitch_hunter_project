@@ -532,6 +532,38 @@ class CoverageStatsCallback(BaseCallback):
         self.trail_path = trail_path
         self.checkpoints = checkpoints
         self._episodes = 0
+        self._table_rows_printed = 0
+
+    # A plain, column-aligned table on stdout, separate from the [COVERAGE]
+    # log line above: that line is the persisted record (console + file,
+    # tested), this is purely a live-readable view of the same numbers,
+    # appended (not overwritten) so the run's whole coverage history stays
+    # scrollable rather than collapsing to one gauge line.
+    _TABLE_COLS = (("Step", 11), ("Covered", 12), ("Testable", 12),
+                   ("Coverage%", 10), ("Remaining", 12), ("New(sess)", 11),
+                   ("New/10k", 9))
+    _TABLE_HEADER_EVERY = 10
+
+    def _print_table_row(self, step: int, covered: int, testable_total: int,
+                          pct_text: str, remaining: int | None, session_new: int,
+                          rate: float) -> None:
+        lines = []
+        if self._table_rows_printed % self._TABLE_HEADER_EVERY == 0:
+            header = "  ".join(name.rjust(w) for name, w in self._TABLE_COLS)
+            lines += [header, "-" * len(header)]
+        values = (f"{step:,}", f"{covered:,}", f"{testable_total:,}", pct_text,
+                  f"{remaining:,}" if remaining is not None else "-",
+                  f"{session_new:,}", f"{rate:,.0f}")
+        lines.append("  ".join(v.rjust(w) for v, (_, w)
+                                in zip(values, self._TABLE_COLS, strict=True)))
+        # log.info, not print: T201 bans raw print in this codebase, and
+        # routing through logging means the console handler correctly ends
+        # any write_progress() line first instead of colliding with it.
+        # _ConsoleFormatter shows INFO bare, so the table reaches the
+        # terminal exactly as built; the file gets one extra timestamped
+        # entry per row, which is a cheap, permanent copy of the same table.
+        log.info("\n".join(lines))
+        self._table_rows_printed += 1
 
     def _append_trail(self, entry: dict[str, Any]) -> None:
         path = cast(str, self.trail_path)
@@ -574,6 +606,8 @@ class CoverageStatsCallback(BaseCallback):
                  f"{self.num_timesteps:,}", f"{covered:,}", f"{testable_total or 0:,}",
                  shown, tail, f"{session_new:,}", f"{rate:,.0f}", f"{noncov:,}",
                  f"{anomalous:,}")
+        self._print_table_row(self.num_timesteps, covered, testable_total or 0,
+                               shown, remaining, session_new, rate)
 
         plateau = self.plateau.update(self.num_timesteps, covered)
         if remaining is not None and 0 < remaining < xconfig.STAGNATION_REMAINING_MIN:
