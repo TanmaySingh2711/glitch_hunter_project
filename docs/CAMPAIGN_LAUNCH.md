@@ -1,5 +1,7 @@
 # Campaign launch — corrected spec and monitoring plan
 
+> **Superseded (2026-09-21).** This page records the launch of the capped validation milestone against the old 4,002,095 denominator. The campaign has since run to 15.36M steps and the denominator is now **3,757,990**; the current resume command and banner numbers are in [OBJECTIVE2_WORKLOG.md](OBJECTIVE2_WORKLOG.md) under "Where to resume" -> CURRENT.
+
 ## The banner you pasted did not match this project's real state
 
 Three numbers in it were wrong, checked against the actual files on disk and

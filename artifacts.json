@@ -72,10 +72,10 @@
   "recorded": "2026-09-11"
  },
  "exploration_data/reachable_mask.npz": {
-  "sha256": "9080f13178052c17a101824c6643acd0a01ac1cf22417cc5aa50c75cc73c3a82",
-  "recorded": "2026-09-20",
-  "supersedes": "ae3826bb20a13b1bd19b8702a01da7647b92c6fe54fa2ddd271fcac3bf763401",
-  "note": "Denominator 4,013,723 -> 4,002,095, from two independent corrections that nearly cancel. (1) BOTH OF MARIO'S FORMS: A/B/C and the noncoverage classifier ran on the small collider (30x40) only, while coverage records the real per-form collider; big Mario (40x80) reaches 40 px higher, so ordinary big-Mario play was classified ANOMALOUS - 25,356 px in one measured run, every one inside the big envelope. Method B 4,097,097 -> 4,252,679. (2) FLAG TRIGGER: checkpoint '11' is a 6x600 rect at x 8504 spanning the whole level height; past it Mario is under the scripted flag sequence, so only the grab band (to x 8564) and the recorded slide-and-walk corridor are reachable - removes 167,210 px. Acceptance: no coverage state lost a covered pixel, and the worst anomalous count across 9 states fell from 25,356 to 2. Superseded masks kept under exploration_data/archive_*. Fingerprint ded5cd19..."
+  "sha256": "c48b56cddce7a61e50b5c8e365a5212ba6216260e2531e7859e029c7e34b086d",
+  "recorded": "2026-09-21",
+  "supersedes": "9080f13178052c17a101824c6643acd0a01ac1cf22417cc5aa50c75cc73c3a82",
+  "note": "Denominator 4,002,095 -> 3,757,990 (-244,105): the REAL-ARC ENVELOPE. Methods B/C bound a jump by a rectangle (rise 183 AND reach 480 at once); no arc does both. Re-derived from 228 measured engine arcs (exploration_data/jump_arcs.npz, tools/collect_jump_arcs.py) with a generous bound (arcs slide along walls, every arc launchable from every standable anchor). It accounts for 99.74% of the 3.16M px of real play on the 14.8M state; the 8,274 px it denies are kept as observed play (exploration_data/observed_reach.npz), so coverage is lossless. The 244,105 removed px are all classified CONNECTIVITY_GAP (model gap, never a glitch). Applied by tools/build_reachability.py --tighten; the previous rectangle-envelope mask is archived at exploration_data/archive_mask_v3_rectangle/reachable_mask.npz. PREVIOUS NOTE: Denominator 4,013,723 -> 4,002,095, from two independent corrections that nearly cancel. (1) BOTH OF MARIO'S FORMS: A/B/C and the noncoverage classifier ran on the small collider (30x40) only, while coverage records the real per-form collider; big Mario (40x80) reaches 40 px higher, so ordinary big-Mario play was classified ANOMALOUS - 25,356 px in one measured run, every one inside the big envelope. Method B 4,097,097 -> 4,252,679. (2) FLAG TRIGGER: checkpoint '11' is a 6x600 rect at x 8504 spanning the whole level height; past it Mario is under the scripted flag sequence, so only the grab band (to x 8564) and the recorded slide-and-walk corridor are reachable - removes 167,210 px. Acceptance: no coverage state lost a covered pixel, and the worst anomalous count across 9 states fell from 25,356 to 2. Superseded masks kept under exploration_data/archive_*. Fingerprint ded5cd19..."
  },
  "exploration_data/coverage_bootstrap_6000000.npz": {
   "sha256": "8a57c737eef4c953af4dd38a44640187f9dff30565c8a53a6bea653fc3916ac4",
@@ -93,5 +93,25 @@
   "sha256": "b73e54bc70535af1ba3725c25180785b6cc5f40617d3cdb388c36a1e9afbeddc",
   "recorded": "2026-09-20",
   "note": "coverage_bootstrap_6000000.npz re-stamped to the two-form + flag-trigger mask by tools/migrate_coverage.py. visited_packed byte-identical; covered_testable 1,872,441 unchanged; testable_total 4,013,723 -> 4,002,095. config.BOOTSTRAP_COVERAGE points here."
+ },
+ "exploration_data/archive_mask_v3_rectangle/reachable_mask.npz": {
+  "sha256": "9080f13178052c17a101824c6643acd0a01ac1cf22417cc5aa50c75cc73c3a82",
+  "recorded": "2026-09-21",
+  "note": "The rectangle-envelope mask (4,002,095 px) that preceded the real-arc envelope. Coverage states stamped with it are refused by the current mask; migrate them with tools/migrate_coverage.py."
+ },
+ "exploration_data/jump_arcs.npz": {
+  "sha256": "cc3ef3a8463acea042fbd26dc55772828cd989edc9edf743744569ad1c44c2ee",
+  "recorded": "2026-09-21",
+  "note": "228 distinct real engine jump arcs x 146 frames, from tools/collect_jump_arcs.py (600 take-off sequences; max rise 183 px = config.JUMP_RISE_PX). An input to the mask."
+ },
+ "exploration_data/observed_reach.npz": {
+  "sha256": "23990757c650bc25b79c3080b459a55a7ff066df47741f3cfb92c3374c60d38a",
+  "recorded": "2026-09-21",
+  "note": "Real play (15.2M and 6.03M coverage states) the arc envelope denies: kept testable so the denominator change is lossless. An input to the mask."
+ },
+ "exploration_data/coverage_bootstrap_6000000_mask_v4.npz": {
+  "sha256": "3031dca2af8a6d1f6fd3804228eda759a5fdb2b58e32adce343ea9196cc1aede",
+  "recorded": "2026-09-21",
+  "note": "coverage_bootstrap_6000000_mask_v3.npz re-stamped to the real-arc mask by tools/migrate_coverage.py. visited_packed byte-identical; covered_testable 1,872,441 unchanged; testable_total 4,002,095 -> 3,757,990. config.BOOTSTRAP_COVERAGE points here."
  }
 }

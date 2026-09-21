@@ -218,8 +218,15 @@ def test_methods_reproduce_and_reconcile(env):
             config.GRID_H, config.GRID_W).astype(bool)
     wy0, wx0 = -config.GRID_Y0, -config.GRID_X0
     corridor = corridor_g[wy0:wy0 + config.LEVEL_H, wx0:wx0 + config.LEVEL_W]
+    # The real-arc envelope is an INPUT too: measured jump arcs, plus the real
+    # play those arcs deny. A rebuild without them gives the retired
+    # rectangle-envelope denominator.
+    import os
+    if not os.path.exists(config.JUMP_ARCS_PATH):
+        pytest.skip(f"{config.JUMP_ARCS_PATH} is not in this checkout")
     _solid, testable, _cls, stats = reachability.build_testable(
-        env.game.state, (mario.rect.x, mario.rect.y), flag_corridor=corridor)
+        env.game.state, (mario.rect.x, mario.rect.y), flag_corridor=corridor,
+        arcs=reachability.load_jump_arcs(), observed=reachability.load_observed_reach())
 
     assert stats['testable_total'] == config.TESTABLE_TOTAL, (
         "a clean rebuild produced a different denominator - it is not "
@@ -233,10 +240,11 @@ def test_methods_reproduce_and_reconcile(env):
         f"Methods B and C differ by {stats['bc_delta_pct']:.2f}% - too far "
         f"apart to adopt either")
     assert stats['adopted_method'] == 'C'
-    # The flag-trigger correction ran, and its arithmetic closes exactly.
+    # The flag-trigger and real-arc corrections ran, and the arithmetic closes exactly.
     assert stats['flag_trigger'] is not None and stats['flag_removed_px'] > 0
+    assert stats['arcs_removed_px'] > 0
     assert (stats['method_c_trimmed_px'] - stats['flag_removed_px']
-            == stats['testable_total'])
+            - stats['arcs_removed_px'] == stats['testable_total'])
     assert stats['solid_px'] == config.EXPECTED_SOLID_PX
     assert stats['n_solid_rects'] == config.EXPECTED_SOLID_RECTS
     for key in ('method_a_px', 'method_b_px', 'method_c_px'):
@@ -303,6 +311,18 @@ def test_mask_file_carries_a_fingerprint(masks):
     assert meta['testable_total'] == config.TESTABLE_TOTAL
     assert meta['method_b_px'] >= meta['method_c_px']
     assert meta['lattice'] == config.REACHABILITY_LATTICE
+
+
+def test_mask_file_records_the_arc_envelope_and_keeps_observed_play(masks):
+    _solid, testable, meta = masks
+    assert meta['arcs_removed_px'] > 0, "the real-arc envelope removed nothing"
+    assert meta['observed_px'] > 0
+    observed = reachability.load_observed_reach()
+    if observed is None:
+        pytest.skip("observed_reach.npz is not in this checkout")
+    # Real play the arcs deny is never dropped: coverage may not go down.
+    assert int(observed.sum()) == meta['observed_px']
+    assert (reachability._embed_in_grid(observed) & ~testable).sum() == 0
 
 
 def test_coverage_state_from_a_different_denominator_is_refused(tmp_path, masks):

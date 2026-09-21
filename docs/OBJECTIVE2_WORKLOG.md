@@ -340,6 +340,67 @@ appear in a result.
 
 ## Where to resume
 
+### CURRENT (2026-09-21): unlimited campaign paused at 15.36M; denominator is now 3,757,990
+
+**What happened.** The user launched the unrestricted campaign from
+`pre_unlimited_6360000` and let it run ~9M steps: coverage 66.84% -> 78.86%
+(15.2M milestone: 3,156,053 px), level completion stayed roughly 40-60% of
+episodes, the anchor never warned, no crash, anomalous px constant at 15,360.
+Growth was two big breakthroughs (+55,745 px near 12.97M, +24,138 px near 14.79M)
+between long plateaus; the last ran from ~14.88M past 15.36M with ~0 new px.
+Policy was not collapsed (entropy_loss -1.5, explained variance 0.87-0.90), so
+the plateau was not a training fault. `STAGNATION_ESCALATE` stays False - its own
+comment records that escalating never helped.
+
+**Why it plateaued: the denominator over-counted.** Methods B/C bound a jump by
+a RECTANGLE (rise 183 AND reach 480 together); no arc does both. Rebuilt with
+228 real engine arcs (`tools/collect_jump_arcs.py`, 600 take-offs; max rise 183):
+
+| model | reachable px | of covered play it explains |
+|---|---|---|
+| old rectangle mask | 4,002,095 | - |
+| real arcs, walls slide the arc (generous) | 3,749,716 | 99.74% |
+| real arcs, an arc dies at a wall (strict) | 3,457,007 | 96.05% |
+
+Of the 846,634 px then uncovered: <= 602,529 reachable, >= 244,105 not; all of
+the unreachable part is high in the sky (y < 300). Everything below y 300 that
+was still uncovered was reachable. So 100% was unattainable, and the plateau was
+the hard multi-jump upper band.
+
+**Change made (uncommitted).** `TESTABLE_TOTAL` 4,002,095 -> **3,757,990**,
+`TESTABLE_FINGERPRINT` `21eab893d63a2578...`. New code: `reachability.method_arcs`
+/ `apply_arc_envelope` / `load_jump_arcs` / `load_observed_reach`, wired into
+`build_testable(arcs=, observed=)`; `tools/collect_jump_arcs.py`;
+`tools/build_reachability.py --tighten --coverage NPZ...` (equivalent to a full
+rebuild, a few minutes; archives the old mask). Inputs: `exploration_data/
+jump_arcs.npz`, `observed_reach.npz` (8,274 px of real play the arcs deny -
+mostly the very top of the world at x 6000-6200 - kept testable so coverage is
+lossless; cause not identified, death-jump or enemy bounce are only hypotheses).
+The 244,105 removed px are classified CONNECTIVITY_GAP (model gap, never a
+glitch); the taxonomy changed on exactly those px and nowhere else (checked).
+Old mask archived at `exploration_data/archive_mask_v3_rectangle/`. Bootstrap
+re-stamped to `coverage_bootstrap_6000000_mask_v4.npz`. New tests:
+`tests/test_arc_reach.py` (9). `artifacts.json` updated. Still an UPPER bound:
+the strict model suggests the true ceiling may be ~92% of the new mask.
+
+**The campaign was paused by the user at 12:57 (step 15,363,224). Its pause-time
+save, `glitch_hunter_qa.zip` at the repo root, is TRUNCATED (788,854 bytes,
+BadZipFile) - do not resume from it.** Resume from the 15.2M milestone, migrated
+to the new mask at `checkpoints_qa/pre_mask_v4_15200000/` (loses ~163k steps and
+~900 px of coverage, both re-earnable). Verified by `--dry-run-resume`: 15,200,000
+steps, 3,156,053 / 3,757,990 (83.9825%), remaining 601,937, integrity OK.
+
+```
+venv_gpu\Scripts\python.exe train_agent.py --resume-from checkpoints_qa\pre_mask_v4_15200000\glitch_hunter_qa.zip --anchor-kl --unrestricted
+```
+
+(add `| Tee-Object -FilePath logs\console.log` in PowerShell to keep SB3's table
+visible to a monitor; it is written as UTF-16LE). Every older coverage file is
+now stamped with the previous mask and will be refused - migrate with
+`tools/migrate_coverage.py` before using one.
+
+### Earlier state (2026-09-20)
+
 Done since the last revision of this section: rehearsal B was evaluated at the
 full 500 episodes and **refuted** (30.2% / 0.610, REGRESSED) — `COMPLETION_
 REHEARSAL_PERIOD` stays 0; the flag trigger was derived from the engine and

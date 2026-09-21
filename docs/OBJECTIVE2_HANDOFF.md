@@ -10,6 +10,8 @@ The working log with the full experiment history is
 [OBJECTIVE2_WORKLOG.md](OBJECTIVE2_WORKLOG.md). This report is the summary; the
 worklog is the evidence.
 
+> **Superseded number (2026-09-21).** Every `4,002,095` in this report is the rectangle-envelope denominator. It was replaced by **3,757,990** after the real-arc envelope showed 244,105 of those pixels can never be reached by any jump (see the worklog, "Where to resume" -> CURRENT). Percentages below are historical; the same coverage reads about 5 points higher against the new denominator.
+
 ---
 
 ## 1. Flaws found in the audit

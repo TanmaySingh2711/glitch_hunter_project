@@ -301,8 +301,10 @@ def test_the_short_validation_coverage_now_reports_zero_anomalies(class_map):
     # removed pixels no trajectory had ever covered.
     assert cov.covered_testable() == 2_225_509
     # 4,013,723 before two corrections that nearly cancel: +155,582 px for
-    # big Mario's collider, -167,210 px past the flag trigger.
-    assert config.TESTABLE_TOTAL == 4_002_095
+    # big Mario's collider, -167,210 px past the flag trigger - giving 4,002,095;
+    # then -244,105 px no measured jump arc reaches (real play the arcs deny is
+    # kept, which is why the numerator above did not move).
+    assert config.TESTABLE_TOTAL == 3_757_990
 
 
 def test_the_detector_still_fires_on_a_real_deep_clip(class_map):

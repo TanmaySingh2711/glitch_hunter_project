@@ -1183,6 +1183,33 @@ STAGNATION_ESCALATE = False
 # ═══════════════════════════════════════════════════════════════════════
 EXPLORATION_DATA_DIR = "exploration_data"
 REACHABLE_MASK_PATH = f"{EXPLORATION_DATA_DIR}/reachable_mask.npz"
+
+# ─── THE REAL-ARC ENVELOPE (tools/collect_jump_arcs.py, --tighten) ───
+# Methods B and C bound a jump by a RECTANGLE (JUMP_RISE_PX up AND
+# JUMP_REACH_PX out at once). No arc does both: at the apex a jump has stopped
+# rising and is a few hundred px from where it started, and everything after is
+# a fall. Measured against 600 real engine take-offs (228 distinct arcs) on the
+# 14.8M coverage state, against the 4,002,095 px rectangle mask:
+#
+#     rectangle mask                              4,002,095
+#     reachable by real arcs, walls slide arcs    3,749,716   (generous bound)
+#     reachable by real arcs, walls stop arcs     3,457,007   (strict bound)
+#     real play the generous bound accounts for    99.74 %    of covered px
+#
+# so >= 252,379 px (6.3%) of the old denominator can never be covered by any
+# jump, and the whole of it sits high in the sky (y < 300). The generous bound
+# is the one adopted: it never excludes what Mario can reach, and it is
+# validated against 3.16M px of real play rather than assumed.
+#
+# The 0.26% it does NOT account for (8,274 px, almost all at the very top of the
+# world near x 6000-6200) is real play too - the engine demonstrating what the
+# model denies, exactly as with the big-Mario correction (see reachability.py,
+# "BOTH OF MARIO'S FORMS"). It is kept testable via OBSERVED_REACH_PATH, and is
+# what makes a lossless tools/migrate_coverage.py possible: coverage may never go
+# down. Pixels removed here are classified CONNECTIVITY_GAP (model gap, not a
+# bug), so nothing new becomes a glitch report.
+JUMP_ARCS_PATH = f"{EXPLORATION_DATA_DIR}/jump_arcs.npz"
+OBSERVED_REACH_PATH = f"{EXPLORATION_DATA_DIR}/observed_reach.npz"
 CHECKPOINT_DIR_QA = "checkpoints_qa"
 CHECKPOINT_NAME_QA = "glitch_hunter_qa"
 BASELINE_MODEL = "backup_6M/mario_brain_checkpoint.zip"
@@ -1190,7 +1217,11 @@ BASELINE_MODEL = "backup_6M/mario_brain_checkpoint.zip"
 # tools/migrate_coverage.py (visited bitmap byte-identical, 1,872,441 covered
 # unchanged). The original, stamped with the retired 4,013,723 mask, is kept
 # beside it as a verified historical artifact and would be refused on load.
-BOOTSTRAP_COVERAGE = f"{EXPLORATION_DATA_DIR}/coverage_bootstrap_6000000_mask_v3.npz"
+# Re-stamped AGAIN, to the real-arc mask (tools/migrate_coverage.py; visited bitmap
+# byte-identical, covered_testable 1,872,441 unchanged, testable_total 4,002,095 ->
+# 3,757,990). The mask_v3 file, stamped with the rectangle-envelope mask, is kept
+# beside it and would now be refused on load.
+BOOTSTRAP_COVERAGE = f"{EXPLORATION_DATA_DIR}/coverage_bootstrap_6000000_mask_v4.npz"
 BOOTSTRAP_EPISODES = 40
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1217,12 +1248,13 @@ EXPECTED_SOLID_PX = 733_176
 #   Method C (BFS)        = 4,169,305
 #   B vs C delta          = 1.96%
 #   flag trigger          = -167,210   past x 8504, off the scripted path
-#   ADOPTED               = 4,002,095   (Method C + flag trigger)
+#   real-arc envelope     = -244,105   no measured jump arc reaches it (real play keeps 8,274)
+#   ADOPTED               = 3,757,990   (Method C + flag trigger + real-arc envelope)
 #
 # Coverage percentage is ALWAYS covered_testable / TESTABLE_TOTAL.
 # Pixels outside this mask are noncoverage_px, never coverage. Most
 # of that is NORMAL (jump arcs, pit deaths, collision tolerance);
 # only the genuinely impossible subset is anomalous_px.
-TESTABLE_TOTAL = 4002095
-TESTABLE_FINGERPRINT = "ded5cd19a477a8ed309c91074b8bc7a0197c5576fac1c680178ab4bde3ee6b5b"
+TESTABLE_TOTAL = 3757990
+TESTABLE_FINGERPRINT = "21eab893d63a257826808fe5a048d574373fcbf31f388966efa6a6b0af935e87"
 ADOPTED_METHOD = "C"

@@ -376,6 +376,177 @@ def method_c(solid: Mask, spawn_xy: tuple[int, int], mario_w: int | None = None,
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# THE REAL-ARC ENVELOPE — Method C with measured jumps, not a rectangle
+#
+# Methods B and C let a jump rise JUMP_RISE_PX and travel JUMP_REACH_PX at the
+# SAME time. No arc does: by the time a jump has risen 183 px it is at its
+# apex, a few hundred px along at most, and everything after is a fall. The
+# rectangle therefore puts platforms in reach that no take-off ever touches.
+#
+# This replaces the rectangle with the engine's own trajectories
+# (tools/collect_jump_arcs.py: hundreds of real take-offs, frame by frame) and
+# keeps everything else of Method C: gravity is free, Mario can walk, and a
+# launch only starts from somewhere he can stand.
+#
+# It is deliberately GENEROUS, so that it can only ever over-count:
+#   * every arc may be launched from every standable anchor, though the real
+#     run-up needs ground the anchor may not have;
+#   * an arc that meets a wall or ceiling SLIDES along it and keeps its
+#     remaining motion, instead of stopping (real Mario also loses speed);
+#   * both forms of Mario are unioned, as everywhere else.
+# Measured against 3.16M px of real play, it accounts for 99.74% of them; a
+# strict variant (an arc dies at its first collision) only 96.05%, which is
+# how it is known to be the right side to err on.
+# ══════════════════════════════════════════════════════════════════════════
+def load_jump_arcs(path: str | None = None) -> np.ndarray:
+    """Every recorded take-off as cumulative (dy, dx) offsets: (arcs, frames, 2)."""
+    path = config.JUMP_ARCS_PATH if path is None else path
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"{path} not found - run `python tools/collect_jump_arcs.py` first.")
+    with np.load(path, allow_pickle=False) as d:
+        arcs: np.ndarray = d['paths'].astype(np.int32)
+    if arcs.ndim != 3 or arcs.shape[2] != 2 or arcs.shape[1] < 2:
+        raise ReachabilityMismatch(
+            f"{path}: expected (arcs, frames, 2) offsets, got shape {arcs.shape}")
+    if arcs[:, 0].any():
+        raise ReachabilityMismatch(f"{path}: every arc must start at its take-off (0, 0)")
+    return arcs
+
+
+def load_observed_reach(path: str | None = None) -> Mask | None:
+    """World pixels real play has occupied that the arc envelope denies, or None."""
+    path = config.OBSERVED_REACH_PATH if path is None else path
+    if not os.path.exists(path):
+        return None
+    n = config.LEVEL_H * config.LEVEL_W
+    with np.load(path, allow_pickle=False) as d:
+        return np.unpackbits(d['observed_packed'])[:n].reshape(
+            config.LEVEL_H, config.LEVEL_W).astype(bool)
+
+
+def save_observed_reach(path: str, observed_world: Mask, sources: Sequence[str]) -> None:
+    with atomic_write(path) as fh:
+        np.savez_compressed(fh, observed_packed=np.packbits(observed_world),
+                            observed_px=np.int64(observed_world.sum()),
+                            sources=np.array([str(s) for s in sources]))
+
+
+def fall_closure(reach: Mask, valid: Mask) -> Mask:
+    """Everything below a reached cell, down to the first blocked one (gravity is free)."""
+    rows = np.arange(valid.shape[0], dtype=np.int32)[:, None]
+    last_reached = np.maximum.accumulate(np.where(reach & valid, rows, -1), axis=0)
+    last_blocked = np.maximum.accumulate(np.where(~valid, rows, -1), axis=0)
+    out: Mask = valid & (last_reached > last_blocked)
+    return out
+
+
+def walk_closure(reach: Mask, valid: Mask, standable: Mask) -> Mask:
+    """Walking: every cell of a supported run containing a reached cell, plus the
+    free cell just past either end (he walks off the ledge and falls)."""
+    supported = valid & standable
+    cols = np.arange(valid.shape[1], dtype=np.int32)[None, :]
+    seed = reach & supported
+    run = np.zeros_like(reach)
+    for flip in (False, True):
+        s = seed[:, ::-1] if flip else seed
+        w = supported[:, ::-1] if flip else supported
+        last_seed = np.maximum.accumulate(np.where(s, cols, -1), axis=1)
+        last_gap = np.maximum.accumulate(np.where(~w, cols, -1), axis=1)
+        hit = w & (last_seed > last_gap)
+        run |= hit[:, ::-1] if flip else hit
+    edge = np.zeros_like(run)
+    edge[:, 1:] |= run[:, :-1]
+    edge[:, :-1] |= run[:, 1:]
+    out: Mask = reach | run | (edge & valid)
+    return out
+
+
+def method_arcs(solid: Mask, spawn_xy: tuple[int, int], arcs: np.ndarray,
+                mario_w: int | None = None, mario_h: int | None = None,
+                ) -> tuple[Mask, Stats]:
+    """World pixels a real jump arc can put Mario's collider on, from the spawn.
+
+    Fixed point of: gravity, walking, then every recorded arc launched from
+    each newly reached standable anchor - all blocked by geometry (sliding, see
+    the section header).
+    """
+    mario_w = config.MARIO_SMALL_W if mario_w is None else mario_w
+    mario_h = config.MARIO_SMALL_H if mario_h is None else mario_h
+    valid, standable = anchor_grids(solid, mario_w, mario_h)
+    ah, aw = valid.shape
+    sx, sy = spawn_xy
+    if not valid[sy, sx]:
+        raise ReachabilityMismatch(
+            f"spawn anchor {spawn_xy} is not a valid anchor - the collider "
+            f"size or the level geometry has changed")
+    steps = np.diff(arcs, axis=1)                       # (arcs, frames-1, 2) per-frame (dy, dx)
+    n_arcs = steps.shape[0]
+
+    def free(y: np.ndarray, x: np.ndarray) -> np.ndarray:
+        inside = (y >= 0) & (y < ah) & (x >= 0) & (x < aw)
+        ok: np.ndarray = inside & valid[np.clip(y, 0, ah - 1), np.clip(x, 0, aw - 1)]
+        return ok
+
+    reach = np.zeros_like(valid)
+    reach[sy, sx] = True
+    launched = np.zeros_like(valid)
+    rounds = 0
+    while True:
+        seen = -1
+        while int(reach.sum()) != seen:
+            seen = int(reach.sum())
+            reach = walk_closure(fall_closure(reach, valid), valid, standable)
+        fresh = reach & standable & ~launched
+        if not fresh.any():
+            break
+        launched |= fresh
+        starts = np.argwhere(fresh).astype(np.int32)
+        pos = np.tile(starts, (n_arcs, 1))              # arc-major: (arcs * starts, 2)
+        for t in range(steps.shape[1]):
+            cand = pos + np.repeat(steps[:, t, :], len(starts), axis=0)
+            full = free(cand[:, 0], cand[:, 1])
+            vertical = ~full & free(cand[:, 0], pos[:, 1])
+            horizontal = ~full & ~vertical & free(pos[:, 0], cand[:, 1])
+            pos[:, 0] = np.where(full | vertical, cand[:, 0], pos[:, 0])
+            pos[:, 1] = np.where(full | horizontal, cand[:, 1], pos[:, 1])
+            reach[pos[:, 0], pos[:, 1]] = True
+        rounds += 1
+    px = anchors_to_pixels(reach, mario_w, mario_h)
+    return px, {'anchors': int(reach.sum()), 'px': int(px.sum()),
+                'launch_anchors': int(launched.sum()), 'rounds': rounds}
+
+
+def apply_arc_envelope(testable_world: Mask, solid_world: Mask,
+                       spawn_xy: tuple[int, int], arcs: np.ndarray,
+                       keep_world: Mask | None = None) -> tuple[Mask, Mask, Stats]:
+    """(tightened testable mask, the arc-reachable set, stats).
+
+    Keeps a pixel only if a real arc reaches it (either form of Mario) or it is
+    in `keep_world` - pixels the ENGINE has demonstrated (observed play, the
+    recorded flag corridor). Never adds a pixel: the result is a subset of
+    `testable_world`, so it can only shrink the denominator.
+    """
+    forms = ((config.MARIO_SMALL_W, config.MARIO_SMALL_H),
+             (config.MARIO_BIG_W, config.MARIO_BIG_H))
+    base_h = forms[0][1]
+    arc_px = np.zeros_like(testable_world)
+    for mw, mh in forms:
+        # The spawn ANCHOR is the collider's top-left: a taller form standing
+        # in the same place has a higher one (same reasoning as build_testable).
+        px, _s = method_arcs(solid_world, (spawn_xy[0], spawn_xy[1] + base_h - mh),
+                             arcs, mw, mh)
+        arc_px |= px
+    allowed = arc_px if keep_world is None else (arc_px | keep_world)
+    tightened = testable_world & allowed
+    return tightened, arc_px, {
+        'arc_reach_px': int(arc_px.sum()),
+        'arcs_removed_px': int((testable_world & ~tightened).sum()),
+        'observed_px': 0 if keep_world is None else int((keep_world & testable_world).sum()),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # NONCOVERAGE CLASSIFICATION
 #
 # "Outside the testable mask" is NOT the same as "a bug". Measured against
@@ -709,7 +880,8 @@ def classify_noncoverage(solid_world: Mask, testable_world: Mask, b_world: Mask,
     # x=1202..1206, unreachable by any fully-free 30x40 placement, but swept
     # by the collider during a perfectly ordinary 1-5 px wall overlap.)
     w[near_solid] = CLS_COLLISION_TOL
-    # Legal altitude but the BFS never got there: my model, not a game bug.
+    # Legal altitude but the BFS never got there - or, since the real-arc
+    # envelope, no measured arc does: my model, not a game bug.
     # This OUTRANKS the overlap explanation on purpose. Most of the level is
     # within 6 px of something solid, so letting collision tolerance absorb
     # these would hide the one signal that says the denominator is too small.
@@ -958,7 +1130,9 @@ def apply_flag_trigger(testable_world: Mask, trigger: tuple[int, int, int, int],
 
 def build_testable(level_state: Any, spawn_xy: tuple[int, int],
                    tolerance: float = 0.05,
-                   flag_corridor: Mask | None = None) -> tuple[Mask, Mask, np.ndarray, Stats]:
+                   flag_corridor: Mask | None = None,
+                   arcs: np.ndarray | None = None,
+                   observed: Mask | None = None) -> tuple[Mask, Mask, np.ndarray, Stats]:
     """Runs all three methods, reconciles them, and returns the adopted mask.
 
     Adoption rule, from the brief and enforced here:
@@ -966,6 +1140,12 @@ def build_testable(level_state: Any, spawn_xy: tuple[int, int],
       * If C and B agree within `tolerance`, adopt C - it is the tighter and
         more physically meaningful of the two.
       * If they diverge by more, raise rather than silently pick one.
+
+    `arcs` (load_jump_arcs) replaces C's rectangular jump with the engine's
+    measured arcs as a final tightening; `observed` (load_observed_reach) is
+    real play the arcs deny and stays testable. Omitting `arcs` builds the
+    rectangle-envelope mask this project used before the arc correction -
+    tools/build_reachability.py always passes them.
     """
     # Checked FIRST, before minutes of reachability work: a level with a flag
     # trigger cannot be scored without the recorded scripted corridor, and
@@ -1084,6 +1264,18 @@ def build_testable(level_state: Any, spawn_xy: tuple[int, int],
         adopted, beyond_flag = apply_flag_trigger(adopted, trigger, flag_corridor)
         region = beyond_flag_region(trigger, flag_corridor)
 
+    # ─── THE REAL-ARC ENVELOPE (see its section above) ───
+    # After the flag trigger so that stats['flag_removed_px'] keeps meaning
+    # what it always did; the two only remove pixels, so the order cannot
+    # change the result, only how the removal is itemised.
+    arc_stats: Stats = {}
+    if arcs is not None:
+        keep = np.zeros_like(adopted) if observed is None else observed.copy()
+        if flag_corridor is not None:
+            keep |= fill_corridor(flag_corridor)
+        adopted, _arc_px, arc_stats = apply_arc_envelope(
+            adopted, solid, spawn_xy, arcs, keep)
+
     class_map = classify_noncoverage(
         solid, adopted, b_px,
         mutable_world=mutable_solid_mask(level_state),
@@ -1111,6 +1303,7 @@ def build_testable(level_state: Any, spawn_xy: tuple[int, int],
         'flag_band_right': flag_grab_band_right(trigger) if trigger is not None else None,
         'flag_removed_px': int(beyond_flag.sum()),
         'flag_corridor': flag_corridor,
+        **arc_stats,
     }
     return solid, adopted, class_map, stats
 
@@ -1180,7 +1373,17 @@ def _write_mask_bundle(fh: Any, solid: Mask, testable: Mask,
         # flag corridor is recorded from the engine, not derived from
         # geometry, and a rebuild must be checkable against it.
         **_flag_fields(stats),
+        **_arc_fields(stats),
     )
+
+
+def _arc_fields(stats: Stats) -> dict[str, Any]:
+    """Present only when the arc envelope was applied, so its absence is meaningful."""
+    if 'arcs_removed_px' not in stats:
+        return {}
+    return {'arcs_removed_px': np.int64(stats['arcs_removed_px']),
+            'arc_reach_px': np.int64(stats['arc_reach_px']),
+            'observed_px': np.int64(stats['observed_px'])}
 
 
 def _flag_fields(stats: Stats) -> dict[str, Any]:
@@ -1259,6 +1462,9 @@ def _parse_mask_bundle(d: Any, path: str) -> tuple[Mask, Mask, Stats]:
                       'adopted_method', 'bc_delta_pct', 'lattice',
                       'c_lattice_overshoot_px')}
     meta['testable_fingerprint'] = str(d['testable_fingerprint'])
+    for key in ('arcs_removed_px', 'arc_reach_px', 'observed_px'):
+        if key in d:
+            meta[key] = int(d[key])
     return solid, testable, meta
 
 
