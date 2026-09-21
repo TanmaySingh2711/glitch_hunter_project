@@ -399,6 +399,19 @@ visible to a monitor; it is written as UTF-16LE). Every older coverage file is
 now stamped with the previous mask and will be refused - migrate with
 `tools/migrate_coverage.py` before using one.
 
+### 2026-09-21: campaign stopped at 16,000,000 steps (user's chosen stop point)
+
+Resumed from `pre_mask_v4_15200000` with `--anchor-kl --safety-cap-timesteps
+16000000` (about 1.2 h, ~185 steps/s); stopped cleanly at the cap. Exact milestone:
+`checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` (+ `_coverage.npz`), coverage
+3,166,235 / 3,757,990 = 84.2534%. The repo-root `glitch_hunter_qa.zip` was rewritten
+at the end (valid; the truncated pause-time file is gone).
+
+Official 500-episode retention test on that milestone (12 workers, 51.7 min):
+**56.6% completion (95% CI 52.2-60.9%) vs 46.8% at 6M, mean progress 0.750 vs 0.710,
+greedy run completes in 434 steps - VERDICT HEALTHY.** Result file:
+`evaluation/results/glitch_hunter_qa_16000000_steps_d906d09e.json`.
+
 ### Earlier state (2026-09-20)
 
 Done since the last revision of this section: rehearsal B was evaluated at the
