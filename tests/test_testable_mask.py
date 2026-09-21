@@ -355,3 +355,36 @@ def test_bootstrap_rescored_against_the_adopted_mask(masks):
     cov.assert_consistent()
     assert cov.covered_testable() <= config.TESTABLE_TOTAL
     assert 0.0 < cov.coverage_pct() < 100.0
+
+
+# ── Test: the tracked docs quote the denominator that is actually in force ──
+def test_the_docs_quote_the_current_denominator():
+    """README.md and docs/ARCHITECTURE.md both print the denominator as a
+    literal. Three mask generations shipped (4,013,723 -> 4,002,095 ->
+    3,757,990) and the docs kept the first one through all of them: a reader
+    checking a coverage percentage against the README would have been out by
+    6.8% with nothing in the suite to say so.
+
+    Prose about a *superseded* number is fine and expected - the worklog
+    explains each change - so this only asks that the current denominator
+    appears, and that the retired ones are never presented as current.
+    """
+    import os
+    import re
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    current = f"{config.TESTABLE_TOTAL:,}"
+    retired = ("4,013,723", "4,002,095", "3,866,663", f"{RETIRED_DENOMINATOR:,}")
+    for rel in ("README.md", os.path.join("docs", "ARCHITECTURE.md")):
+        with open(os.path.join(root, rel), encoding="utf-8") as fh:
+            text = fh.read()
+        assert current in text, (
+            f"{rel} never mentions the live denominator {current}; it was "
+            f"changed in exploration/config.py without updating the docs")
+        for old in retired:
+            for line in text.splitlines():
+                if old not in line:
+                    continue
+                assert re.search(r"superseded|retired|was\b|previous|earlier|before|old",
+                                 line, re.IGNORECASE), (
+                    f"{rel} presents the retired denominator {old} as current:\n  {line.strip()}")

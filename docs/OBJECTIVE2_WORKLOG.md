@@ -4,6 +4,148 @@ Read this first after any context compaction or session restart. It holds the
 user's standing brief for Objective 2, every finding so far, what has been
 changed, and exactly where to resume. Keep it current as work progresses.
 
+## FINAL STATE - Objective 2 is CLOSED (2026-09-21). Read this block first.
+
+Development and training are finished. Nothing below this block is a to-do; the
+older sections are the evidence trail and some of their resume commands are
+**superseded**.
+
+**Final approved artifacts (frozen, read-only, hashes in `artifacts.json`):**
+
+| | path | SHA-256 | fact |
+|---|---|---|---|
+| **Final brain** | `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` | `d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899` | exactly 16,000,000 steps |
+| Its coverage state | `checkpoints_qa/glitch_hunter_qa_16000000_steps_coverage.npz` | `aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4` | stamped `model_timesteps` 16,000,000; 3,166,235 / 3,757,990 testable px = **84.2534%**; mask fingerprint `21eab893...`; config hash `2aa92606...` |
+| Retention evidence | `evaluation/results/glitch_hunter_qa_16000000_steps_d906d09e.json` | `be13f1e04da2f5c54c0b7906d6c69ddb6bf62714414ebfdd9d045763b2ae57b5` | 500-episode official protocol |
+
+A byte-identical frozen copy of the pair, the evidence (retention result, 6M
+baseline, coverage audit trail, raw reward telemetry, the campaign's training
+log) and the record `FINAL_OBJECTIVE2.json` live in
+`checkpoints_qa/final_objective2_16000000/`. Every file there is read-only.
+
+**Final retention (official 500-episode protocol, seeds and settings read from the
+frozen 6M baseline; 12 workers, 51.7 min):** completion **283/500 = 56.6%** (95% CI
+52.2-60.9%) against 46.8% for the 6M baseline; mean progress **0.750** against
+0.710; the greedy run completes the level in 434 steps; verdict **HEALTHY**.
+Endings: 283 level-complete, 126 deaths (goomba 92, koopa 19, pit 15), 91
+time-outs. The 6M baseline is unchanged.
+
+**Coverage is 84.25% of the testable mask. It is NOT 100%, and no document or
+report may say so.** 591,755 testable px were not visited.
+
+**Why training was stopped here (the user's decision, and the evidence for it):**
+
+* Returns had become very small. Measured against the new denominator: 6.5M
+  72.49%, 8.5M 79.46%, 10.5M 81.08%, 12.5M 81.58%, 14.5M 83.23%, 16.0M 84.25%.
+  The last 0.8M steps (about 1.2 h, 15.2M -> 16.0M) added 10,182 px (+0.27 pt):
+  about 4,060 in the first ~0.6M steps, then ~6,040 in one breakthrough near
+  15.98M, with long stretches of 0 new px between. Gains come mostly from rare
+  multi-jump breakthroughs, and the stagnation detector warned repeatedly.
+  85% would need about 28,000 more px from the 16M state; the user's estimate
+  from the earlier rate was 10-12 h for 2-3 points.
+* What is left is mostly open air. Of the 591,755 remaining px, 503,804 (85.1%)
+  are at y < 300 and 392,502 (66.3%) at y < 200 (y = 0 is the top of the world).
+  Coverage by altitude: y 300-400 95.03%, y 400-500 95.94%, y 500-600 93.72%,
+  y 200-300 85.51%, y 100-200 71.97%, y 0-100 56.12%. Within 60 px of any
+  solid (ground, pipes, stairs, bricks) coverage is **92.14%** (101,125 px
+  remaining); farther from any solid it is 80.15%. Only 87,951 remaining px are
+  at y >= 300.
+* The user's judgement is that Mario would practically never be in the
+  remaining high-air space during real play, so extra coverage there has little
+  QA value. The data are consistent with that. **It is a judgement, not a proof:
+  nothing shows that no bug exists in the uncovered space.**
+* Continuing was also not free of risk: every extra step adds drift pressure on
+  the completion skill, which is only ever measured by the 500-episode test.
+
+**How to read "accepted practical ceiling" honestly.** 84.25% is the accepted
+*practical stopping point*, not a proven upper limit. Of the uncovered px,
+415,634 are reachable even under the strict arc model (an arc dies at a wall) and
+another 176,121 only under the generous one; the strict-model bound is 95.31%,
+the generous bound 100%. The true reachable ceiling lies between those and is
+unknown.
+
+**Integrity checks run at closure (all passed):** the model zip tests clean and
+carries 16,000,000 steps; the coverage file is stamped 16,000,000 and the
+current mask fingerprint; an independent recount of the visited bitmap against
+the mask gives exactly 3,166,235 / 3,757,990 and the stored totals; the 15.2M
+coverage is a subset of the 16M coverage (0 px lost, +10,182 gained);
+`train_agent.py --dry-run-resume --resume-from <the pair>` reports "retention:
+HEALTHY", paired at 16,000,000, integrity OK; `tools/verify_artifacts.py` 40
+artifacts at that time (37 after the cleanup below), 0 changed (the 6M brain and every backup, the baseline, the masks and
+mask inputs are byte-identical); `checkpoints_qa/pre_main_6032768` is still the
+healthy 6M-era master (`7d2f3e37...`, matches its own 500-episode result).
+
+**An inconsistency was found and fixed during closure.** When the run reached
+the safety cap it wrote the repo-root `glitch_hunter_qa.zip` one rollout later,
+at **16,002,816** steps, never evaluated. Automatic resume picks the highest step
+count, so a bare `train_agent.py` would have resumed that unevaluated file, not
+the approved brain (dry-run showed exactly that). Its coverage is the same
+visited set as the approved pair, so nothing was lost, but the weights differ.
+That pair was archived (later deleted in the cleanup below; its hashes stay in
+`FINAL_OBJECTIVE2.json`) and the root pair was then **replaced by
+byte-identical copies of the approved pair**. The root files are ordinary
+working files: any future training run overwrites them, which is why the frozen
+copies exist. Never treat the root pair as authoritative; check its hash against
+the table above.
+
+**Cleanup done after closure (2026-09-21, ~690 MB).** Deleted: all regenerable
+caches (`.mypy_cache`, `.pytest_cache`, `.ruff_cache`, every `__pycache__`); the 23 unevaluated intermediate milestones 6.8M-15.6M with their
+coverage files and flags; `candidate_anchorB_6196608_mask_v3/`;
+`pre_mask_v4_15200000/`; `archive_post_cap_root_16002816/`; the old-mask
+`coverage_bootstrap_6000000_mask_v3.npz`; four regenerable `coverage_audits/`
+files (the hand-made `arc_reach_map_14.8M.png` was kept); `tools/recheck_bootstrap.py`
+(a finished one-time migration); and `docs/CAMPAIGN_LAUNCH.md`. So any older
+path named below (`candidate_anchorB_6196608*`, `pre_mask_v4_15200000/`, a
+6.8M-15.6M milestone) **no longer exists** - the evidence tables and results
+remain; the files do not. Kept on purpose: the frozen final folder and the 16.0M
+milestone pair, the 6.4M REGRESSED checkpoint, `pre_main_6032768`,
+`candidate_retreat_6196608`, `pre_unlimited_6360000`, the 13 experiment
+`archive_*_run` folders, all 6M brain copies, the live logs and the root pair.
+
+**Starting Objective 3 from this exact state.** Use the frozen pair explicitly,
+never the automatic choice:
+
+```
+venv_gpu\Scripts\python.exe train_agent.py --dry-run-resume --resume-from checkpoints_qa\final_objective2_16000000\glitch_hunter_qa_16000000_steps.zip
+```
+
+(a dry run that trains and writes nothing). A launch of any QA campaign is still
+refused unless `--safety-cap-timesteps N` or `--unrestricted` is given, so a bare
+`train_agent.py` cannot silently continue Objective 2. Do NOT relaunch the old
+"Resume from 15.2M" command below: it would re-run finished work from an older
+state. Objective 3's own training must write to its own checkpoint locations; it
+must not overwrite `checkpoints_qa/glitch_hunter_qa_16000000_steps*` or the
+frozen folder. If it trains on the same Level-1 coverage campaign it is a new
+campaign from this state, and its result is judged by the same 500-episode
+retention test against the 6M baseline before anything is accepted.
+
+**Known limitations at closure (nothing hidden):**
+
+1. Coverage is 84.25%, not 100%; the true reachable ceiling is unknown (95.31%
+   strict bound, 100% generous bound). The uncovered space is not evidence of
+   "no bugs there".
+2. Retention is one 500-episode measurement of one checkpoint. Its CI is 52.2-60.9%;
+   run-to-run variance was measured at several points earlier in this log.
+   Completion is 56.6%, not near 100%: 25% of episodes end in a death and 18%
+   in a time-out. Walls were reduced, not eliminated (see the handoff report).
+3. The denominator was changed mid-campaign (4,002,095 -> 3,757,990, real-arc
+   envelope). Percentages before and after are not comparable unless
+   re-expressed against the same denominator, as done above. The migration was
+   lossless (0 px lost), but the arc model is a model: 8,274 px of real play at
+   the very top of the world (x 6000-6200) are kept as "observed" although the
+   arc envelope denies them, and their cause was never identified.
+4. 21,473 px were flagged "anomalous" at the freeze (17,004 when this run was
+   resumed; it rose during the last breakthrough). They are classifier output,
+   never triaged one by one.
+5. The stagnation detector is detect-only by design (`STAGNATION_ESCALATE =
+   False`). The watchdog raised many "brain collapse" alerts during the
+   campaign; they were treated as benign because completion retention is judged
+   separately by the 500-episode test, which passed.
+6. `checkpoints_qa/`, `evaluation/results/` and the frozen folder are git-ignored
+   local files. Git tracks only `artifacts.json` (the hashes) and these docs; a
+   copy of the frozen folder on another disk is worth making, and is the
+   owner's to arrange.
+
 ## The brief (user's requirements, condensed from the 2026-09-19 prompt)
 
 Build a master Level 1-1 QA agent that explores until all genuinely testable
@@ -150,7 +292,7 @@ artifacts and the 6.03M healthy pair byte-identical.
 15. StagnationCallback was a one-way ratchet (novelty ×1.25→2.5, ent_coef
     ×1.15→0.06), ent_coef saved into checkpoints; fired on stuck-env stalls.
 
-## Changes made (uncommitted)
+## Changes made (all since committed)
 
 * `rewards/qa.py`, `exploration/config.py`: secondary-income gate — interaction
   AND locomotion scaled by `QA_SECONDARY_DROUGHT_SCALE` (0.1) on the shared
@@ -340,7 +482,11 @@ appear in a result.
 
 ## Where to resume
 
-### CURRENT (2026-09-21): unlimited campaign paused at 15.36M; denominator is now 3,757,990
+### HISTORICAL (2026-09-21, superseded by the FINAL STATE block at the top): unlimited campaign paused at 15.36M; denominator is now 3,757,990
+
+> **Do not use the resume command in this subsection.** The campaign was resumed
+> from 15.2M, run to 16.0M, evaluated and closed. The final pair is in the FINAL
+> STATE block. The section is kept as the record of how the denominator changed.
 
 **What happened.** The user launched the unrestricted campaign from
 `pre_unlimited_6360000` and let it run ~9M steps: coverage 66.84% -> 78.86%
@@ -367,7 +513,7 @@ the unreachable part is high in the sky (y < 300). Everything below y 300 that
 was still uncovered was reachable. So 100% was unattainable, and the plateau was
 the hard multi-jump upper band.
 
-**Change made (uncommitted).** `TESTABLE_TOTAL` 4,002,095 -> **3,757,990**,
+**Change made (since committed).** `TESTABLE_TOTAL` 4,002,095 -> **3,757,990**,
 `TESTABLE_FINGERPRINT` `21eab893d63a2578...`. New code: `reachability.method_arcs`
 / `apply_arc_envelope` / `load_jump_arcs` / `load_observed_reach`, wired into
 `build_testable(arcs=, observed=)`; `tools/collect_jump_arcs.py`;
@@ -380,8 +526,10 @@ The 244,105 removed px are classified CONNECTIVITY_GAP (model gap, never a
 glitch); the taxonomy changed on exactly those px and nowhere else (checked).
 Old mask archived at `exploration_data/archive_mask_v3_rectangle/`. Bootstrap
 re-stamped to `coverage_bootstrap_6000000_mask_v4.npz`. New tests:
-`tests/test_arc_reach.py` (9). `artifacts.json` updated. Still an UPPER bound:
-the strict model suggests the true ceiling may be ~92% of the new mask.
+`tests/test_arc_reach.py` (9). `artifacts.json` updated. Still an UPPER bound
+(the generous model): the strict model's ceiling, computed as covered plus
+strictly-reachable remaining, is 95.31% of the new mask (an earlier note here
+said ~92%; that was wrong).
 
 **The campaign was paused by the user at 12:57 (step 15,363,224). Its pause-time
 save, `glitch_hunter_qa.zip` at the repo root, is TRUNCATED (788,854 bytes,
@@ -404,8 +552,10 @@ now stamped with the previous mask and will be refused - migrate with
 Resumed from `pre_mask_v4_15200000` with `--anchor-kl --safety-cap-timesteps
 16000000` (about 1.2 h, ~185 steps/s); stopped cleanly at the cap. Exact milestone:
 `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` (+ `_coverage.npz`), coverage
-3,166,235 / 3,757,990 = 84.2534%. The repo-root `glitch_hunter_qa.zip` was rewritten
-at the end (valid; the truncated pause-time file is gone).
+3,166,235 / 3,757,990 = 84.2534%. At the cap the run also wrote the repo-root
+`glitch_hunter_qa.zip` at 16,002,816 steps (one rollout later); see the FINAL
+STATE block for how that was archived and the root pair realigned to the
+approved 16,000,000-step pair (the truncated pause-time file is gone).
 
 Official 500-episode retention test on that milestone (12 workers, 51.7 min):
 **56.6% completion (95% CI 52.2-60.9%) vs 46.8% at 6M, mean progress 0.750 vs 0.710,

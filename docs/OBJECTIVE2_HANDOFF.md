@@ -3,8 +3,28 @@
 Scope: the Level 1-1 QA explorer. Objective 3 was not started.
 
 Everything below is measured unless a sentence says otherwise. Where a claim is
-an extrapolation rather than an observation it is labelled **UNPROVEN**. Nothing
-has been committed; all changes are in the working tree.
+an extrapolation rather than an observation it is labelled **UNPROVEN**. (When
+this report was written the changes were uncommitted; they have since been
+committed.)
+
+> **OBJECTIVE 2 IS CLOSED (2026-09-21) - this report describes the state
+> *before* the campaign; the outcome is in
+> [OBJECTIVE2_WORKLOG.md](OBJECTIVE2_WORKLOG.md), "FINAL STATE".** The
+> unrestricted campaign was run to exactly **16,000,000 steps** and stopped by
+> the user at **84.25%** practical spatial coverage (3,166,235 / 3,757,990
+> testable px - **not** 100%). Final brain:
+> `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` (SHA-256 `d906d09e...`),
+> paired with `checkpoints_qa/glitch_hunter_qa_16000000_steps_coverage.npz`
+> (`aa384707...`), frozen with its evidence in
+> `checkpoints_qa/final_objective2_16000000/`. Official 500-episode retention:
+> **56.6% completion (CI 52.2-60.9%) vs 46.8% baseline, progress 0.750 vs 0.710,
+> greedy run completes, verdict HEALTHY.** This resolves the two things this
+> report marked open: the "no constrained run observed past ~164k steps" risk
+> (§15.3, §17) - a 16M-step campaign under the anchor kept completion - and the
+> "coverage can be driven to exhaustion" question (§15.5) - it was not driven to
+> exhaustion: the remaining 591,755 px are 85% high air (y < 300) and the gain
+> per hour had become very small, so the user stopped it. Whether a longer run
+> could reach more remains unproven. Sections 15-17 below are kept as written.
 
 The working log with the full experiment history is
 [OBJECTIVE2_WORKLOG.md](OBJECTIVE2_WORKLOG.md). This report is the summary; the
@@ -93,7 +113,7 @@ being reported.
 
 ## 5. Changes made
 
-All uncommitted. Principal files:
+(Uncommitted when written; since committed.) Principal files:
 
 - `exploration/config.py` — new constants, each with its measurement rationale
   in a comment: `ANCHOR_*` (consolidation), `JUMP_RISE_STANDING=166`,
@@ -323,6 +343,10 @@ Stated plainly rather than smoothed over.
    classes are by definition untested.
 
 ## 16. Exact manual command to start the campaign
+
+> **Historical.** These commands started the capped validation. Do not use them
+> now: the campaign has been run and closed. Start Objective 3 only from the
+> frozen pair named in the worklog's FINAL STATE block.
 
 **I have not run this and will not — the campaign is yours to launch.** It opens
 8 game windows.

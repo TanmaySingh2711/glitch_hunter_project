@@ -38,3 +38,25 @@ def test_the_artifact_is_unchanged(rel):
     assert canonical_sha256(path) == MANIFEST[rel]['sha256'], (
         f"{rel} changed since it was recorded; if that was deliberate, re-record "
         f"with `python tools/verify_artifacts.py --record` and say why in the commit")
+
+
+def test_recording_keeps_entries_that_are_not_in_protected(tmp_path, monkeypatch):
+    """--record must not silently drop what was added later (the mask inputs, the
+    frozen Objective-2 pair): their notes are the only record of why they exist."""
+    from tools import verify_artifacts as va
+
+    monkeypatch.setattr(va, "ROOT", str(tmp_path))
+    (tmp_path / "later_added.bin").write_bytes(b"frozen pair")
+    (tmp_path / "changed.bin").write_bytes(b"new bytes")
+    previous = {
+        "later_added.bin": {"sha256": canonical_sha256(str(tmp_path / "later_added.bin")),
+                            "recorded": "2026-09-21", "note": "why it exists"},
+        "changed.bin": {"sha256": "0" * 64, "recorded": "2026-09-01", "note": "kept too"},
+        "not_in_this_checkout.bin": {"sha256": "1" * 64, "recorded": "2026-09-01"},
+    }
+    out = va.record(previous)
+    assert out["later_added.bin"] == previous["later_added.bin"]        # untouched: same bytes, same date
+    assert out["changed.bin"]["note"] == "kept too"
+    assert out["changed.bin"]["sha256"] == canonical_sha256(str(tmp_path / "changed.bin"))
+    assert out["changed.bin"]["recorded"] != "2026-09-01"               # the bytes changed, so re-dated
+    assert "not_in_this_checkout.bin" not in out                        # absent files are not recorded

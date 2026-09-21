@@ -32,7 +32,6 @@ refuses (with the reason) rather than guessing when an input is missing.
 | Tool | What it measured | Writes |
 |---|---|---|
 | `calibrate_phase_reward.py` | Phase 4B: every QA reward channel, per phase and per step, on real trajectories and scripted controllers; `--report` re-analyses a run without replaying it. The PHASE-GATED REWARD values in `exploration/config.py` come from it. | `calibration_runs/*.pkl` |
-| `recheck_bootstrap.py` | One-time migration: re-scored the bootstrap map against the corrected denominator and rewrote it in format v2, keeping the raw v1 evidence beside it. Idempotent; nothing needs it now. | the bootstrap file (+ `_raw_v1.npz` backup) |
 
 ## Conventions
 

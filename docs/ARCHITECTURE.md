@@ -85,7 +85,7 @@ else follows from it:
 | reward | new testable world pixels; phase-gated EXPLORE -> COMPLETE | tiles, milestones, flag +500 - preserved bit for bit |
 | episode ends | castle door, death, or evidence-based safety reset | engine timer, death, stuck rule, TimeLimit |
 | writes | `glitch_hunter_qa.zip`, `checkpoints_qa/` | `mario_brain_checkpoint.zip`, `checkpoints/` |
-| training stops | Level 1 fully covered (4,013,723 px), or a safety cap | 6,000,000 steps |
+| training stops | Level 1 fully covered (3,757,990 px), or a safety cap | 6,000,000 steps |
 
 The dashboard ignores the switch and shows whichever brain is on disk under
 that brain's own reward (`dashboard_backend.select_checkpoint`).
@@ -95,7 +95,7 @@ that brain's own reward (`dashboard_backend.select_checkpoint`).
 These are enforced in code and pinned by tests; changing one is a design
 decision, not a refactor.
 
-* **The denominator is 4,013,723.** Coverage percent is always
+* **The denominator is `config.TESTABLE_TOTAL` (3,757,990).** Coverage percent is always
   `covered_testable / TESTABLE_TOTAL`, and Level 1 is complete only on integer
   equality (`level_completion.is_level_complete`). The mask is fingerprinted;
   a coverage file recorded against a different mask refuses to load.
@@ -153,8 +153,12 @@ decision, not a refactor.
 | `backup_6M/` | by hand | no | byte-identical copies of the 6M brain; `mario_brain_checkpoint.zip` there is `config.BASELINE_MODEL` |
 | `checkpoints/` | legacy training | no | 400k … 6.0M milestones + `.flag` sentinels |
 | `exploration_data/reachable_mask.npz` | `tools/build_reachability.py` | no | the testable mask + noncoverage class map |
-| `exploration_data/coverage_bootstrap_6000000.npz` | `tools/bootstrap_coverage.py` | no | the QA campaign's starting map |
+| `exploration_data/jump_arcs.npz` | `tools/collect_jump_arcs.py` | no | 228 real engine jump arcs - an input to the mask (the real-arc envelope) |
+| `exploration_data/observed_reach.npz` | `tools/build_reachability.py --tighten` | no | real play the arc envelope denies, kept testable so a denominator change loses no pixel |
+| `exploration_data/coverage_bootstrap_6000000_mask_v4.npz` | `tools/bootstrap_coverage.py`, re-stamped by `tools/migrate_coverage.py` | no | the QA campaign's starting map (`config.BOOTSTRAP_COVERAGE`) |
+| `exploration_data/anchor_states.npz` | `tools/build_anchor_set.py` | no | the states `AnchorConsolidationCallback` holds KL against |
 | `checkpoints_qa/`, `glitch_hunter_qa*.{zip,npz}` | QA training | no | matched model/coverage pairs |
+| `checkpoints_qa/final_objective2_16000000/` | by hand at closure | no | **frozen**: the approved Objective-2 brain + coverage + evidence, read-only. See `docs/OBJECTIVE2_WORKLOG.md` |
 | `checkpoints_qa/coverage_audit_trail.jsonl` | QA training | no | append-only coverage growth, one line per 10k steps |
 | `checkpoints_qa/reward_telemetry.jsonl` | QA training | no | append-only reward books: one line per episode (channels per phase) + 10k-step summaries |
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |

@@ -89,11 +89,6 @@
   "sha256": "c8b4ec126651db8cd895118893f745c1b0427416ed6343eab02b382659fd6cbc",
   "recorded": "2026-09-11"
  },
- "exploration_data/coverage_bootstrap_6000000_mask_v3.npz": {
-  "sha256": "b73e54bc70535af1ba3725c25180785b6cc5f40617d3cdb388c36a1e9afbeddc",
-  "recorded": "2026-09-20",
-  "note": "coverage_bootstrap_6000000.npz re-stamped to the two-form + flag-trigger mask by tools/migrate_coverage.py. visited_packed byte-identical; covered_testable 1,872,441 unchanged; testable_total 4,013,723 -> 4,002,095. config.BOOTSTRAP_COVERAGE points here."
- },
  "exploration_data/archive_mask_v3_rectangle/reachable_mask.npz": {
   "sha256": "9080f13178052c17a101824c6643acd0a01ac1cf22417cc5aa50c75cc73c3a82",
   "recorded": "2026-09-21",
@@ -113,5 +108,60 @@
   "sha256": "3031dca2af8a6d1f6fd3804228eda759a5fdb2b58e32adce343ea9196cc1aede",
   "recorded": "2026-09-21",
   "note": "coverage_bootstrap_6000000_mask_v3.npz re-stamped to the real-arc mask by tools/migrate_coverage.py. visited_packed byte-identical; covered_testable 1,872,441 unchanged; testable_total 4,002,095 -> 3,757,990. config.BOOTSTRAP_COVERAGE points here."
+ },
+ "checkpoints_qa/glitch_hunter_qa_16000000_steps.zip": {
+  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
+  "recorded": "2026-09-21",
+  "note": "FINAL OBJECTIVE-2 BRAIN (approved 2026-09-21). 16,000,000 steps; 500-episode retention test 56.6% completion, progress 0.750, HEALTHY. Paired with the coverage file below. See checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json."
+ },
+ "checkpoints_qa/glitch_hunter_qa_16000000_steps_coverage.npz": {
+  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
+  "recorded": "2026-09-21",
+  "note": "FINAL OBJECTIVE-2 COVERAGE STATE, the exact pair of the brain above: 3,166,235 / 3,757,990 testable px = 84.2534% (NOT 100%), mask fingerprint 21eab893."
+ },
+ "checkpoints_qa/final_objective2_16000000/glitch_hunter_qa_16000000_steps.zip": {
+  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
+  "recorded": "2026-09-21",
+  "note": "Frozen byte-identical copy of the final brain (read-only)."
+ },
+ "checkpoints_qa/final_objective2_16000000/glitch_hunter_qa_16000000_steps_coverage.npz": {
+  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
+  "recorded": "2026-09-21",
+  "note": "Frozen byte-identical copy of the final coverage state (read-only)."
+ },
+ "checkpoints_qa/final_objective2_16000000/evidence/glitch_hunter_qa_16000000_steps_d906d09e.json": {
+  "sha256": "be13f1e04da2f5c54c0b7906d6c69ddb6bf62714414ebfdd9d045763b2ae57b5",
+  "recorded": "2026-09-21",
+  "note": "The 500-episode retention result for the final brain: 283/500 = 56.6%, HEALTHY (copy of evaluation/results/glitch_hunter_qa_16000000_steps_d906d09e.json)."
+ },
+ "evaluation/results/glitch_hunter_qa_16000000_steps_d906d09e.json": {
+  "sha256": "be13f1e04da2f5c54c0b7906d6c69ddb6bf62714414ebfdd9d045763b2ae57b5",
+  "recorded": "2026-09-21",
+  "note": "The 500-episode retention result for the final brain (283/500 = 56.6%, HEALTHY); the original."
+ },
+ "checkpoints_qa/final_objective2_16000000/evidence/completion_baseline_6M.json": {
+  "sha256": "c8b4ec126651db8cd895118893f745c1b0427416ed6343eab02b382659fd6cbc",
+  "recorded": "2026-09-21",
+  "note": "Copy of the frozen 6M completion baseline the result was measured against."
+ },
+ "checkpoints_qa/final_objective2_16000000/evidence/coverage_audit_trail.jsonl": {
+  "sha256": "2c856791c7c26eae8daaec86b2c102e775364809dc10271e8c21413548094ac9",
+  "recorded": "2026-09-21",
+  "note": "Coverage audit trail as it stood when the campaign stopped at 16M."
+ },
+ "checkpoints_qa/final_objective2_16000000/evidence/reward_telemetry.jsonl": {
+  "sha256": "76c365f0e9ed845c55981f14771b98b61ed9f24fcd63df2bf4a931e1664e37b2",
+  "recorded": "2026-09-21",
+  "note": "Raw reward telemetry as it stood when the campaign stopped at 16M."
+ },
+ "checkpoints_qa/final_objective2_16000000/evidence/train.log": {
+  "sha256": "e41ba6e01b2cbcfce6d939da26da064c28c8c9848ca496c1efb34bbb4014f8fc",
+  "recorded": "2026-09-21",
+  "note": "The campaign's training log as it stood at 16M (whole Objective-2 campaign)."
+ },
+ "checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json": {
+  "sha256": "c2f3f92de3b2c7ad1cebc1e00f52a934190081190f10d78171ed9794ed3d7c2e",
+  "recorded": "2026-09-21",
+  "note": "The record that names the approved pair, its hashes, coverage and retention numbers."
  }
 }

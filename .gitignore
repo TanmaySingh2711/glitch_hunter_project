@@ -1,40 +1,34 @@
 # ═══════════════════════════════════════════════════════════════════════
-# VIRTUAL ENVIRONMENTS
-# venv_gpu/ is this project's own env (see README setup). Never commit an
-# env: it is gigabytes of platform-specific binaries that every machine
-# has to build for itself anyway.
+# Every entry here is something this project actually produces, or a
+# costly accident worth guarding against. Boilerplate for toolchains this
+# project does not use (packaging builds, Jython, HTML coverage reports)
+# was removed deliberately - an ignore rule for a file that can never
+# appear only makes the real ones harder to find.
 # ═══════════════════════════════════════════════════════════════════════
-venv_gpu/
-venv/
-env/
-.venv/
-.env
-env.bak/
-venv.bak/
 
-# ═══════════════════════════════════════════════════════════════════════
-# PYTHON BUILD / CACHE ARTIFACTS
+# ─── VIRTUAL ENVIRONMENTS ───
+# venv_gpu/ is the documented env (README "Setup"); .venv/ is what
+# `uv sync` creates. Never commit either: gigabytes of platform-specific
+# binaries that every machine has to build for itself anyway.
+venv_gpu/
+.venv/
+
+# Not used today, and there are no secrets in this repository (see
+# SECURITY.md) - kept because committing one costs far more than this line.
+.env
+
+# ─── PYTHON / TOOL CACHES ───
 # All regenerated automatically; none of it is source.
-# ═══════════════════════════════════════════════════════════════════════
 __pycache__/
 *.py[cod]
-*$py.class
-*.egg-info/
-build/
-dist/
-
-# ═══════════════════════════════════════════════════════════════════════
-# TEST / LINT / TYPE-CHECK CACHES
-# Created by pytest, ruff, mypy and pytest-cov (see README "Running the
-# tests"). coverage.xml is what CI's `--cov-report=xml` writes.
-# ═══════════════════════════════════════════════════════════════════════
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# pytest-cov: `.coverage` locally (tools/check.py --full), `coverage.xml`
+# in CI (--cov-report=xml).
 .coverage
-.coverage.*
 coverage.xml
-htmlcov/
 
 # ═══════════════════════════════════════════════════════════════════════
 # TRAINING ARTIFACTS  —  the big one
@@ -62,17 +56,20 @@ mario_brain_*checkpoint*.zip
 !mario_brain_checkpoint.zip
 
 # ═══════════════════════════════════════════════════════════════════════
-# EXPLORATION RETROFIT ARTIFACTS
+# EXPLORATION / QA ARTIFACTS
 # backup_6M/        immutable copy of the 6M brain - the baseline every
 #                   tool and slow test reads (config.BASELINE_MODEL), and
 #                   restorable from checkpoints/, so not worth a second
 #                   20MB blob in history
-# exploration_data/ generated masks and bootstrap coverage
-# checkpoints_qa/   the QA-phase model zips + their paired coverage
+# exploration_data/ generated masks, jump arcs and bootstrap coverage
+# checkpoints_qa/   the QA-phase model zips + their paired coverage, and
+#                   final_objective2_16000000/ - the frozen Objective-2
+#                   pair (its SHA-256s ARE tracked, in artifacts.json)
 # ═══════════════════════════════════════════════════════════════════════
 backup_6M/
 exploration_data/
 checkpoints_qa/
+
 # Tool outputs - regenerable records, one per run:
 #   coverage_audits/     tools/remaining_coverage_map.py (pictures + region lists)
 #   evaluation/results/  tools/evaluate_completion.py and verify_level1.py
@@ -86,30 +83,21 @@ calibration_runs/
 # The QA-phase master lives at the repo root, next to (never on top of)
 # mario_brain_checkpoint.zip. Unlike that file it is NOT tracked: the
 # completion brain is tracked so a fresh clone can watch the agent play, and
-# the QA brain is a work in progress that would add a new 20MB blob to
-# history on every push.
+# the QA brain would add a new 20MB blob to history on every push.
 glitch_hunter_qa.zip
 glitch_hunter_qa_coverage.npz
 
-# ═══════════════════════════════════════════════════════════════════════
-# EDITORS & IDEs
-# ═══════════════════════════════════════════════════════════════════════
+# ─── EDITORS & OS ───
+# CI runs on Windows and Linux and CONTRIBUTING.md invites contributors, so
+# the common per-machine droppings stay listed.
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# ═══════════════════════════════════════════════════════════════════════
-# OS-GENERATED FILES
-# This project lives inside a OneDrive folder on Windows, which sprinkles
-# Desktop.ini and thumbnail caches into directories it syncs.
-# ═══════════════════════════════════════════════════════════════════════
 .DS_Store
 Thumbs.db
-ehthumbs.db
 Desktop.ini
-$RECYCLE.BIN/
 
 # ═══════════════════════════════════════════════════════════════════════
 # NOT IGNORED, ON PURPOSE - listed here so nobody "helpfully" adds them:
@@ -119,4 +107,6 @@ $RECYCLE.BIN/
 #                                 dependency we deliberately ship so the
 #                                 dashboard works with no internet.
 #   mario_brain_checkpoint.zip  - see the exception above.
+#   artifacts.json              - the SHA-256 of every protected artifact,
+#                                 including ones that are themselves ignored.
 # ═══════════════════════════════════════════════════════════════════════

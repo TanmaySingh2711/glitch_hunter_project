@@ -95,6 +95,8 @@ tools/                  command-line scripts, one job each - see tools/README.md
 tests/                  the automated checks (see "Running the tests")
 docs/ARCHITECTURE.md    how the pieces fit together, and the invariants that hold across them
 docs/PERFORMANCE.md     where the time and memory go per worker, and how to re-measure
+docs/OBJECTIVE2_WORKLOG.md   the QA exploration phase: final state, every finding, why it stopped
+docs/OBJECTIVE2_HANDOFF.md   the 17-section report on that phase (written before the campaign ran)
 mario_clone/            the actual Super Mario Bros game (Python/Pygame). Not written by us - see Credits
 static/, templates/     the dashboard page; static/vendor/socket.io.min.js is kept locally so the
                         dashboard works with no internet connection
@@ -109,8 +111,23 @@ Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security notes:
 
 ## The QA exploration phase (from 6M steps onward)
 
+> **This phase is finished (2026-09-21).** The campaign ran to **16,000,000
+> steps** and was stopped there deliberately, at **84.25%** of the testable
+> pixels (3,166,235 / 3,757,990) — **not** 100%. The remaining 591,755 pixels
+> are mostly high air that Mario has no reason to occupy, and coverage had
+> slowed to a fraction of a point per hour. The final brain still finishes the
+> level: **56.6%** completion over the 500-episode protocol, against 46.8% for
+> the 6M baseline it started from.
+>
+> Final brain: `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip`, frozen
+> with its coverage state and evidence in
+> `checkpoints_qa/final_objective2_16000000/`. Full reasoning, hashes and
+> limitations: [`docs/OBJECTIVE2_WORKLOG.md`](docs/OBJECTIVE2_WORKLOG.md)
+> ("FINAL STATE"). The rest of this section describes how the phase works and
+> still applies.
+
 The first 6,000,000 steps trained the agent to **complete the level**. From
-here it is being retrained to **explore the world**, which is a different
+there it was retrained to **explore the world**, which is a different
 objective, not a refinement of the old one:
 
 > previously explored territory = **transit space**
@@ -144,15 +161,21 @@ python tools/build_reachability.py     # once - the coverage denominator
 python tools/bootstrap_coverage.py     # ~3 min - seed the map from the 6M brain
 python tools/calibrate_reward.py       # ~8 min - solve NOVELTY_WEIGHT
 python train_agent.py --safety-cap-timesteps 6020000   # the controlled +20k validation
-# ...review it, then the campaign itself, which runs until Level 1 is fully covered:
-python train_agent.py --unrestricted
-python tools/verify_level1.py          # after completion: is it the final Level-1 brain?
+# ...review it, then the campaign itself:
+python train_agent.py --unrestricted                   # open-ended; or --safety-cap-timesteps N
+python tools/evaluate_completion.py <checkpoint>       # can it still finish the level?
 ```
 
 The first three are one-off. Each refuses to run if the previous one has not,
 rather than silently proceeding with a wrong denominator or an empty map.
 A QA launch with no safety cap is refused unless `--unrestricted` is given,
 so an unbounded campaign never starts by accident.
+
+`--unrestricted` ends only when every testable pixel is covered, which the
+2026 campaign showed does not happen in practice — it was stopped at a chosen
+step count with `--safety-cap-timesteps`, and a checkpoint is accepted on the
+500-episode retention result, never on training statistics.
+`tools/verify_level1.py` applies only if coverage ever does reach 100%.
 `python tools/remaining_coverage_map.py <coverage.npz>` draws what is left of
 the level at any point.
 
@@ -183,7 +206,7 @@ be reached from the spawn point through a chain of real moves.
 | quantity | value | role |
 |---|---|---|
 | `world_raster_px` | 5,452,200 | the 9087x600 level. Informational **only** - never a denominator |
-| `testable_coverable_px` | 4,013,723 | **the denominator** |
+| `testable_coverable_px` | 3,757,990 | **the denominator** (`config.TESTABLE_TOTAL`) |
 | `covered_testable_px` | — | the numerator |
 | `noncoverage_px` | — | recorded, but outside the mask. Never coverage |
 
@@ -191,8 +214,13 @@ be reached from the spawn point through a chain of real moves.
 
 It is built by three independent methods that must reconcile - geometric
 openness, a jump envelope from the measured physics, and a connectivity BFS
-from spawn - and the strictest is adopted. `tools/build_reachability.py`
-prints the full reconciliation and refuses to write a mask if they disagree.
+from spawn - and the strictest is adopted, then narrowed once more by the
+**real-arc envelope**: 228 jump trajectories recorded from the engine itself
+(`tools/collect_jump_arcs.py`), because the three methods bound a jump by a
+rectangle (full rise *and* full reach at once) that no real arc can fill.
+That last step removed 244,105 pixels no jump can ever reach.
+`tools/build_reachability.py` prints the full reconciliation and refuses to
+write a mask if the methods disagree.
 The derivation, including the resolution-convergence study behind it, is in
 `exploration/config.py`.
 
@@ -262,7 +290,7 @@ No GPU needed. The fast tests cover the environment contract, the reward
 rules of both modes, the episode lifecycle and safety reset, coverage and its
 persistence, the dashboard's window control, and the bug detector (including
 that it stays quiet during normal play). The `slow` ones replay the real
-engine for thousands of steps, rebuild the 4,013,723-pixel mask, and load the
+engine for thousands of steps, rebuild the 3,757,990-pixel mask, and load the
 real 6M brain. Tests that need a git-ignored file (`exploration_data/`,
 `checkpoints/`, `backup_6M/`) skip themselves when it is missing.
 

@@ -62,10 +62,25 @@ def verify(manifest: dict[str, dict[str, str]]) -> int:
     return changed
 
 
-def record() -> dict[str, dict[str, str]]:
+def record(previous: dict[str, dict[str, str]] | None = None) -> dict[str, dict[str, str]]:
+    """Re-hash PROTECTED plus everything already in the manifest.
+
+    Entries added since (the real-arc mask inputs, the frozen Objective-2 pair)
+    are not in PROTECTED, and their notes are the only record of why they
+    exist - so an existing entry is kept, with its note, not silently dropped.
+    """
     stamp = datetime.date.today().isoformat()
-    return {rel: {"sha256": canonical_sha256(os.path.join(ROOT, rel)), "recorded": stamp}
-            for rel in PROTECTED if os.path.exists(os.path.join(ROOT, rel))}
+    previous = previous or {}
+    out: dict[str, dict[str, str]] = {}
+    for rel in dict.fromkeys([*PROTECTED, *previous]):
+        if os.path.exists(os.path.join(ROOT, rel)):
+            old = previous.get(rel, {})
+            sha = canonical_sha256(os.path.join(ROOT, rel))
+            unchanged = old.get("sha256") == sha      # keep the original date unless the bytes changed
+            notes = {k: v for k, v in old.items() if k not in ("sha256", "recorded")}
+            out[rel] = {"sha256": sha, "recorded": old.get("recorded", stamp) if unchanged else stamp,
+                        **notes}
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -74,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
                     help='rewrite artifacts.json from the files present now')
     args = ap.parse_args(argv)
     if args.record:
-        recorded = record()
+        recorded = record(read_json(MANIFEST) if os.path.exists(MANIFEST) else None)
         write_json_atomic(recorded, MANIFEST)
         print(f"recorded {len(recorded)} artifacts in {MANIFEST}")
         return 0
