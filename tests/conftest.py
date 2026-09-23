@@ -1,7 +1,7 @@
 """Shared fixtures.
 
 The Mario clone creates its pygame window ONCE per process, at module-import
-time (see mario_clone/data/setup.py). So every test in a run has to share a
+time (see mario_clean/data/setup.py). So every test in a run has to share a
 single environment instance - building a second one would not get a second
 window, and tearing one down would pull the display out from under the rest.
 Hence session scope.
@@ -44,6 +44,8 @@ def _restore_engine_lifecycle():
     for e in _SESSION_ENV:
         e.episode_time_units = None
         e.end_on_level_complete = False
+        e.holds_engine_clock = False
+        e.disable_evidence()
 
 
 @pytest.fixture

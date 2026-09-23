@@ -22,6 +22,10 @@ dependencies = [
     "opencv-python==5.0.0.93",
     "stable-baselines3==2.9.0",
     "torch==2.5.1",
+    # Incident reports (reporting/render.py): the PDF, and the GIF + the
+    # images fpdf2 embeds.
+    "fpdf2==2.8.8",
+    "pillow==12.3.0",
 ]
 
 [dependency-groups]
@@ -69,7 +73,7 @@ explicit = true
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["mario_clone", "venv_gpu",   # vendored / generated
+exclude = ["mario_clean", "mario_bugged", "venv_gpu",   # vendored / generated
            "docs/evidence"]             # preserved anomaly reproductions, kept as recorded
 
 [tool.ruff.lint]
@@ -121,7 +125,8 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
                      "dashboard_backend", "dashboard_service", "evaluation",
-                     "exploration", "game_window", "rewards", "train_agent", "training"]
+                     "exploration", "game_window", "reporting", "rewards", "train_agent",
+                     "training"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests: sys.path is adjusted in conftest before imports; asserts are the point;
@@ -137,22 +142,22 @@ known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
 python_version = "3.12"
 files = ["agent_logic.py", "app.py", "custom_mario_env.py", "dashboard_backend.py",
          "dashboard_service.py", "game_window.py", "train_agent.py",
-         "common", "evaluation", "exploration", "rewards", "training", "tools"]
-exclude = ["^mario_clone/", "^venv_gpu/"]
+         "common", "evaluation", "exploration", "reporting", "rewards", "training", "tools"]
+exclude = ["^mario_clean/", "^mario_bugged/", "^venv_gpu/"]
 strict = true
 warn_unreachable = true
 # numpy / torch / gymnasium generics are pervasive and partly untyped at the
 # boundary; requiring every array's dtype parameter would be noise, not safety.
 disallow_any_generics = false
-# SB3 and the mario_clone engine are untyped; calling into them is allowed,
+# SB3 and the vendored game engine are untyped; calling into them is allowed,
 # and what comes back is typed at our boundary instead.
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
-# The vendored engine (mario_clone/, imported as `data`) and libraries that
+# The vendored engine (mario_clean/ or mario_bugged/, imported as `data`) and libraries that
 # ship no type information.
 module = ["data", "data.*", "cv2", "cv2.*", "flask_socketio", "tensorboard",
-          "pygame._sdl2.*", "cloudpickle"]
+          "pygame._sdl2.*", "cloudpickle", "fpdf", "fpdf.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -162,7 +167,7 @@ disallow_untyped_decorators = false
 
 [tool.coverage.run]
 source = ["."]
-omit = ["mario_clone/*", "venv_gpu/*", "tests/*", "tools/*"]
+omit = ["mario_clean/*", "mario_bugged/*", "venv_gpu/*", "tests/*", "tools/*"]
 branch = true
 
 [tool.coverage.report]

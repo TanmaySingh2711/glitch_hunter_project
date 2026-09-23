@@ -128,6 +128,9 @@ class GlitchHunterWrapper(QAExplorationReward, LegacyCompletionReward,
         # engine clock is kept above zero (CustomMarioEnv.hold_clock). Legacy
         # keeps the timeout the 6M brain was trained with.
         self.holds_engine_clock = qa and not config.QA_TIMEOUT_ENDS_EPISODE
+        # Recorded on the engine too, read only by incident evidence: a replay
+        # of an incident must top the clock up exactly as this episode did.
+        base.holds_engine_clock = self.holds_engine_clock
 
         # Cumulative across episodes: the clamp counter and the death memory.
         self.qa_clip_events = 0

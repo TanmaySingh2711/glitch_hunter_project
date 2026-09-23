@@ -530,7 +530,7 @@ DROUGHT_NOTCH = 0.005
 # The env's own death reward (custom_mario_env.step: `reward = -5.0`), named
 # so the bounds below can be stated against it.
 ENGINE_DEATH_PENALTY = 5.0
-# mario_clone constants MAX_WALK_SPEED = 6 px/frame. Walking, not sprinting,
+# game constants (data/constants.py) MAX_WALK_SPEED = 6 px/frame. Walking, not sprinting,
 # is the pace the dominance check below is held to: the stricter case.
 WALK_PX_PER_SUBSTEP = 6
 # Spawn x = 110 to the castle door: every completed episode in calibration
@@ -742,7 +742,7 @@ PENETRATION_TOL = 6
 
 # How far a bumped brick or coin box rises above its resting position.
 #
-# Not a guess: Brick.bumped() (mario_clone/data/components/bricks.py) runs
+# Not a guess: Brick.bumped() (mario_clean/data/components/bricks.py) runs
 #   rect.y += y_vel;  y_vel += gravity
 # from y_vel = -6.0 with gravity = 1.2, and settles once rect.y is back to
 # rest_height + 5. Integrating that gives a peak 18 px above rest, so for
@@ -755,7 +755,7 @@ BUMP_RISE_PX = 18
 # EPISODE LENGTH — ROOT CAUSE OF THE 2,451-STEP CAP, AND THE FIX
 #
 # The authoritative episode clock is the ENGINE's HUD timer, nothing else.
-# mario_clone/data/components/info.py:
+# mario_clean/data/components/info.py:
 #
 #     self.time = 401                                           (line 23)
 #     elif (CURRENT_TIME - self.current_time) > 400:            (line 302)
@@ -1223,6 +1223,110 @@ BASELINE_MODEL = "backup_6M/mario_brain_checkpoint.zip"
 # beside it and would now be refused on load.
 BOOTSTRAP_COVERAGE = f"{EXPLORATION_DATA_DIR}/coverage_bootstrap_6000000_mask_v4.npz"
 BOOTSTRAP_EPISODES = 40
+
+# ═══════════════════════════════════════════════════════════════════════
+# THE FINAL OBJECTIVE-2 STATE (read-only input to everything after it)
+#
+# The approved QA brain and its coverage, frozen read-only at closure with
+# their evidence (docs/OBJECTIVE2_WORKLOG.md, "FINAL STATE"). Objective 3 reads
+# these and never writes them: the dashboard plays this brain, and every
+# incident names it by SHA-256, checked against FINAL_OBJECTIVE2.json.
+# ═══════════════════════════════════════════════════════════════════════
+FINAL_OBJECTIVE2_DIR = f"{CHECKPOINT_DIR_QA}/final_objective2_16000000"
+FINAL_OBJECTIVE2_RECORD = f"{FINAL_OBJECTIVE2_DIR}/FINAL_OBJECTIVE2.json"
+FINAL_BRAIN_PATH = f"{FINAL_OBJECTIVE2_DIR}/glitch_hunter_qa_16000000_steps.zip"
+FINAL_COVERAGE_PATH = f"{FINAL_OBJECTIVE2_DIR}/glitch_hunter_qa_16000000_steps_coverage.npz"
+
+# ═══════════════════════════════════════════════════════════════════════
+# GAME VARIANTS (Objective 3)
+#
+# mario_clean is the canonical game - every brain and every Objective-2 number
+# was produced on it - and never receives an intentional bug. mario_bugged
+# began as a byte-identical copy and is where deliberate bugs go, each one
+# declared in mario_bugged/INJECTED_BUGS.json (reporting/variants.py).
+#
+# CLEAN_GAME_TREE_SHA256 pins the clean game's content (data/ + resources/,
+# see reporting/variants.py). It is the tree hash of mario_clone/ measured
+# immediately BEFORE the directory was renamed to mario_clean/ (48 files), so
+# it also proves the rename changed nothing. Any edit to mario_clean fails
+# tests/test_game_variants.py.
+#
+# Training, the tools and the evaluator always run the clean game (the
+# default); only an explicit choice - the dashboard's --game flag, or an
+# incident replay of a bugged-variant incident - selects mario_bugged.
+# ═══════════════════════════════════════════════════════════════════════
+CLEAN_GAME_VARIANT = "mario_clean"
+BUGGED_GAME_VARIANT = "mario_bugged"
+GAME_VARIANTS = (CLEAN_GAME_VARIANT, BUGGED_GAME_VARIANT)
+DEFAULT_GAME_VARIANT = CLEAN_GAME_VARIANT
+CLEAN_GAME_TREE_SHA256 = "b1f6b18467db398a41f7272c414d7f2a81ae4929b1c7a788dc572f19fe592630"
+
+# ═══════════════════════════════════════════════════════════════════════
+# INCIDENT EVIDENCE AND REPORTING (Objective 3; see docs/OBJECTIVE3.md)
+# ═══════════════════════════════════════════════════════════════════════
+INCIDENTS_DIR = "incidents"
+
+# ─── HOW MUCH CONTEXT BEFORE A TRIGGER ───
+# Enough to hold the whole manoeuvre that led to the trigger AND the approach
+# before it. The longest real manoeuvre in this engine is a full run-up
+# (45 frames, the longest in tools/collect_jump_arcs.py) followed by the
+# longest airborne arc measured from 600 real take-offs (77 frames,
+# exploration_data/jump_arcs.npz). Twice that is 244 engine frames = 61 agent
+# steps, about 4 s of play. The per-substep trace and the GIF context use the
+# same window, so the picture and the numbers cover the same moments.
+EVIDENCE_LONGEST_RUNUP_FRAMES = 45
+EVIDENCE_LONGEST_AIRBORNE_FRAMES = 77
+EVIDENCE_CONTEXT_SUBSTEPS = 2 * (EVIDENCE_LONGEST_RUNUP_FRAMES + EVIDENCE_LONGEST_AIRBORNE_FRAMES)
+EVIDENCE_CONTEXT_AGENT_STEPS = -(-EVIDENCE_CONTEXT_SUBSTEPS // SUBSTEPS_PER_AGENT_STEP)
+
+# ─── THE NORMAL-PLAY ENVELOPE THE DETECTOR THRESHOLDS WERE SET FROM ───
+# Measured over 4,000 agent steps of the trained policy (custom_mario_env.py,
+# GLITCH DETECTION): |x_vel| never above 13.2, y never above -29. The detector
+# fires at roughly twice these; the confidence model (reporting/analysis.py)
+# measures how far past the threshold a reading went, in units of the gap
+# between this envelope and the threshold.
+NORMAL_PLAY_MAX_ABS_X_VEL = 13.2
+NORMAL_PLAY_MIN_Y = -29
+ENGINE_MAX_Y_VEL = 11              # data/constants.py MAX_Y_VEL: terminal fall speed
+
+# ─── WHEN TWO SIGHTINGS ARE THE SAME INCIDENT ───
+# Same game, same kind, synthetic-or-not the same, and the triggering
+# colliders at most one collider plus one substep of motion apart - i.e. they
+# would overlap if either had been caught one frame earlier or later. Largest
+# collider: big Mario, 40 x 80. Largest motion per frame: 14 px horizontally
+# (the 13.2 envelope, rounded up) and ENGINE_MAX_Y_VEL vertically. Further
+# apart than that is a different site, and a different incident, even for the
+# same kind - two real bugs can share a category.
+DEDUP_RADIUS_X = 40 + 14
+DEDUP_RADIUS_Y = 80 + ENGINE_MAX_Y_VEL
+
+# ─── RENDERING RETRIES ───
+# GIF / Markdown / PDF are rendered off the game thread, after the raw
+# evidence is already on disk. A failure is retried (a report file briefly
+# locked by an indexer or antivirus is the realistic transient on Windows),
+# then recorded as failed in the bundle manifest - never retried forever, and
+# never able to lose the incident itself.
+RENDER_MAX_ATTEMPTS = 3
+RENDER_RETRY_DELAYS_S = (0.5, 2.0)
+
+# ─── REPRODUCTION (replay in a separate process) ───
+# Replaying an incident re-runs its episode from reset, frame by frame, in a
+# headless subprocess. Measured on this machine (2026-09-23): 1.48 ms per
+# engine frame with evidence on (3 x 3,000 frames: 1.464 / 1.496 / 1.480 ms),
+# and ~0.65 s to start a warm interpreter and build the env. The timeout is a
+# start-up allowance plus a per-frame budget ~3.4x the measured cost. The
+# start-up allowance is deliberately far above the warm figure: too short a
+# limit turns a slow cold start (first import after boot, a busy machine)
+# into a false "timeout" verdict, while too long only delays the report of a
+# replay that has genuinely hung.
+REPRODUCE_STARTUP_TIMEOUT_S = 90.0
+REPRODUCE_PER_SUBSTEP_TIMEOUT_S = 0.005
+
+# ─── GIF TIMING ───
+# Context frames are the dashboard's own stream frames (one per agent step,
+# 4 engine frames apart), so the GIF plays at real game speed; the exact
+# trigger frame is then held long enough to read.
+GIF_TRIGGER_HOLD_MS = 1500
 
 # ═══════════════════════════════════════════════════════════════════════
 # EXPECTED GEOMETRY — asserted by build_reachability.py so a level change

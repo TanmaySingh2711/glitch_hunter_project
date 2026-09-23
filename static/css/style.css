@@ -238,11 +238,7 @@ select:focus {
     margin-bottom: 20px;
 }
 
-/* Bug tracker entries.
-   These used to be styled inline from JavaScript. Moving them here keeps
-   presentation in the stylesheet with everything else, and let the JS drop
-   innerHTML in favour of textContent.
-
+/* Bug tracker entries (one per recorded incident, see the Incidents block).
    The selector is deliberately `#bug-terminal li.bug-entry` and not just
    `.bug-entry`: the shared rule above is `#bug-terminal li`, whose ID gives
    it higher specificity than a bare class, so a plain `.bug-entry` would
@@ -250,6 +246,154 @@ select:focus {
 #bug-terminal li.bug-entry {
     color: #ff4444;
     margin-bottom: 8px;
+}
+
+/* ─── Incidents (Objective 3) ─── */
+.meta-line {
+    margin: 8px 0 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    word-break: break-word;
+}
+
+.synthetic-badge {
+    margin: 10px 0 0;
+    padding: 6px 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #1a1a1a;
+    background: #ffd166;
+    border-radius: 6px;
+}
+
+/* Not .hidden alone: the modal's .hidden fades rather than disappears. */
+.synthetic-badge.hidden, .bug-banner.hidden {
+    display: none;
+}
+
+select:disabled {
+    opacity: 1;
+    cursor: default;
+}
+
+.bug-banner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    max-height: 100%;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 12px 14px;
+    background: rgba(40, 6, 12, 0.94);
+    border-bottom: 2px solid #ff395c;
+    box-shadow: 0 6px 24px rgba(255, 57, 92, 0.35);
+}
+
+.bug-banner__title {
+    margin: 0 0 8px;
+    font-size: 1.15rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #ff4d6d;
+}
+
+.bug-banner__hint {
+    margin: 8px 0 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.incident {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    word-break: normal;
+}
+
+#bug-terminal li.incident {
+    color: var(--text-main);
+    border: 1px solid rgba(255, 68, 68, 0.35);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    opacity: 1;
+}
+
+.incident--synthetic {
+    border-color: rgba(255, 209, 102, 0.6) !important;
+}
+
+.synthetic-tag {
+    margin: 0 0 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #ffd166;
+}
+
+.incident-title {
+    display: block;
+    color: #ff6b81;
+    font-size: 0.9rem;
+}
+
+.incident-desc {
+    margin: 4px 0 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.incident-facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 8px;
+    margin: 0 0 6px;
+    font-size: 0.74rem;
+}
+
+.incident-facts dt {
+    color: var(--text-muted);
+}
+
+.incident-facts dd {
+    margin: 0;
+    color: var(--text-main);
+    word-break: break-all;
+}
+
+.evidence-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.evidence-link, .evidence-pending {
+    font-size: 0.72rem;
+    padding: 3px 7px;
+    border-radius: 4px;
+    text-decoration: none;
+}
+
+.evidence-link {
+    color: var(--accent-primary);
+    border: 1px solid rgba(0, 229, 255, 0.4);
+}
+
+.evidence-link:hover {
+    background: rgba(0, 229, 255, 0.12);
+}
+
+.evidence-link--bundle {
+    color: var(--accent-secondary);
+    border-color: rgba(57, 255, 136, 0.4);
+}
+
+.evidence-pending {
+    color: var(--text-muted);
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+}
+
+#log-terminal p.log-bug {
+    color: #ff4444;
 }
 
 /* Scrollbar styling */

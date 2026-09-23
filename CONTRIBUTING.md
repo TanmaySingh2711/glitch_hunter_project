@@ -36,8 +36,10 @@ and Windows.
 * **Comments say why.** The code says what. A comment that restates the next
   line is noise; one that records the incident, measurement or constraint
   behind it is the most valuable line in the file.
-* **Never touch `mario_clone/`.** It is vendored third-party code (see
-  `THIRD_PARTY_NOTICES.md`); read what you need from outside it.
+* **Never touch `mario_clean/`.** It is vendored third-party code (see
+  `THIRD_PARTY_NOTICES.md`) and the pinned baseline game; read what you need
+  from outside it. Deliberate QA bugs go only in `mario_bugged/`, each
+  declared in its `INJECTED_BUGS.json` (see `mario_bugged/VARIANT.md`).
 * **The legacy reward is frozen.** `rewards/legacy.py` is what the 6M brain
   was trained under; `tests/test_reward_wrapper.py` pins it to the bit.
 

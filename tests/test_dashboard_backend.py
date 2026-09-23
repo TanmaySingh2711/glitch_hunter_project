@@ -61,11 +61,18 @@ class _Model:
 
 
 @pytest.fixture
-def injected(monkeypatch):
+def injected(monkeypatch, tmp_path):
     env = _Env(episode_len=3, alert_at=2)
     monkeypatch.setattr(db, "_global_env", env)
     monkeypatch.setattr(db, "_global_model", _Model())
-    return env
+    # preload() also starts the incident pipeline: keep it off the real
+    # incidents/ folder and shut it down afterwards.
+    monkeypatch.setattr(db, "_config", db.DashboardConfig(incidents_dir=str(tmp_path / "inc")))
+    monkeypatch.setattr(db, "_pipeline", None)
+    monkeypatch.setattr(db, "_provenance", {})
+    yield env
+    if db._pipeline is not None:
+        db._pipeline.close()
 
 
 def test_the_stream_yields_a_jpeg_and_a_log_line_per_step(injected):
@@ -95,6 +102,8 @@ def test_the_backend_drives_the_engine_window(injected):
     backend.stop_audio()                          # best-effort; must never raise
     assert injected.unwrapped.calls == ["hide", "open", "hide", "close"]
     assert next(backend.new_session())['step'] == 1
+    assert backend.pipeline is not None, "preload did not start the incident pipeline"
+    assert backend.describe()["game_variant"] == db._config.game_variant
 
 
 def test_the_reward_mode_follows_the_brain_on_disk(tmp_path, monkeypatch):

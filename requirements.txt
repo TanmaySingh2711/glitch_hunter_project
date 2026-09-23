@@ -30,6 +30,9 @@ pygame==2.6.1
 flask==3.1.3
 flask-socketio==5.6.1
 opencv-python==5.0.0.93
+# Incident reports (reporting/render.py): PDF, and the GIF + embedded images.
+fpdf2==2.8.8
+pillow==12.3.0
 
 # NOTE: eventlet was removed on purpose and must NOT be reinstalled.
 # Flask-SocketIO picks its async mode from what's installed, so simply

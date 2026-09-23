@@ -48,7 +48,7 @@ def test_walking_right_actually_moves_mario(fresh):
 def test_step_does_not_change_working_directory(fresh):
     """Regression guard.
 
-    step() used to chdir into mario_clone/ and back on every single frame,
+    step() used to chdir into the game directory and back on every single frame,
     because the game's resource paths were relative. setup.py now builds them
     absolutely, and the chdir was removed from the hot path - if anyone
     reintroduces a chdir that fails to restore, this catches it.

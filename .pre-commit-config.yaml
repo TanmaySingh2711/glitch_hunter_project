@@ -22,9 +22,9 @@ repos:
       # protected byte for byte by their hashes, so they are left exactly as
       # the tool that wrote them left them.
       - id: end-of-file-fixer
-        exclude: ^(mario_clone|static/vendor)/|\.json$
+        exclude: ^(mario_clean|mario_bugged|static/vendor)/|\.json$
       - id: trailing-whitespace
-        exclude: ^(mario_clone|static/vendor)/
+        exclude: ^(mario_clean|mario_bugged|static/vendor)/
       # The master checkpoint is the one large binary tracked on purpose
       # (see .gitignore); anything else this size is a mistake.
       - id: check-added-large-files

@@ -1,10 +1,18 @@
 """The dashboard: a Flask-SocketIO server that streams the agent to a browser.
 
-    python app.py          then open http://localhost:5000
+    python app.py                        then open http://localhost:5000
+    python app.py --game mario_bugged    run the variant that carries deliberate bugs
+    python app.py --synthetic-probe 1000 SYNTHETIC pipeline test: a fake "bug" whenever
+                                         Mario reaches world x 1000 (labelled as such
+                                         everywhere; never a real bug report)
 
 Every socket handler only POSTS a command to the one game thread
 (dashboard_service.GameWindowService); none of them touches the pygame
 window or the env itself - see THE GAME WINDOW HAS ONE OWNER below.
+
+Incident evidence (Objective 3) is served read-only under /api/incidents and
+/incidents/<id>/<file>; see INCIDENT FILES below for how those requests are
+kept inside the incident store.
 """
 from __future__ import annotations
 
@@ -37,20 +45,24 @@ if isinstance(sys.stdout, io.TextIOWrapper):
 # for nothing (see train_agent.limit_worker_blas_threads).
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
+import argparse
 import threading
 import time
+import zipfile
 from collections.abc import Mapping
 from typing import Any
 
-from flask import Flask, render_template
+from flask import Flask, Response, abort, render_template, request, send_file
 from flask_socketio import SocketIO
 
 from common.logging_setup import configure_logging
 
 # dashboard_backend pulls in custom_mario_env, which sets SDL_AUDIODRIVER
 # before pygame loads - so it has to be imported before pygame is used anywhere.
-from dashboard_backend import DashboardBackend
+from dashboard_backend import DashboardBackend, DashboardConfig
 from dashboard_service import THREAD_NAME, GameWindowService
+from exploration import config
+from reporting.store import StoreError
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +97,9 @@ DEFAULT_PORT = 5000
 # game thread (dashboard_service.py); the handlers below only post commands
 # to it. That thread is also the single frame loop - there is no way to start
 # a second one, however fast Start is clicked.
-service = GameWindowService(DashboardBackend(), emit=socketio.emit)
+backend = DashboardBackend()
+backend.notify = socketio.emit        # the report worker announces finished reports
+service = GameWindowService(backend, emit=socketio.emit)
 
 
 @app.route('/')
@@ -110,6 +124,92 @@ def healthz() -> dict[str, Any]:
         "threads_total": threading.active_count(),
         "frame_loops": frame_loops,
     }
+
+
+@app.route('/api/status')
+def api_status() -> dict[str, Any]:
+    """The backend's truth for the page: running, why it paused, the bug
+    that stopped it, and which game and brain are running. A (re)loaded page
+    renders from this, so a banner can never be a frontend-only invention."""
+    return {**service.status(), **backend.describe()}
+
+
+# ─── INCIDENT FILES ───
+# A request names an incident id and a file name - never a path. The store
+# accepts only a well-formed id of an EXISTING incident and a name on its
+# allow-list, and checks the resolved file is still inside that incident's
+# folder (reporting/store.IncidentStore.artifact_path). Everything else is a
+# 404, so "../", absolute paths, symlinks and encoded tricks all end there.
+_MIMETYPES = {".png": "image/png", ".gif": "image/gif", ".pdf": "application/pdf",
+              ".json": "application/json", ".zip": "application/zip"}
+
+
+def _pipeline_or_404() -> Any:
+    pipeline = backend.pipeline
+    if pipeline is None:
+        abort(404)
+    return pipeline
+
+
+@app.route('/api/incidents')
+def api_incidents() -> dict[str, Any]:
+    pipeline = backend.pipeline
+    return {"incidents": pipeline.summaries() if pipeline is not None else []}
+
+
+@app.route('/api/incidents/<incident_id>')
+def api_incident(incident_id: str) -> dict[str, Any]:
+    pipeline = _pipeline_or_404()
+    try:
+        detail: dict[str, Any] = pipeline.detail(incident_id)
+    except (StoreError, KeyError, OSError):
+        abort(404)
+    return detail
+
+
+@app.route('/incidents/<incident_id>/bundle.zip')
+def incident_bundle(incident_id: str) -> Response:
+    """The whole evidence bundle as one download."""
+    pipeline = _pipeline_or_404()
+    try:
+        folder = pipeline.store.bundle_dir(incident_id)
+        listing = sorted(os.listdir(folder))
+    except (StoreError, OSError):
+        abort(404)
+    paths = []
+    for name in listing:                 # only real, allow-listed bundle files
+        try:
+            paths.append((name, pipeline.store.artifact_path(incident_id, name)))
+        except StoreError:
+            continue
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, path in paths:
+            zf.write(path, arcname=f"{incident_id}/{name}")
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"{incident_id}.zip", max_age=0)
+
+
+@app.route('/incidents/<incident_id>/<name>')
+def incident_file(incident_id: str, name: str) -> Response:
+    """One evidence file, shown in the browser or (?download=1) saved."""
+    pipeline = _pipeline_or_404()
+    try:
+        path = pipeline.store.artifact_path(incident_id, name)
+    except StoreError:
+        abort(404)
+    ext = os.path.splitext(name)[1].lower()
+    download = request.args.get('download') == '1'
+    # Markdown opens as readable text; downloaded, it keeps its own type.
+    # No charset here: Flask appends "; charset=utf-8" to every text/* type
+    # itself, and naming it too sent the header with the charset twice.
+    mimetype = ("text/markdown" if download else "text/plain") \
+        if ext == ".md" else _MIMETYPES.get(ext, "application/octet-stream")
+    response = send_file(path, mimetype=mimetype, as_attachment=download,
+                         download_name=f"{incident_id}_{name}", max_age=0)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @socketio.on('connect')
@@ -175,8 +275,30 @@ def bind_address(environ: Mapping[str, str] = os.environ) -> tuple[str, int]:
     return host, port
 
 
-def main() -> None:
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="The Glitch Hunter dashboard.")
+    ap.add_argument("--game", choices=config.GAME_VARIANTS, default=config.DEFAULT_GAME_VARIANT,
+                    help="which game variant to test (default: the clean baseline)")
+    ap.add_argument("--synthetic-probe", type=int, action="append", default=[], metavar="X",
+                    help="PIPELINE TEST ONLY: report a synthetic, clearly labelled 'bug' the "
+                         "first time each episode Mario reaches world x >= X (repeatable)")
+    ap.add_argument("--incidents-dir", default=None,
+                    help=f"where incident bundles are written (default: {config.INCIDENTS_DIR}/)")
+    ap.add_argument("--no-reproduce", action="store_true",
+                    help="skip the replay-based reproduction of each incident")
+    return ap.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
     configure_logging()
+    args = parse_args([] if argv is None else argv)
+    backend.configure(DashboardConfig(
+        game_variant=args.game, synthetic_probes=tuple(args.synthetic_probe),
+        incidents_dir=args.incidents_dir or DashboardConfig().incidents_dir,
+        reproduce=not args.no_reproduce))
+    if args.synthetic_probe:
+        log.warning("SYNTHETIC PIPELINE TEST MODE: probes at x = %s. Incidents they produce are "
+                    "pipeline tests, not game bugs, and are labelled so.", args.synthetic_probe)
     host, port = bind_address()
 
     # ─── PRE-LOAD THE MODEL BEFORE ACCEPTING CONNECTIONS ───
@@ -208,4 +330,4 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])

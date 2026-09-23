@@ -24,4 +24,5 @@
 # Generated / vendored: collapsed in diffs and excluded from language stats.
 uv.lock                   linguist-generated=true -diff
 static/vendor/**          linguist-vendored=true
-mario_clone/**            linguist-vendored=true
+mario_clean/**            linguist-vendored=true
+mario_bugged/**           linguist-vendored=true

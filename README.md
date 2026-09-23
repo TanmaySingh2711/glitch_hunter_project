@@ -53,11 +53,25 @@ That's it. A game window will pop up and the same footage streams live to your b
 - **Stop Testing** — pauses the game (both the pop-up window and the browser view freeze on the same frame). The window stays where it is; minimise, move or close it yourself whenever you like.
 - **The game window's X** — closes the window and pauses testing. Nothing is lost: **Start Testing** reopens it and resumes.
 - **Reset Dashboard** — ends the session and closes the window; the next start is a fresh one. Refreshing the page only pauses.
-- **BUG TRACKER** (red panel) — stays empty unless the game actually breaks a
-  rule it's supposed to follow: Mario alive below the floor, moving at an
-  impossible speed, or the score/coin counter running backwards. An empty
-  panel is the normal, healthy result — it only speaks up for real problems.
+- **BUG TRACKER** (red panel) — every recorded incident, newest first, kept
+  across restarts. It stays empty unless the game actually breaks a rule it's
+  supposed to follow: Mario alive below the floor, far above the level,
+  moving at an impossible speed, or the score/coin counter running backwards.
+  An empty panel is the normal, healthy result. Each entry links to its
+  **PDF report, Markdown report, exact trigger frame, GIF** and the whole
+  evidence bundle.
+- **Testing Stopped - Bug Found** — when a new incident is caught, testing
+  stops by itself (the evidence is already saved) and a red banner over the
+  video shows what happened. It stays until you press **Start Testing**,
+  which carries on from the same moment. A later sighting of the same bug is
+  counted, but does not stop testing again.
 - **LOG TERMINAL** (green panel) — every action the AI takes, with its reward.
+- **Game under test** — which game is running: the clean baseline
+  (`python app.py`) or the variant for deliberate bugs
+  (`python app.py --game mario_bugged`).
+
+How incidents are captured, reported, de-duplicated and replayed:
+[`docs/OBJECTIVE3.md`](docs/OBJECTIVE3.md).
 
 Works fully offline — nothing is loaded from the internet.
 
@@ -80,7 +94,8 @@ If you ever see the AI acting completely random instead of playing well, check t
 ```
 app.py                  the web server (Flask + WebSockets) that streams the game to your browser
 dashboard_service.py    the one thread that owns the game window (Start / Stop / Reset / its X)
-dashboard_backend.py    loads the brain on disk and turns each step into a frame + a log line
+dashboard_backend.py    loads the approved brain and turns each step into a frame, a log line and
+                        any incident it caught
 game_window.py          where the window appears, and the Windows calls pygame lacks
 custom_mario_env.py     the Mario game as a Gymnasium environment, plus the agent's 84x84 view
 agent_logic.py          GlitchHunterWrapper: coverage recording, episode lifecycle, reward
@@ -90,6 +105,8 @@ training/               training building blocks: callbacks, checkpoint helpers,
 exploration/            world-pixel coverage, the testable-pixel mask, the EXPLORE -> COMPLETE
                         lifecycle, Level-1 completion, and config.py - every tunable, with its evidence
 evaluation/             can a checkpoint still finish the level? (completion retention, verification)
+reporting/              bug incidents: evidence capture, the incident store, GIF/Markdown/PDF
+                        reports, replay-based reproduction, the two game variants
 common/                 logging, atomic file writes, the tools' shared start-up
 tools/                  command-line scripts, one job each - see tools/README.md
 tests/                  the automated checks (see "Running the tests")
@@ -97,7 +114,10 @@ docs/ARCHITECTURE.md    how the pieces fit together, and the invariants that hol
 docs/PERFORMANCE.md     where the time and memory go per worker, and how to re-measure
 docs/OBJECTIVE2_WORKLOG.md   the QA exploration phase: final state, every finding, why it stopped
 docs/OBJECTIVE2_HANDOFF.md   the 17-section report on that phase (written before the campaign ran)
-mario_clone/            the actual Super Mario Bros game (Python/Pygame). Not written by us - see Credits
+docs/OBJECTIVE3.md      bug evidence and reports: how an anomaly becomes a reviewable incident
+incidents/              (created at run time, not in git) one folder of evidence per incident
+mario_clean/            the actual Super Mario Bros game (Python/Pygame). Not written by us - see Credits
+mario_bugged/           a copy of it where deliberate test bugs go (none yet) - see mario_bugged/VARIANT.md
 static/, templates/     the dashboard page; static/vendor/socket.io.min.js is kept locally so the
                         dashboard works with no internet connection
 mario_brain_checkpoint.zip   the trained AI's "brain" - needed for the AI to play well
@@ -231,15 +251,40 @@ Every out-of-mask pixel is classified against the level geometry, and only the
 genuinely impossible ones reach the glitch report - over the entire 40-episode
 bootstrap, that count is zero.
 
+## Bug reports (Objective 3)
+
+When the detector sees the game break a rule, the dashboard stops and the
+moment becomes an **incident** in `incidents/<id>/`: the exact trigger frame
+(lossless, full resolution), a GIF of the seconds before it, the per-frame
+trajectory, the episode's complete input log, a Markdown and a PDF report
+that keep what was measured apart from what is inferred, and a replay of the
+episode in a separate process that says honestly whether it happens again.
+Repeat sightings of the same bug are counted, not re-reported.
+
+```bash
+python app.py --game mario_bugged        # test the variant meant for deliberate bugs
+python tools/incidents.py list           # every incident, from the command line
+python tools/incidents.py verify         # re-hash every evidence file
+python tools/validate_incident_pipeline.py   # prove the whole pipeline end to end
+```
+
+There are two copies of the game: `mario_clean/` (the untouched baseline,
+pinned by hash) and `mario_bugged/` (where deliberate bugs go - none yet).
+`--synthetic-probe X` adds a fake, clearly labelled "bug" at world x X, only
+to exercise the pipeline. Full design, schema and limitations:
+[`docs/OBJECTIVE3.md`](docs/OBJECTIVE3.md).
+
+---
+
 ## Credits & Licensing
 
-The game in `mario_clone/` was written by **Justin Meister**
+The game in `mario_clean/` (and its copy `mario_bugged/`) was written by **Justin Meister**
 ([Mario-Level-1](https://github.com/justinmeister/Mario-Level-1)) — not by us. It has
 **no open-source license**, and its author states it is "intended for non-commercial
 educational purposes." The artwork and sounds are Nintendo's property.
 
 **So: learn from this, don't sell it.** Our own code — everything outside
-`mario_clone/` and `static/vendor/` (the Socket.IO client, MIT-licensed by its
+`mario_clean/`, `mario_bugged/` and `static/vendor/` (the Socket.IO client, MIT-licensed by its
 own authors) — is MIT-licensed.
 
 Full details in [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

@@ -17,10 +17,16 @@
         <aside class="panel control-panel">
             <h1>The Glitch Hunter</h1>
             <div class="control-group">
-                <label for="env-select">Select Environment</label>
-                <select id="env-select">
-                    <option value="mario_python">Super Mario Bros (Python Clone)</option>
+                <!-- The game variant is chosen when the server starts
+                     (python app.py --game ...): one process runs one variant.
+                     This shows which one is running; it is filled from
+                     /api/status, never assumed. -->
+                <label for="env-select">Game under test</label>
+                <select id="env-select" disabled>
+                    <option value="">loading...</option>
                 </select>
+                <p id="brain-line" class="meta-line"></p>
+                <p id="synthetic-badge" class="synthetic-badge hidden">SYNTHETIC PIPELINE TEST MODE - probe events are not game bugs</p>
             </div>
             <div class="button-group">
                 <button id="start-btn" class="btn-primary" type="button">START TESTING</button>
@@ -37,15 +43,23 @@
         <main class="panel video-panel">
             <div class="monitor">
                 <img id="video-feed" alt="Live view of the AI playing" />
+                <!-- Shown only while the SERVER reports bug_found (dashboard_service). -->
+                <section id="bug-banner" class="bug-banner hidden" role="alert" aria-live="assertive">
+                    <h2 class="bug-banner__title">Testing Stopped - Bug Found</h2>
+                    <div id="bug-banner-body"></div>
+                    <p class="bug-banner__hint">The evidence is saved. Review it, then press START TESTING to continue.</p>
+                </section>
             </div>
         </main>
 
         <!-- Middle-Right: Bug Tracker -->
         <aside class="panel bug-panel">
             <h3 class="panel-heading panel-heading--bug">BUG TRACKER</h3>
+            <!-- Incident history from /api/incidents: every captured incident,
+                 newest first, kept across restarts. -->
             <div id="bug-terminal" role="log" aria-live="polite">
                 <ul id="bug-list">
-                    <li id="bug-placeholder" class="placeholder">start testing...</li>
+                    <li id="bug-placeholder" class="placeholder">No incidents recorded yet.</li>
                 </ul>
             </div>
         </aside>

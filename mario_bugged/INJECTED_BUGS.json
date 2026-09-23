@@ -1,0 +1,4 @@
+{
+ "note": "Deliberate bugs in this variant. Empty on purpose: no bug has been specified yet. Each entry: {\"id\", \"summary\", \"files\": [paths relative to this folder]}.",
+ "bugs": []
+}

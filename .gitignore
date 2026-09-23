@@ -80,6 +80,11 @@ coverage_audits/
 evaluation/results/
 calibration_runs/
 
+# Incident evidence bundles (Objective 3; reporting/store.py): screenshots,
+# GIFs, reports and replays, one folder per incident. Runtime evidence, not
+# source - kept locally, read-only, and served by the dashboard.
+incidents/
+
 # The QA-phase master lives at the repo root, next to (never on top of)
 # mario_brain_checkpoint.zip. Unlike that file it is NOT tracked: the
 # completion brain is tracked so a fresh clone can watch the agent play, and

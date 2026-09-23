@@ -126,7 +126,7 @@ def rasterize_solids(level_state: Any, *, x0: int = 0, y0: int = 0,
     """Burns every collider group into a mask, in WORLD coordinates.
 
     `level_state` is a live `Level1`. The groups are read from outside rather
-    than by modifying mario_clone/, which stays read-only.
+    than by modifying mario_clean/, which stays read-only.
     """
     w = config.LEVEL_W if w is None else w
     h = config.LEVEL_H if h is None else h

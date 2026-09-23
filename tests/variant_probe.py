@@ -1,0 +1,76 @@
+"""Plays one game variant in a fresh process and prints its behavioural
+fingerprint as JSON. Run by tests/test_game_variants.py, once per variant:
+one process can host only one variant (both import the game as `data`).
+
+    python tests/variant_probe.py mario_clean
+
+Fingerprints, each a SHA-256 so two variants compare with one equality:
+  noop600          the 600 raw observations holding NOOP from reset - the same
+                   measurement as test_hud_timer.LEGACY_NOOP_600_SHA256
+  scripted_state   every substep's physics state (collider, x_vel, y_vel,
+                   Mario's state, score, coins, clock, death) over a scripted
+                   run that walks, sprints, jumps into walls and meets enemies
+  scripted_frames  every 25th full-resolution frame of that run (rendering)
+  geometry         every collider in the level at reset (level layout)
+"""
+import hashlib
+import json
+import os
+import sys
+
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pygame as pg
+
+from custom_mario_env import CustomMarioEnv
+
+# A fixed, varied action script: sprint right with jumps (into the first pipe
+# and over the goombas), retreat, walk, crouch, stand. Deterministic.
+SCRIPT = ([3] * 40 + [4] * 30 + [3] * 60 + [4] * 25 + [0] * 20 + [8] * 30
+          + [9] * 20 + [1] * 60 + [2] * 30 + [7] * 15 + [5] * 25 + [4] * 80
+          + [3] * 100 + [4] * 40 + [6] * 30 + [3] * 120)
+
+
+def main(variant):
+    env = CustomMarioEnv(game_variant=variant)
+    out = {"variant": variant, "loaded_from": os.path.basename(env.game_dir)}
+
+    env.reset()
+    h = hashlib.sha256()
+    for _ in range(600):
+        obs, _r, done, _t, _i = env.step(0)
+        h.update(obs.tobytes())
+        assert not done
+    out["noop600"] = h.hexdigest()
+
+    env.reset()
+    state = env.game.state
+    geo = hashlib.sha256()
+    for group in ("ground_group", "pipe_group", "step_group", "brick_group", "coin_box_group"):
+        for s in sorted(getattr(state, group), key=lambda s: (s.rect.x, s.rect.y, s.rect.w)):
+            geo.update(f"{group}:{s.rect.x},{s.rect.y},{s.rect.w},{s.rect.h};".encode())
+    out["geometry"] = geo.hexdigest()
+
+    st, fr = hashlib.sha256(), hashlib.sha256()
+    deaths = 0
+    for i, action in enumerate(SCRIPT):
+        _o, _r, done, _t, info = env.step(action)
+        mario = env.game.state.mario
+        st.update(json.dumps([info.get("mario_rect"), round(float(info.get("x_vel", 0)), 6),
+                              round(float(getattr(mario, "y_vel", 0)), 6), str(mario.state),
+                              info.get("score"), info.get("coins"), info.get("time_left"),
+                              info.get("is_dead")]).encode())
+        if i % 25 == 0:
+            fr.update(pg.surfarray.array3d(pg.display.get_surface()).tobytes())
+        if done:
+            deaths += 1
+            env.reset()
+    out.update(scripted_state=st.hexdigest(), scripted_frames=fr.hexdigest(),
+               scripted_substeps=len(SCRIPT), scripted_episode_ends=deaths)
+    print(json.dumps(out))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1])

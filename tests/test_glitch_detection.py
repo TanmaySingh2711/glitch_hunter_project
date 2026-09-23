@@ -119,3 +119,21 @@ def test_alert_survives_the_frame_skip_wrapper(env):
             break
     assert len(delivered) == 1, (
         f"alert should reach the agent exactly once, got {len(delivered)}")
+
+
+def test_a_frame_the_engine_could_not_read_is_not_a_score_drop(fresh):
+    """Found in the Objective-3 audit. On a frame where Mario cannot be read,
+    step() reports UNKNOWN_STATE_INFO, whose score and coins are placeholder
+    zeros. The detector compared them with the last real reading and reported
+    "Coin total went backwards (3 -> 0)" about a frame where nothing was
+    measured. It must stay quiet, and keep the last REAL reading as its
+    baseline so a genuine drop afterwards is still caught."""
+    from custom_mario_env import UNKNOWN_STATE_INFO
+    fresh._last_score, fresh._last_coins = 500, 3
+    info = dict(UNKNOWN_STATE_INFO)
+    fresh._detect_glitches(info)
+    assert 'glitch_alert' not in info, info.get('glitch_alert')
+    assert (fresh._last_score, fresh._last_coins) == (500, 3), "the placeholder became the baseline"
+    real = {'mario_rect': (10, 10, 30, 40), 'y_pos': 10, 'score': 400, 'coins': 3}
+    fresh._detect_glitches(real)
+    assert "backwards (500 -> 400)" in real['glitch_alert']

@@ -28,8 +28,9 @@ flowchart TD
     subgraph measure["Measurement"]
         EXP["exploration/<br/>coverage · lifecycle · reachability · level_completion · config"]
         EVAL["evaluation/<br/>completion retention · Level-1 verification"]
+        REPT["reporting/<br/>incidents · evidence · reports · replay · game variants"]
     end
-    GAME["mario_clone/<br/>vendored engine (read-only)"]
+    GAME["mario_clean/ (mario_bugged/)<br/>vendored engine"]
     COMMON["common/<br/>logging · atomic file I/O · tool start-up"]
 
     APP --> SVC --> BACK --> WRAP
@@ -43,13 +44,15 @@ flowchart TD
     WRAP --> ENV --> GAME
     ENV --> EXP
     BACK --> ENV
+    BACK --> REPT
+    ENV -. Detection .-> REPT
     EVAL --> ENV
     EVAL --> EXP
     TRN --> EXP
 ```
 
 Dependencies only point downward. Nothing in `exploration/` imports the
-agent, nothing in `rewards/` imports the trainer, and `mario_clone/` is never
+agent, nothing in `rewards/` imports the trainer, and the game directories are never
 modified - everything the project needs from the engine is read from outside
 (`CustomMarioEnv`, `reachability.rasterize_solids`). `common/` knows nothing
 about Mario at all.
@@ -87,8 +90,10 @@ else follows from it:
 | writes | `glitch_hunter_qa.zip`, `checkpoints_qa/` | `mario_brain_checkpoint.zip`, `checkpoints/` |
 | training stops | Level 1 fully covered (3,757,990 px), or a safety cap | 6,000,000 steps |
 
-The dashboard ignores the switch and shows whichever brain is on disk under
-that brain's own reward (`dashboard_backend.select_checkpoint`).
+The dashboard ignores the switch and shows a brain under that brain's own
+reward (`dashboard_backend.select_checkpoint`): the frozen Objective-2 brain
+when its SHA-256 matches the closure record, else the root QA brain, else
+the 6M brain.
 
 ## Invariants
 
@@ -144,6 +149,15 @@ decision, not a refactor.
 * **One thread owns the game window.** On Windows a window dies with the
   thread that created it, so every window and env call in the dashboard runs
   on `dashboard_service`'s single game thread.
+* **One game variant per process, and the clean one is pinned.** Both
+  variants import as `data`; `claim_game_variant` refuses to mix them.
+  `mario_clean/` must match `CLEAN_GAME_TREE_SHA256`; `mario_bugged/` may differ
+  only where `INJECTED_BUGS.json` says (docs/OBJECTIVE3.md).
+* **Observing never changes the game.** Evidence (Objective 3) is off unless
+  enabled and only reads the engine when on; an episode is identical either way.
+* **An incident is on disk before testing stops.** `IncidentPipeline.capture`
+  writes the raw evidence on the game thread; reports are derived afterwards,
+  and their failure never loses the incident. Evidence is never overwritten.
 
 ## Persistent artifacts
 
@@ -164,6 +178,7 @@ decision, not a refactor.
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |
 | `logs/train.log` | QA / legacy training | no | the run's full log |
 | `evaluation/results/`, `coverage_audits/`, `calibration_runs/` | the tools (see `tools/README.md`) | no | one regenerable record per run |
+| `incidents/` | the dashboard (`reporting/`) | no | one read-only evidence bundle per incident, plus `occurrences.jsonl`; NOT regenerable - it is evidence |
 
 `tools/verify_artifacts.py` re-hashes every artifact that is present against
 `artifacts.json` and reports any that drifted.
@@ -175,6 +190,8 @@ decision, not a refactor.
 | a reward weight or threshold | `exploration/config.py` (the balance asserts run at wrapper construction) | `pytest tests/test_phase_reward.py tests/test_reward_qa.py` |
 | the QA reward logic | `rewards/qa.py` | `pytest tests/test_reward_*.py tests/test_phase_reward.py` |
 | when a QA episode ends | `exploration/lifecycle.py` | `pytest tests/test_episode_lifecycle.py` |
-| what the dashboard shows | `dashboard_backend.py`, `static/`, `templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py` |
+| what the dashboard shows | `dashboard_backend.py`, `static/`, `templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py` |
+| incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
+| the game itself (deliberate bugs) | `mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |
 | anything | - | `python tools/check.py` |

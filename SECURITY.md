@@ -20,6 +20,19 @@ kept narrow.
   remote code execution console by design.
 * **Offline.** The Socket.IO client is vendored (`static/vendor/`); the page
   loads nothing from the internet.
+* **Incident files are served from an allow-list, not from paths.** The
+  report and evidence routes (`/incidents/<id>/<file>`, `/api/incidents/...`)
+  accept only a well-formed id of an existing incident (ASCII, whole-string
+  match) and a file name from a fixed list, and the resolved path must still
+  lie inside that incident's folder (`reporting/store.IncidentStore.artifact_path`).
+  Anything else - `../`, encoded separators, absolute paths, unknown files -
+  is a 404; `tests/test_dashboard_incidents.py` tries a dozen such requests.
+  Files are sent with `X-Content-Type-Options: nosniff`, and the page puts
+  incident text into the DOM with `textContent`, never as HTML.
+* **A replay runs only what the bundle names from a closed list.** Incident
+  reproduction starts a local Python process (`reporting/reproduce.py`) that
+  reads the bundle; extra detectors are rebuilt only from a fixed registry
+  (`reporting.events.detector_from_spec`), never from code in the bundle.
 
 ## Files it loads
 
@@ -52,6 +65,8 @@ pip-audit -r requirements.txt      # set PYTHONUTF8=1 first on Windows
 ```
 
 Last audit (2026-09-11): no known vulnerabilities in `requirements.txt`.
+`fpdf2` and `pillow` were added on 2026-09-23 (incident reports) and have
+not been through pip-audit yet.
 
 **Known exception - torch 2.5.1.** It is pinned because no CUDA 12.1 build
 of anything newer exists (README, "Why the pip install is 3 steps"), and

@@ -3,7 +3,7 @@
     python tools/build_reachability.py
 
 Runs all three reachability methods, reconciles them, adopts one, and writes
-the mask plus the full provenance. Re-run only if mario_clone's level layout
+the mask plus the full provenance. Re-run only if mario_clean's level layout
 changes; the solid-geometry counts are asserted so such a change fails loudly
 rather than silently moving the coverage denominator.
 
@@ -513,7 +513,7 @@ def main(argv: list[str] | None = None) -> None:
             if got != want:
                 raise SystemExit(
                     f"Level geometry changed: {label} got {got:,}, expected "
-                    f"{want:,}.\nIf mario_clone's layout genuinely changed, "
+                    f"{want:,}.\nIf mario_clean's layout genuinely changed, "
                     f"update the EXPECTED_* constants and say so in the "
                     f"commit - the coverage denominator moves with them.")
 

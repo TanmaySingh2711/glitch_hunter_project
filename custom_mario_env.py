@@ -1,17 +1,23 @@
 """The Mario clone as a Gymnasium environment, plus the agent's view of it.
 
-CustomMarioEnv drives mario_clone/ one 60 fps frame per step() with
-synthetic key presses, and reports what happened in the info dict: Mario's
-world-space collider, velocity, score, powerups, death, the engine clock,
-and any GLITCH it observed. wrap_observation() is the one observation chain
-every consumer (training, the dashboard, the tools, the evaluator) puts on
-top of it.
+CustomMarioEnv drives one game variant (mario_clean by default, see
+reporting/variants.py) one 60 fps frame per step() with synthetic key
+presses, and reports what happened in the info dict: Mario's world-space
+collider, velocity, score, powerups, death, the engine clock, and any GLITCH
+it observed. wrap_observation() is the one observation chain every consumer
+(training, the dashboard, the tools, the evaluator) puts on top of it.
+
+With enable_evidence() (Objective 3 - off by default, so training and every
+Objective-2 path run exactly as before), each detector verdict is also
+frozen into a reporting.events.Detection at the substep it fired.
 """
 from __future__ import annotations
 
+import collections
 import gc
 import os
 import sys
+from collections.abc import Mapping
 from typing import Any
 
 import gymnasium as gym
@@ -27,9 +33,41 @@ from gymnasium.wrappers import (
 
 import game_window
 from exploration import config
+from reporting.events import Detection, ExtraDetector, json_safe
 
 # Disable audio to prevent sound spam during training
 os.environ["SDL_AUDIODRIVER"] = "dummy"
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _package_root(module: Any) -> str:
+    """The game-variant directory a loaded `data` package came from."""
+    return os.path.normcase(os.path.dirname(os.path.dirname(os.path.abspath(str(module.__file__)))))
+
+
+def claim_game_variant(variant: str) -> str:
+    """The directory of `variant`, after checking this process can run it.
+
+    Both variants ship the game as the top-level package `data` (the upstream
+    layout, deliberately untouched), and Python imports a package once per
+    process. So a process can host exactly ONE variant: asking for the other
+    after one has loaded would silently run the first one's code while every
+    record said otherwise - exactly the "wrong game selected" failure a QA
+    report must never contain. That is refused here, loudly.
+    """
+    if variant not in config.GAME_VARIANTS:
+        raise ValueError(f"unknown game variant {variant!r}; expected one of "
+                         f"{', '.join(config.GAME_VARIANTS)}")
+    game_dir = os.path.join(PROJECT_ROOT, variant)
+    loaded = sys.modules.get('data')
+    if loaded is not None and getattr(loaded, '__file__', None):
+        if _package_root(loaded) != os.path.normcase(game_dir):
+            raise RuntimeError(
+                f"this process already runs the game from {_package_root(loaded)}; "
+                f"it cannot also run {variant!r}. One game variant per process - "
+                f"start a new process for the other one.")
+    return game_dir
 
 # How many substeps a glitch alert stays attached to info before expiring.
 # Must match the `skip` passed to MaxAndSkipObservation (see the delivery
@@ -106,8 +144,12 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
     # stream). Declaring a render mode without implementing render() would
     # advertise an API this class does not actually support.
 
-    def __init__(self) -> None:
+    def __init__(self, game_variant: str | None = None) -> None:
         super().__init__()
+        # Which game this env drives. The clean game unless a caller names
+        # the other on purpose - training, the tools and the evaluator never do.
+        self.game_variant = config.DEFAULT_GAME_VARIANT if game_variant is None else game_variant
+        self.game_dir = claim_game_variant(self.game_variant)
 
         # ═══════════════════════════════════════════════════════════════════
         # ACTION SPACE (10 discrete actions)
@@ -147,6 +189,21 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         self._pending_glitch: str | None = None
         self._pending_ttl = 0
 
+        # ─── EVIDENCE (Objective 3) ───
+        # Off unless enable_evidence() is called. While off, step() and reset()
+        # do exactly what they did before Objective 3 existed: nothing below
+        # is read, written or allocated.
+        self.evidence_enabled = False
+        self.episode_index = 0                   # resets so far
+        self.holds_engine_clock = False          # set by the QA wrapper that tops the clock up
+        self._extra_detectors: list[ExtraDetector] = []
+        self._trace: collections.deque[dict[str, Any]] = collections.deque(maxlen=1)
+        self._episode_actions = bytearray()
+        self._clock_holds: list[tuple[int, int]] = []
+        self._actions_complete = False
+        self._pending_detections: list[Detection] = []
+        self.dropped_detections = 0
+
         # ─── EPISODE LIFECYCLE OVERRIDES (QA mode only) ───
         # Both default to "leave the engine exactly as it is", which is what
         # legacy mode and the 6M brain rely on. GlitchHunterWrapper sets them
@@ -161,14 +218,13 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         self.end_on_level_complete = False
 
         # Load the Pygame clone safely using absolute paths so SubprocVecEnv workers don't crash
-        self.project_root = os.path.dirname(os.path.abspath(__file__))
-        self.mario_clone_dir = os.path.join(self.project_root, 'mario_clone')
+        self.project_root = PROJECT_ROOT
 
         orig_cwd = os.getcwd()
-        os.chdir(self.mario_clone_dir)
-        sys.path.insert(0, self.mario_clone_dir)
+        os.chdir(self.game_dir)
+        sys.path.insert(0, self.game_dir)
 
-        # The window is created by mario_clone/data/setup.py the first time it
+        # The window is created by <variant>/data/setup.py the first time it
         # is imported in this process (see WINDOW LIFECYCLE below). Wherever
         # that happens - the dashboard, a training worker, a tool, a test - it
         # opens centred on the display the user is on (game_window.py). This
@@ -178,9 +234,17 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         game_window.request_centered_creation()
 
         try:
+            import data
             from data import constants as c
             from data import setup, tools
             from data.states import level1
+
+            # Belt and braces: the package that actually loaded must be the
+            # requested variant's (a stray `data` earlier on sys.path would
+            # otherwise win silently).
+            if _package_root(data) != os.path.normcase(self.game_dir):
+                raise RuntimeError(f"loaded the game from {_package_root(data)}, "
+                                   f"not {self.game_dir}")
 
             # The clone's modules, kept so reset() never re-imports them.
             self.tools_module: Any = tools
@@ -193,8 +257,8 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
             self.fake_time = 0.0
         finally:
             os.chdir(orig_cwd)
-            if self.mario_clone_dir in sys.path:
-                sys.path.remove(self.mario_clone_dir)
+            if self.game_dir in sys.path:
+                sys.path.remove(self.game_dir)
         if creates_window:
             game_window.center_on_current_display()
         # Set by hide_window(): the OS window exists but is off screen.
@@ -236,7 +300,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         # Update state with fake keys.
         #
         # No chdir here any more: this used to wrap the call in
-        # getcwd + chdir(mario_clone) + chdir(back), because the game's music
+        # getcwd + chdir(game dir) + chdir(back), because the game's music
         # paths were relative and pg.mixer.music.load() re-opens them at
         # runtime (game_sound.py can start a track mid-update). setup.py now
         # builds those paths absolutely from its own location, so the update
@@ -369,6 +433,8 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
             info.update(UNKNOWN_STATE_INFO)
             done = bool(self.game.state.done)
 
+        if self.evidence_enabled:
+            self._record_substep(action, info)
         self._detect_glitches(info)
         return obs, reward, done, False, info
 
@@ -410,13 +476,22 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
 
         # Reported at most once per episode per kind: without this, a stuck
         # out-of-bounds Mario would emit the same alert every single frame
-        # and bury the panel in duplicates.
-        def report(kind: str, message: str) -> None:
-            if kind not in self._reported_glitches:
-                self._reported_glitches.add(kind)
-                self._pending_glitch = message
-                self._pending_ttl = GLITCH_ALERT_TTL
-                info['glitch_alert'] = message
+        # and bury the panel in duplicates. With evidence on, the FIRST report
+        # also freezes a Detection - on this substep, before the frame, the
+        # trace or the state can move on (see reporting/events.py).
+        def report(kind: str, message: str, metrics: dict[str, Any] | None = None,
+                   detector: str | None = None, synthetic: bool = False,
+                   key: str | None = None) -> None:
+            key = key or kind
+            if key in self._reported_glitches:
+                return
+            self._reported_glitches.add(key)
+            self._pending_glitch = message
+            self._pending_ttl = GLITCH_ALERT_TTL
+            info['glitch_alert'] = message
+            if self.evidence_enabled:
+                self._freeze_detection(kind, message, detector or f"engine_invariants/{kind}",
+                                       synthetic, metrics or {}, info)
 
         y = info.get('y_pos', 0)
         dead = info.get('is_dead', False)
@@ -431,34 +506,59 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         if y > self.c_module.SCREEN_HEIGHT and not dead and not info.get('flag_get'):
             report('below_world',
                    f"Mario is below the floor (y={y}) but still alive - "
-                   f"the pit-death check did not fire.")
+                   f"the pit-death check did not fire.",
+                   {'y': y, 'death_plane_y': self.c_module.SCREEN_HEIGHT,
+                    'is_dead': False, 'flag_get': False})
 
         # 2. Far above the level ceiling. Normal jump arcs peaked at y=-29.
         if y < ABOVE_WORLD_Y:
             report('above_world',
-                   f"Mario clipped far above the level (y={y}).")
+                   f"Mario clipped far above the level (y={y}).",
+                   {'y': y, 'threshold_y': ABOVE_WORLD_Y})
 
         # 3. Impossible horizontal speed. Fastest observed sprint was 13.2.
         x_vel = info.get('x_vel', 0.0)
         if abs(x_vel) > MAX_PLAUSIBLE_X_VEL:
             report('speed',
                    f"Impossible horizontal speed (x_vel={x_vel:.1f}); "
-                   f"the engine should cap a sprint far below this.")
+                   f"the engine should cap a sprint far below this.",
+                   {'x_vel': x_vel, 'threshold_abs_x_vel': MAX_PLAUSIBLE_X_VEL})
 
         # 4/5. Score and coin totals must never run backwards inside an
         #      episode. Skipped while dead, because the engine resets these
         #      as part of tearing the level down.
+        #
+        #      Also skipped - and the baseline left alone - on a frame the
+        #      engine could not be read (UNKNOWN_STATE_INFO, mario_rect None).
+        #      Its score and coins are PLACEHOLDER zeros, not readings, and
+        #      comparing them to the last real reading reported "Coin total
+        #      went backwards (3 -> 0)" for a frame where nothing was measured
+        #      at all (found in the Objective-3 audit; tests pin it). The other
+        #      checks cannot fire on the placeholders (y 0, x_vel 0), and none of
+        #      this reaches the reward: glitch_alert only feeds the dashboard.
         score = info.get('score', 0)
         coins = info.get('coins', 0)
-        if not dead:
-            if score < self._last_score:
-                report('score_drop',
-                       f"Score went backwards ({self._last_score} -> {score}).")
-            if coins < self._last_coins:
-                report('coin_drop',
-                       f"Coin total went backwards ({self._last_coins} -> {coins}).")
-        self._last_score = score
-        self._last_coins = coins
+        if info.get('mario_rect') is not None:
+            if not dead:
+                if score < self._last_score:
+                    report('score_drop',
+                           f"Score went backwards ({self._last_score} -> {score}).",
+                           {'previous_score': self._last_score, 'score': score})
+                if coins < self._last_coins:
+                    report('coin_drop',
+                           f"Coin total went backwards ({self._last_coins} -> {coins}).",
+                           {'previous_coins': self._last_coins, 'coins': coins})
+            self._last_score = score
+            self._last_coins = coins
+
+        # Detectors added on top (today only the synthetic pipeline probe).
+        # Same report-once rule, keyed per detector so two probes can both fire.
+        for extra in self._extra_detectors:
+            hit = extra.check(info)
+            if hit is not None:
+                message, metrics = hit
+                report(extra.kind, message, metrics, detector=extra.detector_id,
+                       synthetic=extra.synthetic, key=extra.detector_id)
 
     def reset(self, *, seed: int | None = None,
               options: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
@@ -476,6 +576,20 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         self._last_coins = 0
         self._pending_glitch = None
         self._pending_ttl = 0
+
+        # A new episode starts a new evidence record. The trace and the action
+        # log never carry frames from the episode before: an incident's context
+        # and its replay must describe ONE episode. Pending detections are NOT
+        # dropped - they are the previous episode's finished evidence, waiting
+        # to be drained.
+        self.episode_index += 1
+        if self.evidence_enabled:
+            self._trace.clear()
+            self._episode_actions = bytearray()
+            self._clock_holds = []
+            self._actions_complete = True
+            for extra in self._extra_detectors:
+                extra.reset()
 
         # level1 is already in sys.modules from __init__, so this resolves
         # from cache rather than touching sys.path or the filesystem. No
@@ -567,7 +681,163 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         units = int(self.episode_time_units)
         hud.time += units
         hud.display_time_offset += units
+        if self.evidence_enabled:
+            # Before the substep it affects, so the index is that substep's.
+            self._clock_holds.append((len(self._episode_actions), units))
         return units
+
+    # ═══════════════════════════════════════════════════════════════════
+    # EVIDENCE (Objective 3)
+    #
+    # Everything here only READS the engine. It never moves Mario, never
+    # changes a timer and never touches the observation, so an episode played
+    # with evidence on is frame-for-frame the episode played with it off
+    # (tests/test_incident_capture.py pins that).
+    # ═══════════════════════════════════════════════════════════════════
+    def enable_evidence(self, context_substeps: int = config.EVIDENCE_CONTEXT_SUBSTEPS) -> None:
+        """Start keeping the per-frame trace and the action log, and freezing
+        a Detection whenever a detector fires. Takes effect fully from the
+        next reset(): an episode already under way has no action log from its
+        start, so its incidents are marked not replayable rather than guessed."""
+        self.evidence_enabled = True
+        self._trace = collections.deque(maxlen=max(1, int(context_substeps)))
+        self._episode_actions = bytearray()
+        self._clock_holds = []
+        self._actions_complete = False
+
+    def disable_evidence(self) -> None:
+        """Back to the pre-Objective-3 behaviour: no trace, no log, no
+        detections, no extra detectors."""
+        self.evidence_enabled = False
+        self.dropped_detections = 0
+        self._extra_detectors.clear()
+        self._pending_detections.clear()
+        self._trace.clear()
+        self._episode_actions = bytearray()
+        self._clock_holds = []
+        self._actions_complete = False
+
+    def add_detector(self, detector: ExtraDetector) -> None:
+        """Adds a detector on top of the built-in ones (the synthetic probe)."""
+        self._extra_detectors.append(detector)
+
+    @property
+    def extra_detectors(self) -> tuple[ExtraDetector, ...]:
+        return tuple(self._extra_detectors)
+
+    def last_trace_entry(self) -> dict[str, Any] | None:
+        """The per-frame record of the most recent substep (evidence on)."""
+        return dict(self._trace[-1]) if self._trace else None
+
+    def drain_detections(self) -> list[Detection]:
+        """The Detections frozen since the last drain, oldest first."""
+        out, self._pending_detections = self._pending_detections, []
+        return out
+
+    # Pending detections are drained after every agent step by whoever
+    # enabled evidence. This cap only matters if nobody drains: a runaway list
+    # must not grow for ever, and what was dropped is counted, not hidden.
+    MAX_PENDING_DETECTIONS = 64
+
+    def _record_substep(self, action: int, info: Mapping[str, Any]) -> None:
+        self._episode_actions.append(action)
+        mario = self._mario_extras()
+        rect = info.get('mario_rect') or (None, None, None, None)
+        self._trace.append({
+            'substep': len(self._episode_actions) - 1,
+            'engine_time_ms': round(self.fake_time, 3),
+            'action': action,
+            'x': rect[0], 'y': rect[1], 'w': rect[2], 'h': rect[3],
+            'x_vel': info.get('x_vel'), 'y_vel': mario.get('y_vel'),
+            'mario_state': mario.get('state'), 'on_ground': info.get('on_ground'),
+            'status': info.get('status'), 'is_dead': info.get('is_dead'),
+            'score': info.get('score'), 'coins': info.get('coins'),
+            'time_left': info.get('time_left'), 'viewport_x': info.get('viewport_x'),
+        })
+
+    def _freeze_detection(self, kind: str, message: str, detector: str, synthetic: bool,
+                          metrics: Mapping[str, Any], info: Mapping[str, Any]) -> None:
+        if len(self._pending_detections) >= self.MAX_PENDING_DETECTIONS:
+            self.dropped_detections += 1
+            return
+        state = {k: v for k, v in info.items() if k != 'glitch_alert'}
+        self._pending_detections.append(Detection(
+            kind=kind, message=message, detector=detector, synthetic=synthetic,
+            metrics=json_safe(metrics), state=json_safe(state),
+            mario=json_safe(self._mario_extras()),
+            episode_index=self.episode_index,
+            episode_substep=len(self._episode_actions) - 1,
+            engine_time_ms=float(self.fake_time),
+            frame=self._capture_frame(),
+            trace=tuple(dict(t) for t in self._trace),
+            geometry=self._visible_geometry(),
+            actions=bytes(self._episode_actions),
+            clock_holds=tuple(self._clock_holds),
+            actions_complete=self._actions_complete,
+            game_variant=self.game_variant,
+            episode_time_units=self.episode_time_units,
+            end_on_level_complete=bool(self.end_on_level_complete),
+            holds_engine_clock=bool(self.holds_engine_clock),
+            extra_detectors=tuple(d.spec() for d in self._extra_detectors),
+        ))
+
+    def _capture_frame(self) -> np.ndarray | None:
+        """The frame this substep drew, full resolution, as its own copy.
+        None when there is no window (then there is nothing to show, and the
+        incident says so rather than substituting another frame)."""
+        surface: pg.Surface | None = pg.display.get_surface()
+        if surface is None:
+            return None
+        return np.ascontiguousarray(pg.surfarray.array3d(surface).transpose(1, 0, 2))
+
+    def _mario_extras(self) -> dict[str, Any]:
+        """Engine fields the info dict does not carry but a report needs."""
+        try:
+            mario = self.game.state.mario
+        except AttributeError:
+            return {}
+        return {
+            'y_vel': float(getattr(mario, 'y_vel', 0.0)),
+            'state': str(getattr(mario, 'state', '')),
+            'big': bool(getattr(mario, 'big', False)),
+            'fire': bool(getattr(mario, 'fire', False)),
+            'invincible': bool(getattr(mario, 'invincible', False)),
+            'hurt_invincible': bool(getattr(mario, 'hurt_invincible', False)),
+            'in_castle': bool(getattr(mario, 'in_castle', False)),
+            'facing_right': bool(getattr(mario, 'facing_right', True)),
+        }
+
+    # The level's collider and sprite groups (level1.py), by what they hold.
+    _GEOMETRY_GROUPS = (('ground', 'ground_group'), ('pipe', 'pipe_group'),
+                        ('step', 'step_group'), ('brick', 'brick_group'),
+                        ('coin_box', 'coin_box_group'), ('enemy', 'enemy_group'),
+                        ('shell', 'shell_group'), ('powerup', 'powerup_group'))
+
+    def _visible_geometry(self) -> tuple[dict[str, Any], ...]:
+        """Every collider and sprite at least partly inside the camera's view
+        at the trigger - i.e. exactly what the trigger frame shows - in world
+        coordinates."""
+        state = self.game.state
+        viewport = getattr(state, 'viewport', None)
+        if viewport is None:
+            return ()
+        x0, x1 = int(viewport.x), int(viewport.x) + int(viewport.w)
+        found: list[dict[str, Any]] = []
+        for label, attr in self._GEOMETRY_GROUPS:
+            for sprite in getattr(state, attr, ()) or ():
+                rect = getattr(sprite, 'rect', None)
+                if rect is None or rect.right < x0 or rect.left > x1:
+                    continue
+                item: dict[str, Any] = {'group': label, 'x': int(rect.x), 'y': int(rect.y),
+                                        'w': int(rect.w), 'h': int(rect.h)}
+                name = getattr(sprite, 'name', None)
+                if isinstance(name, str):
+                    item['name'] = name
+                sprite_state = getattr(sprite, 'state', None)
+                if isinstance(sprite_state, str):
+                    item['state'] = sprite_state
+                found.append(item)
+        return tuple(found)
 
     # ═══════════════════════════════════════════════════════════════════
     # WINDOW LIFECYCLE — for the dashboard's game window. Not used during
@@ -584,7 +854,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
     #
     # Important quirk this works around: pygame's actual OS window is
     # created ONCE, at module-import time, by the top-level
-    # `pg.display.set_mode(...)` call in mario_clone/data/setup.py -
+    # `pg.display.set_mode(...)` call in <variant>/data/setup.py -
     # constructing a new Control() (which reset() does on every episode)
     # does NOT create a new window, it just calls pg.display.get_surface()
     # to grab whatever window already exists. So "closing" and "reopening"
@@ -610,7 +880,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
             pg.display.init()
             new_surface = pg.display.set_mode(self.c_module.SCREEN_SIZE)
             pg.display.set_caption(self.setup_module.ORIGINAL_CAPTION)
-            # mario_clone/data/states/level1.py reads setup.SCREEN directly
+            # <variant>/data/states/level1.py reads setup.SCREEN directly
             # (not pg.display.get_surface()), so that module-level reference
             # has to be updated here too - otherwise it still points at the
             # Surface object pg.display.quit() just destroyed, and the next

@@ -30,6 +30,13 @@ Pausing or closing never touches the agent's state: the session is a
 suspended generator, so nothing about the episode, the policy or its
 telemetry is discarded, and the dashboard writes no checkpoint, coverage or
 lifecycle file at all.
+
+BUG FOUND (Objective 3). When a step reports a NEW incident, this thread
+pauses before it takes another step - the evidence is already on disk by then
+(reporting/pipeline.capture ran inside that step) - and remembers it as
+`bug_found` until the user presses Start (resume) or Reset. Nothing resumes
+by itself, not even when the reports finish rendering. A later sighting of an
+incident already recorded is counted but does not pause.
 """
 from __future__ import annotations
 
@@ -82,6 +89,9 @@ class GameWindowService:
         self.testing = False
         self.session: Session | None = None
         self.steps = 0
+        # The incident(s) that stopped testing, until the user resumes or resets.
+        self.bug_found: list[dict[str, Any]] | None = None
+        self.pause_reason: str | None = None
 
     # ── called from any thread ────────────────────────────────────────────
     def start(self, timeout: float | None = None) -> None:
@@ -123,6 +133,13 @@ class GameWindowService:
     @property
     def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    def status(self) -> dict[str, Any]:
+        """The backend's truth, for a browser that (re)connects: running or
+        not, why it last paused, and the bug that stopped it, if any."""
+        return {"testing": self.testing, "steps": self.steps,
+                "pause_reason": None if self.testing else self.pause_reason,
+                "bug_found": self.bug_found}
 
     # ── the game thread ───────────────────────────────────────────────────
     def _run(self) -> None:
@@ -166,6 +183,12 @@ class GameWindowService:
                 if self.session is None:
                     self.session = self.backend.new_session()
                 self.testing = True
+                self.pause_reason = None
+                if self.bug_found is not None:
+                    # Resuming is the user's acknowledgement. The incident
+                    # itself stays on disk and in the history.
+                    self.bug_found = None
+                    self.emit('bug_cleared', {})
             except Exception:
                 _log.exception("could not start testing")
                 self._pause('error', notify=True)
@@ -175,11 +198,22 @@ class GameWindowService:
             self._pause('reset')
             self._close_session()
             self.backend.close_window()
+            if self.bug_found is not None:
+                self.bug_found = None
+                self.emit('bug_cleared', {})
+            self.pause_reason = 'reset'
 
     def _pause(self, reason: str, notify: bool = False) -> None:
         """Stops stepping. Touches nothing else - not the window, not the
-        session. `notify` tells the browser, for pauses it did not ask for."""
+        session. `notify` tells the browser, for pauses it did not ask for.
+
+        The recorded reason is why testing STOPPED: a browser reconnecting to
+        a dashboard already stopped on a bug does not turn "bug_found" into
+        "connect" - the bug is still why it is not running."""
+        was_testing = self.testing
         self.testing = False
+        if was_testing or self.bug_found is None:
+            self.pause_reason = reason
         try:
             self.backend.stop_audio()
         except Exception:                 # silence is best-effort; the pause is not
@@ -217,6 +251,26 @@ class GameWindowService:
         self.emit('video_frame', {'frame': item['frame']})
         if item.get('log'):
             self.emit('agent_log', {'log': item['log']})
+        self._handle_incidents(item.get('incidents') or ())
+
+    def _handle_incidents(self, outcomes: Any) -> None:
+        """A new incident stops testing, here, before another step runs."""
+        new = [o["summary"] for o in outcomes if o.get("status") == "new" and o.get("summary")]
+        for o in outcomes:
+            if o.get("status") == "duplicate" and o.get("summary"):
+                self.emit('incident_occurrence', o["summary"])
+            elif o.get("status") == "failed":
+                # The detector fired but the evidence could not be written.
+                # Still a stop: the user must know something happened.
+                _log.error("an anomaly was detected but could not be recorded: %s", o.get("error"))
+                self.emit('incident_capture_failed', {'error': o.get("error")})
+        failed = any(o.get("status") == "failed" for o in outcomes)
+        if new:
+            self.bug_found = new
+            self._pause('bug_found', notify=True)
+            self.emit('bug_found', {'incidents': new})
+        elif failed:
+            self._pause('capture_failed', notify=True)
 
     def _check_close_button(self) -> None:
         """Pumps the window's events - so it stays responsive while paused -
