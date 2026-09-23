@@ -106,17 +106,17 @@ def test_the_env_runs_the_clean_game_by_default(env):
 def test_a_process_refuses_to_mix_variants(env):
     from custom_mario_env import claim_game_variant
     assert claim_game_variant(config.CLEAN_GAME_VARIANT)          # the one already loaded
-    with pytest.raises(RuntimeError, match=r"One game variant per process"):
+    with pytest.raises(RuntimeError, match=r"One game variant at a time"):
         claim_game_variant(config.BUGGED_GAME_VARIANT)
     with pytest.raises(ValueError):
         claim_game_variant("mario_clone")
 
 
 # ── behaviour ────────────────────────────────────────────────────────────────
-def _probe(variant):
+def _probe(variant, switch_from=None):
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", PYTHONUTF8="1")
     result = subprocess.run([sys.executable, os.path.join(ROOT, "tests", "variant_probe.py"),
-                             variant], cwd=ROOT, env=env, capture_output=True, text=True,
+                             variant, *([switch_from] if switch_from else [])], cwd=ROOT, env=env, capture_output=True, text=True,
                             timeout=300, check=False)
     assert result.returncode == 0, result.stderr[-3000:]
     return json.loads(result.stdout.strip().splitlines()[-1])
@@ -135,6 +135,20 @@ def test_each_variant_loads_from_its_own_directory(fingerprints):
 def test_the_clean_game_still_draws_the_pre_objective_3_frames(fingerprints):
     from test_hud_timer import LEGACY_NOOP_600_SHA256
     assert fingerprints[config.CLEAN_GAME_VARIANT]["noop600"] == LEGACY_NOOP_600_SHA256
+
+
+def test_a_switched_game_is_exactly_the_freshly_loaded_game(fingerprints):
+    """The dashboard's game switch: load one variant, release it, load the
+    other in the SAME process. The result must be the other variant, byte for
+    byte what a fresh process plays - nothing of the first one survives."""
+    clean, bugged = config.CLEAN_GAME_VARIANT, config.BUGGED_GAME_VARIANT
+    for target, source in ((bugged, clean), (clean, bugged)):
+        switched = _probe(target, switch_from=source)
+        assert switched["loaded_from"] == target
+        assert switched["switched_from"] == source
+        for key in ("noop600", "geometry", "scripted_state", "scripted_frames",
+                    "scripted_episode_ends"):
+            assert switched[key] == fingerprints[target][key], f"{key}: {source} -> {target}"
 
 
 def test_both_variants_behave_identically(fingerprints):

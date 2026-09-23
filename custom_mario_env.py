@@ -51,10 +51,11 @@ def claim_game_variant(variant: str) -> str:
 
     Both variants ship the game as the top-level package `data` (the upstream
     layout, deliberately untouched), and Python imports a package once per
-    process. So a process can host exactly ONE variant: asking for the other
-    after one has loaded would silently run the first one's code while every
+    process. So a process hosts ONE variant at a time: asking for the other
+    while one is loaded would silently run the first one's code while every
     record said otherwise - exactly the "wrong game selected" failure a QA
-    report must never contain. That is refused here, loudly.
+    report must never contain. That is refused here, loudly; the only way to
+    the other variant is release_game_variant() first.
     """
     if variant not in config.GAME_VARIANTS:
         raise ValueError(f"unknown game variant {variant!r}; expected one of "
@@ -65,9 +66,25 @@ def claim_game_variant(variant: str) -> str:
         if _package_root(loaded) != os.path.normcase(game_dir):
             raise RuntimeError(
                 f"this process already runs the game from {_package_root(loaded)}; "
-                f"it cannot also run {variant!r}. One game variant per process - "
-                f"start a new process for the other one.")
+                f"it cannot also run {variant!r}. One game variant at a time - "
+                f"release_game_variant() first, or start a new process.")
     return game_dir
+
+
+def release_game_variant() -> None:
+    """Unloads the game so this process can load the OTHER variant.
+
+    Only for a caller that has already discarded every env built on the
+    loaded variant (the dashboard's game switch). The window is destroyed and
+    every `data` module is dropped, so the next CustomMarioEnv imports the
+    requested variant from scratch - its code, its window, its resources.
+    claim_game_variant then sees no loaded game, and nothing of the old
+    variant can run: there is no mixing, just a clean second load.
+    """
+    if pg.display.get_init():
+        pg.display.quit()
+    for name in [n for n in sys.modules if n == 'data' or n.startswith('data.')]:
+        del sys.modules[name]
 
 # How many substeps a glitch alert stays attached to info before expiring.
 # Must match the `skip` passed to MaxAndSkipObservation (see the delivery

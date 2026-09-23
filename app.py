@@ -248,6 +248,16 @@ def handle_reset_game() -> None:
     service.reset()
 
 
+@socketio.on('switch_game')
+def handle_switch_game(data: object = None) -> None:
+    # The "Select Game Environment" list. Only a known variant name gets
+    # through; the game thread resets, unloads this game and loads that one,
+    # then answers with 'game_switched'.
+    variant = data.get('variant') if isinstance(data, dict) else None
+    if variant in config.GAME_VARIANTS:
+        service.switch_game(variant)
+
+
 def bind_address(environ: Mapping[str, str] = os.environ) -> tuple[str, int]:
     """(host, port) to listen on.
 

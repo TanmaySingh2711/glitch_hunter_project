@@ -17,7 +17,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
 import cv2
@@ -27,7 +27,7 @@ from stable_baselines3 import PPO
 
 from agent_logic import ACTION_NAMES, GlitchHunterWrapper
 from common.fileio import sha256_of
-from custom_mario_env import PROJECT_ROOT, CustomMarioEnv, wrap_observation
+from custom_mario_env import PROJECT_ROOT, CustomMarioEnv, release_game_variant, wrap_observation
 from exploration import config
 from exploration import coverage as coverage_mod
 from reporting.events import SyntheticProbe
@@ -44,8 +44,9 @@ CHECKPOINT_NAME = "mario_brain_checkpoint"
 
 @dataclass(frozen=True)
 class DashboardConfig:
-    """How this dashboard process runs. Fixed for the life of the process:
-    one process hosts one game variant (custom_mario_env.claim_game_variant)."""
+    """How this dashboard runs. One game variant at a time: switching
+    (switch_game_variant) unloads the old game completely before the new one
+    loads (custom_mario_env.claim_game_variant / release_game_variant)."""
     game_variant: str = config.DEFAULT_GAME_VARIANT
     # SYNTHETIC pipeline probes (reporting.events.SyntheticProbe), by world
     # x. Empty in normal use: these fire on ordinary gameplay, only to prove
@@ -204,6 +205,35 @@ def configure(cfg: DashboardConfig) -> None:
     _config = cfg
 
 
+def switch_game_variant(variant: str) -> bool:
+    """Makes `variant` the game under test; False if it already is.
+
+    Everything built on the old game goes: the incident pipeline (its
+    worker finishes what it was rendering first), the env and its window,
+    the model loaded against that env, and the game's modules. The next
+    preload() then builds all of it again on the new variant, so every
+    incident records the game that actually produced it.
+    """
+    global _config, _global_env, _global_model, _pipeline, _provenance, _brain_path
+    if variant not in config.GAME_VARIANTS:
+        raise ValueError(f"unknown game variant {variant!r}")
+    if variant == _config.game_variant:
+        return False
+    with env_lock:
+        if _pipeline is not None:
+            _pipeline.close()
+        _pipeline, _provenance = None, {}
+        if _global_env is not None:
+            _base(_global_env).close_window()
+            _global_env.close()
+        _global_env = _global_model = None
+        _brain_path = None
+        release_game_variant()
+        _config = replace(_config, game_variant=variant)
+    log.info("[DASHBOARD] game under test is now %s", variant)
+    return True
+
+
 def ensure_pipeline(notify: Callable[[str, dict[str, Any]], Any] | None = None
                     ) -> IncidentPipeline:
     """The incident pipeline, created once (after the env and brain, whose
@@ -292,6 +322,13 @@ class DashboardBackend:
 
     def open_window(self) -> str:
         return open_agent_window()
+
+    def switch_game(self, variant: str) -> bool:
+        """switch_game_variant, then the same pre-load a fresh start does."""
+        if not switch_game_variant(variant):
+            return False
+        self.preload()
+        return True
 
     def hide_window(self) -> None:
         with env_lock:

@@ -149,8 +149,10 @@ decision, not a refactor.
 * **One thread owns the game window.** On Windows a window dies with the
   thread that created it, so every window and env call in the dashboard runs
   on `dashboard_service`'s single game thread.
-* **One game variant per process, and the clean one is pinned.** Both
-  variants import as `data`; `claim_game_variant` refuses to mix them.
+* **One game variant at a time, and the clean one is pinned.** Both
+  variants import as `data`; `claim_game_variant` refuses to mix them, and
+  the dashboard's switch unloads one completely (`release_game_variant`)
+  before loading the other.
   `mario_clean/` must match `CLEAN_GAME_TREE_SHA256`; `mario_bugged/` may differ
   only where `INJECTED_BUGS.json` says (docs/objective3/README.md).
 * **Observing never changes the game.** Evidence (Objective 3) is off unless

@@ -33,7 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const bugBannerBody = document.getElementById('bug-banner-body');
     const bugList = document.getElementById('bug-list');
     const envSelect = document.getElementById('env-select');
-    const brainLine = document.getElementById('brain-line');
     const syntheticBadge = document.getElementById('synthetic-badge');
 
     const FILE_LABELS = [
@@ -122,9 +121,15 @@ document.addEventListener('DOMContentLoaded', () => {
         bugBannerBody.replaceChildren();
     }
 
+    // With nothing recorded the tracker mirrors the log: "start testing..."
+    // until testing has started, then "No bugs found yet".
+    let testingStarted = false;
+    let lastIncidents = [];
     function renderHistory(incidents) {
+        lastIncidents = incidents;
         if (!incidents.length) {
-            bugList.replaceChildren(el('li', 'placeholder', 'No incidents recorded yet.'));
+            bugList.replaceChildren(el('li', 'placeholder',
+                testingStarted ? 'No bugs found yet...' : 'start testing...'));
             return;
         }
         bugList.replaceChildren(...incidents.map((i) => incidentCard(i, true)));
@@ -149,13 +154,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/status', { cache: 'no-store' });
             if (!res.ok) return;
             const s = await res.json();
-            // Short enough for the panel's select; the full variant name and
-            // the brain go on the line beneath it.
-            const label = s.game_variant === 'mario_bugged' ? 'Bugged game' : 'Clean game';
-            envSelect.replaceChildren(el('option', null, label));
-            brainLine.textContent = `Variant: ${s.game_variant}. ` + (s.brain_path
-                ? `Brain: ${s.brain_path.split('/').pop()}${s.brain_approved ? ' (approved Objective-2 brain)' : ''}`
-                : 'Brain: untrained policy');
+            if (s.game_variant) envSelect.value = s.game_variant;
+            envSelect.disabled = false;
+            if (s.testing || s.steps > 0) setTestingStarted(true);
             syntheticBadge.classList.toggle('hidden', !(s.synthetic_probes || []).length);
             if (s.bug_found && s.bug_found.length) {
                 showBugBanner(s.bug_found);
@@ -176,6 +177,7 @@ document.addEventListener('DOMContentLoaded', () => {
         resetBtn.disabled = false;
         startBtn.textContent = 'Testing...';
         hideBugBanner();     // the server clears bug_found on resume, and says so
+        setTestingStarted(true);
 
         const logPlaceholder = document.getElementById('log-placeholder');
         if (logPlaceholder) {
@@ -215,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setIdleUI();
     });
 
-    resetBtn.addEventListener('click', () => {
+    function resetDashboard() {
         isTesting = false;
         socket.emit('stop_testing');
         socket.emit('reset_game');
@@ -223,12 +225,39 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset ends the session; the incident history is evidence and stays.
         logTerminal.replaceChildren(makePlaceholder('p', 'log-placeholder'));
         hideBugBanner();
+        setTestingStarted(false);
 
         clearFrame();
 
         startBtn.disabled = false;
         stopBtn.disabled = true;
         resetBtn.disabled = true;
+        startBtn.textContent = 'START TESTING';
+    }
+    resetBtn.addEventListener('click', resetDashboard);
+
+    function setTestingStarted(started) {
+        testingStarted = started;
+        renderHistory(lastIncidents);
+    }
+
+    // Picking the other game resets the dashboard, exactly like Reset, and
+    // the server loads that game; START TESTING then plays it.
+    envSelect.addEventListener('change', () => {
+        const variant = envSelect.value;
+        resetDashboard();
+        envSelect.disabled = true;
+        startBtn.disabled = true;
+        startBtn.textContent = 'Loading game...';
+        socket.emit('switch_game', { variant });
+    });
+
+    socket.on('game_switched', (data) => {
+        if (!(data && data.ok)) {
+            note(`— could not switch the game: ${(data && data.error) || 'unknown error'} —`);
+        }
+        refreshStatus();       // the server's selection wins, whichever it is
+        startBtn.disabled = false;
         startBtn.textContent = 'START TESTING';
     });
 

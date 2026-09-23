@@ -3,6 +3,8 @@ fingerprint as JSON. Run by tests/test_game_variants.py, once per variant:
 one process can host only one variant (both import the game as `data`).
 
     python tests/variant_probe.py mario_clean
+    python tests/variant_probe.py mario_bugged mario_clean   # load clean first,
+                                  # release it, then probe bugged (the game switch)
 
 Fingerprints, each a SHA-256 so two variants compare with one equality:
   noop600          the 600 raw observations holding NOOP from reset - the same
@@ -24,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pygame as pg
 
-from custom_mario_env import CustomMarioEnv
+from custom_mario_env import CustomMarioEnv, claim_game_variant, release_game_variant
 
 # A fixed, varied action script: sprint right with jumps (into the first pipe
 # and over the goombas), retreat, walk, crouch, stand. Deterministic.
@@ -33,9 +35,19 @@ SCRIPT = ([3] * 40 + [4] * 30 + [3] * 60 + [4] * 25 + [0] * 20 + [8] * 30
           + [3] * 100 + [4] * 40 + [6] * 30 + [3] * 120)
 
 
-def main(variant):
+def main(variant, switch_from=None):
+    if switch_from:
+        first = CustomMarioEnv(game_variant=switch_from)
+        first.reset()
+        for _ in range(60):
+            first.step(3)
+        del first
+        release_game_variant()
     env = CustomMarioEnv(game_variant=variant)
-    out = {"variant": variant, "loaded_from": os.path.basename(env.game_dir)}
+    claim_game_variant(variant)
+    import data
+    loaded = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(data.__file__))))
+    out = {"variant": variant, "loaded_from": loaded, "switched_from": switch_from}
 
     env.reset()
     h = hashlib.sha256()
@@ -73,4 +85,4 @@ def main(variant):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)

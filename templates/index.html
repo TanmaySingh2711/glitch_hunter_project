@@ -17,15 +17,14 @@
         <aside class="panel control-panel">
             <h1>The Glitch Hunter</h1>
             <div class="control-group">
-                <!-- The game variant is chosen when the server starts
-                     (python app.py --game ...): one process runs one variant.
-                     This shows which one is running; it is filled from
+                <!-- Choosing the other game resets the dashboard and loads it
+                     (switch_game). The selection shown is the server's, from
                      /api/status, never assumed. -->
-                <label for="env-select">Game under test</label>
-                <select id="env-select" disabled>
-                    <option value="">loading...</option>
+                <label for="env-select">Select Game Environment</label>
+                <select id="env-select">
+                    <option value="mario_clean">Mario Game (Cleaned)</option>
+                    <option value="mario_bugged">Mario Game (Bugged)</option>
                 </select>
-                <p id="brain-line" class="meta-line"></p>
                 <p id="synthetic-badge" class="synthetic-badge hidden">SYNTHETIC PIPELINE TEST MODE - probe events are not game bugs</p>
             </div>
             <div class="button-group">
@@ -59,7 +58,7 @@
                  newest first, kept across restarts. -->
             <div id="bug-terminal" role="log" aria-live="polite">
                 <ul id="bug-list">
-                    <li id="bug-placeholder" class="placeholder">No incidents recorded yet.</li>
+                    <li id="bug-placeholder" class="placeholder">start testing...</li>
                 </ul>
             </div>
         </aside>

@@ -49,9 +49,11 @@ brain, and every incident says which one it was.
 
 A variant's identity is the SHA-256 of its **game tree** (`data/` + `resources/`,
 text normalised to LF, bytecode ignored; `reporting/variants.py`). Both import
-the game as the upstream package `data`, so one process hosts one variant;
-`custom_mario_env.claim_game_variant` refuses a second one rather than silently
-running the wrong code.
+the game as the upstream package `data`, so a process hosts one variant at a
+time; `custom_mario_env.claim_game_variant` refuses a second one rather than
+silently running the wrong code. The dashboard's game switch first unloads the
+loaded one completely (`release_game_variant`); a switched game plays byte for
+byte like a freshly started one (`tests/test_game_variants.py`).
 
 **Proof that the two are identical today** (`tests/test_game_variants.py`):
 the trees are equal file by file, and each variant, in its own process, plays
@@ -214,7 +216,9 @@ frame 4 engine frames apart), then holds the red-framed trigger for 1.5 s.
   across restarts: each incident with its facts and links (PDF, Markdown,
   trigger frame, GIF, whole bundle as .zip). Reports still rendering show as
   such, and fill in when `incident_updated` arrives.
-* **Game under test** shows the running variant and brain; a yellow badge
+* **Select Game Environment** switches between Mario Game (Cleaned) and
+  Mario Game (Bugged): it resets the dashboard and the game thread unloads one
+  variant completely before loading the other (`switch_game`); a yellow badge
   marks synthetic-probe mode.
 * Files open inline (`?download=1` saves them). Requests are validated against
   the store (SECURITY.md); everything else is a 404.

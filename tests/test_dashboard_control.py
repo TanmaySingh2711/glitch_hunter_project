@@ -80,6 +80,15 @@ class FakeBackend:
     def stop_audio(self):
         self._rec('stop_audio')
 
+    def switch_game(self, variant):
+        self._rec(f'switch_game:{variant}')
+        if variant == 'broken':
+            raise RuntimeError("cannot load broken")
+        changed, self.variant = variant != getattr(self, 'variant', 'mario_clean'), variant
+        if changed:
+            self.window = 'hidden'           # the new game pre-loads hidden
+        return changed
+
     def names(self):
         with self.lock:
             return [c for c, _t in self.calls if c != 'poll']
@@ -245,6 +254,28 @@ def test_reset_ends_the_session_and_the_next_start_is_fresh(svc):
     svc.start_testing()
     run_for(svc, 1)
     assert svc.fake.sessions == 2 and last_log(svc).startswith("session 2 step")
+
+
+def test_switching_the_game_resets_first_then_loads_the_other_game(svc):
+    svc.start_testing()
+    run_for(svc, 3)
+    svc.switch_game('mario_bugged')
+    svc.wait_idle()
+    names = svc.fake.names()
+    assert names.index('close_window') < names.index('switch_game:mario_bugged')
+    assert not svc.testing and svc.session is None and svc.pause_reason == 'reset'
+    assert ('game_switched', {'variant': 'mario_bugged', 'ok': True}) in svc.events
+    svc.start_testing()
+    run_for(svc, 1)
+    assert svc.fake.sessions == 2 and last_log(svc).startswith("session 2 step")
+
+
+def test_a_failed_game_switch_is_reported_not_raised(svc):
+    svc.switch_game('broken')
+    svc.wait_idle()
+    assert svc.alive
+    assert any(e == 'game_switched' and p['ok'] is False and 'broken' in p['error']
+               for e, p in svc.events)
 
 
 def test_a_browser_refresh_pauses_and_keeps_everything(svc):

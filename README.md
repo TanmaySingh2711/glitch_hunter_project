@@ -66,9 +66,11 @@ That's it. A game window will pop up and the same footage streams live to your b
   which carries on from the same moment. A later sighting of the same bug is
   counted, but does not stop testing again.
 - **LOG TERMINAL** (green panel) — every action the AI takes, with its reward.
-- **Game under test** — which game is running: the clean baseline
-  (`python app.py`) or the variant for deliberate bugs
-  (`python app.py --game mario_bugged`).
+- **Select Game Environment** — which game the AI tests: **Mario Game
+  (Cleaned)**, the clean baseline, or **Mario Game (Bugged)**, the copy for
+  deliberate bugs. Changing it resets the dashboard and loads that game;
+  press **Start Testing** to play it. (`python app.py --game mario_bugged`
+  starts on the bugged one.)
 
 How incidents are captured, reported, de-duplicated and replayed:
 [`docs/objective3/README.md`](docs/objective3/README.md).

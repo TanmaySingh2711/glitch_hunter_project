@@ -24,6 +24,8 @@ WHAT THE USER CONTROLS
   X       (the window's own close button, while running or paused) hide the
           window and pause. The session is kept; Start brings it back.
   Reset   end the session and close the window; the next Start is fresh.
+  Game    (the "Select Game Environment" list) a Reset, then the other game
+          variant is loaded in place of this one; the next Start plays it.
   A browser refresh / closed tab pauses, and changes nothing else.
 
 Pausing or closing never touches the agent's state: the session is a
@@ -68,6 +70,7 @@ class Backend(Protocol):
     def close_window(self) -> None: ...
     def poll_close_request(self) -> bool: ...
     def new_session(self) -> Session: ...
+    def switch_game(self, variant: str) -> bool: ...
     def stop_audio(self) -> None: ...
 
 
@@ -112,6 +115,9 @@ class GameWindowService:
 
     def reset(self) -> None:
         self._commands.put('reset')
+
+    def switch_game(self, variant: str) -> None:
+        self._commands.put(f'switch:{variant}')
 
     def client_connected(self) -> None:
         self._commands.put('connect')
@@ -202,6 +208,17 @@ class GameWindowService:
                 self.bug_found = None
                 self.emit('bug_cleared', {})
             self.pause_reason = 'reset'
+        elif cmd.startswith('switch:'):
+            self._handle('reset')
+            variant = cmd.split(':', 1)[1]
+            try:
+                changed = self.backend.switch_game(variant)
+            except Exception as exc:
+                _log.exception("could not switch the game to %s", variant)
+                self.emit('game_switched', {'variant': variant, 'ok': False, 'error': str(exc)})
+                return
+            self.log(f">>> GAME SWITCHED to {variant}" if changed else f">>> {variant} already running")
+            self.emit('game_switched', {'variant': variant, 'ok': True})
 
     def _pause(self, reason: str, notify: bool = False) -> None:
         """Stops stepping. Touches nothing else - not the window, not the
