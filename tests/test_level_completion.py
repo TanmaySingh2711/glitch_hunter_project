@@ -451,10 +451,7 @@ def test_periodic_checkpoints_are_global_and_open_ended(tmp_path):          # [8
 # [9] [10] WHAT MUST NOT MOVE
 # ══════════════════════════════════════════════════════════════════════════
 def test_original_6m_checkpoints_are_untouched():                          # [9]
-    files = ["mario_brain_checkpoint.zip",
-             "checkpoints/mario_brain_checkpoint_6000000_steps.zip",
-             "backup_6M/mario_brain_checkpoint.zip",
-             "backup_6M/mario_brain_checkpoint_6000000_steps.zip"]
+    files = ["mario_brain_checkpoint.zip", config.BASELINE_MODEL]
     found = {f: _sha(os.path.join(ROOT, f)) for f in files
              if os.path.exists(os.path.join(ROOT, f))}
     assert "mario_brain_checkpoint.zip" in found

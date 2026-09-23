@@ -1,8 +1,8 @@
 """artifacts.json: the protected files are still the bytes that were recorded.
 
 Checked for every listed file that exists in this checkout - in git that is
-the 6M master and the completion baseline; locally also the milestones,
-backups, masks and bootstrap map. Missing files are not failures: most are
+the 6M master and the completion baseline; locally also the main brain and
+its backup, the masks and the bootstrap map. Missing files are not failures: most are
 git-ignored by design.
 """
 import json
@@ -26,8 +26,21 @@ def test_the_manifest_covers_the_tracked_artifacts():
 def test_every_copy_of_the_6m_brain_is_the_6m_brain():
     six_m = [k for k in MANIFEST if k.endswith(("mario_brain_checkpoint.zip",
                                                 "_6000000_steps.zip"))]
-    assert len(six_m) == 4
+    assert six_m == ["mario_brain_checkpoint.zip"]       # one copy; git is its backup
     assert {MANIFEST[k]['sha256'] for k in six_m} == {SIX_M_SHA256}
+
+
+def test_the_main_brain_and_its_backup_are_the_approved_brain():
+    from exploration import config
+    record_path = os.path.join(ROOT, config.FINAL_OBJECTIVE2_RECORD)
+    if not os.path.exists(record_path):
+        pytest.skip("the Objective-2 record is not in this checkout")
+    with open(record_path, encoding="utf-8") as fh:
+        record = json.load(fh)
+    for path in (config.FINAL_BRAIN_PATH, config.FINAL_BRAIN_BACKUP):
+        assert MANIFEST[path]["sha256"] == record["brain"]["sha256"], path
+    for path in (config.FINAL_COVERAGE_PATH, config.FINAL_COVERAGE_BACKUP):
+        assert MANIFEST[path]["sha256"] == record["coverage"]["sha256"], path
 
 
 @pytest.mark.parametrize("rel", sorted(MANIFEST))

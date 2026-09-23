@@ -14,11 +14,18 @@ older sections are the evidence trail and some of their resume commands are
 
 | | path | SHA-256 | fact |
 |---|---|---|---|
-| **Final brain** | `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` | `d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899` | exactly 16,000,000 steps |
-| Its coverage state | `checkpoints_qa/glitch_hunter_qa_16000000_steps_coverage.npz` | `aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4` | stamped `model_timesteps` 16,000,000; 3,166,235 / 3,757,990 testable px = **84.2534%**; mask fingerprint `21eab893...`; config hash `2aa92606...` |
+| **Final brain (THE MAIN BRAIN)** | `glitch_hunter_main_brain.zip` (project root) | `d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899` | exactly 16,000,000 steps |
+| Its coverage state | `glitch_hunter_main_brain_coverage.npz` (project root) | `aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4` | stamped `model_timesteps` 16,000,000; 3,166,235 / 3,757,990 testable px = **84.2534%**; mask fingerprint `21eab893...`; config hash `2aa92606...` |
 | Retention evidence | `evaluation/results/glitch_hunter_qa_16000000_steps_d906d09e.json` | `be13f1e04da2f5c54c0b7906d6c69ddb6bf62714414ebfdd9d045763b2ae57b5` | 500-episode official protocol |
 
-A byte-identical frozen copy of the pair, the evidence (retention result, 6M
+**Renamed 2026-09-24 (same bytes, same hashes):** the pair was called
+`checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` (+ `_coverage.npz`) until
+the clean-up that day, which gave it one obvious name at the project root and
+removed the superseded copies (the 16M milestone pair, the old root QA pair,
+`backup_6M/`, `checkpoints/`, the archived runs, `logs/`). Older sections
+below use the old names.
+
+A byte-identical backup copy of the pair, the evidence (retention result, 6M
 baseline, coverage audit trail, raw reward telemetry, the campaign's training
 log) and the record `FINAL_OBJECTIVE2.json` live in
 `checkpoints_qa/final_objective2_16000000/`. Every file there is read-only.
@@ -98,15 +105,26 @@ files (the hand-made `arc_reach_map_14.8M.png` was kept); `tools/recheck_bootstr
 path named below (`candidate_anchorB_6196608*`, `pre_mask_v4_15200000/`, a
 6.8M-15.6M milestone) **no longer exists** - the evidence tables and results
 remain; the files do not. Kept on purpose: the frozen final folder and the 16.0M
-milestone pair, the 6.4M REGRESSED checkpoint, `pre_main_6032768`,
-`candidate_retreat_6196608`, `pre_unlimited_6360000`, the 13 experiment
-`archive_*_run` folders, all 6M brain copies, the live logs and the root pair.
+milestone pair, `pre_main_6032768`, `pre_unlimited_6360000`, the 13 experiment
+`archive_*_run` folders, all 6M brain copies, `logs/console.log` and the root pair.
+
+**Second cleanup (2026-09-23, 108.7 MB, user-approved).** Also deleted: the
+6.4M REGRESSED checkpoint (+ coverage + flag; its verdict and numbers stay in
+`evaluation/results/glitch_hunter_qa_6400000_steps_cfaa3b48.json` and above),
+`candidate_retreat_6196608/` (the campaign's reproducible start is
+`pre_unlimited_6360000/`; its HEALTHY result stays in `evaluation/results/`),
+the live `checkpoints_qa/coverage_audit_trail.jsonl`,
+`checkpoints_qa/reward_telemetry.jsonl` and `logs/train.log` (each
+byte-identical to its hash-protected copy in
+`final_objective2_16000000/evidence/`), all caches, and one synthetic
+Objective-3 test incident. Verified afterwards: 37 artifacts / 0 changed;
+resume still selects the approved 16,000,000-step pair.
 
 **Starting Objective 3 from this exact state.** Use the frozen pair explicitly,
 never the automatic choice:
 
 ```
-venv_gpu\Scripts\python.exe train_agent.py --dry-run-resume --resume-from checkpoints_qa\final_objective2_16000000\glitch_hunter_qa_16000000_steps.zip
+venv_gpu\Scripts\python.exe train_agent.py --dry-run-resume --resume-from glitch_hunter_main_brain.zip
 ```
 
 (a dry run that trains and writes nothing). A launch of any QA campaign is still
@@ -114,7 +132,7 @@ refused unless `--safety-cap-timesteps N` or `--unrestricted` is given, so a bar
 `train_agent.py` cannot silently continue Objective 2. Do NOT relaunch the old
 "Resume from 15.2M" command below: it would re-run finished work from an older
 state. Objective 3's own training must write to its own checkpoint locations; it
-must not overwrite `checkpoints_qa/glitch_hunter_qa_16000000_steps*` or the
+must not overwrite `glitch_hunter_main_brain*` or the
 frozen folder. If it trains on the same Level-1 coverage campaign it is a new
 campaign from this state, and its result is judged by the same 500-episode
 retention test against the 6M baseline before anything is accepted.
@@ -408,8 +426,8 @@ snapshotted and restored if KL ends worse, so it can only help or do nothing.
 
 Observability (§16): banner now also prints worker count, the bootstrap vs
 QA-discovered split (`lc.provenance`) and the anomalous-px count.
-Anomaly recorded: `docs/ANOMALY_acceleration_leak.md` + runnable reproductions
-in `docs/evidence/` (excluded from lint, kept exactly as recorded).
+Anomaly recorded: `docs/objective2/ANOMALY_acceleration_leak.md` + runnable reproductions
+in `docs/objective2/evidence/` (excluded from lint, kept exactly as recorded).
 
 **Mask v3 — BOTH OF MARIO'S FORMS (pre-existing bug, found 2026-09-20).**
 Methods A/B/C and the noncoverage classifier all ran on the SMALL collider
@@ -571,7 +589,7 @@ folded into `build_testable`, giving the mask v3 denominator 4,002,095 with
 fingerprint `ded5cd19…`; the 6.03M coverage was migrated (copy, never edited in
 place); the evaluator now runs headless by default (40/40 episodes identical to
 windowed); the acceleration leak is written up in
-`docs/ANOMALY_acceleration_leak.md`; ruff, mypy and artifact verification all
+`docs/objective2/ANOMALY_acceleration_leak.md`; ruff, mypy and artifact verification all
 pass.
 
 Also done: the retreat candidate returned **48.0% / prog 0.690, HEALTHY** and is
@@ -580,7 +598,7 @@ failures); `ANCHOR_KL_TARGET` was lowered 0.13 -> 0.08 on the measured evidence
 (0.13 was the one setting that produced a WARNING, and the tighter budget also
 explored more); anchorB was pre-migrated to mask v3 at
 `checkpoints_qa/candidate_anchorB_6196608_mask_v3` as a ready fallback; and
-`docs/OBJECTIVE2_HANDOFF.md` holds the 17-section report.
+`docs/objective2/HANDOFF.md` holds the 17-section report.
 
 **A live coverage table was added** (`training/callbacks.py`,
 `CoverageStatsCallback._print_table_row`) — a column-aligned, human-readable

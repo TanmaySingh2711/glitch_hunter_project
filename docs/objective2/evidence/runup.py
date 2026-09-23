@@ -6,7 +6,7 @@ take to exceed 4.5 from a standstill, and what rise does the jump then give?
 """
 import os, sys
 os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 from custom_mario_env import CustomMarioEnv

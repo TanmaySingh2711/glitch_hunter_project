@@ -61,7 +61,7 @@ JUMP_RISE_PX = 183
 JUMP_REACH_PX = 480
 
 # ─── THE OTHER JUMP HEIGHT: no run-up, no 183 ───
-# Measured in the engine (docs/evidence/jump_physics.py, runup.py): the rise
+# Measured in the engine (docs/objective2/evidence/jump_physics.py, runup.py): the rise
 # is BINARY, not a range. mario.py sets y_vel = JUMP_VEL - 0.5 only when
 # |x_vel| > 4.5 at take-off, and JUMP_VEL otherwise, giving exactly 183 px or
 # exactly 166 px and nothing between. Reaching 4.5 from a standstill takes 29
@@ -1212,30 +1212,44 @@ JUMP_ARCS_PATH = f"{EXPLORATION_DATA_DIR}/jump_arcs.npz"
 OBSERVED_REACH_PATH = f"{EXPLORATION_DATA_DIR}/observed_reach.npz"
 CHECKPOINT_DIR_QA = "checkpoints_qa"
 CHECKPOINT_NAME_QA = "glitch_hunter_qa"
-BASELINE_MODEL = "backup_6M/mario_brain_checkpoint.zip"
+# The Objective-1 (6M completion) brain: the retention baseline every tool and
+# slow test reads. It is the git-tracked master itself - git is its backup
+# (`git checkout -- mario_brain_checkpoint.zip` restores it), so the three
+# byte-identical copies it used to have in backup_6M/ and checkpoints/ were
+# removed on 2026-09-24.
+BASELINE_MODEL = "mario_brain_checkpoint.zip"
 # The bootstrap map, re-stamped to the flag-trigger-corrected mask by
 # tools/migrate_coverage.py (visited bitmap byte-identical, 1,872,441 covered
-# unchanged). The original, stamped with the retired 4,013,723 mask, is kept
-# beside it as a verified historical artifact and would be refused on load.
+# unchanged).
 # Re-stamped AGAIN, to the real-arc mask (tools/migrate_coverage.py; visited bitmap
 # byte-identical, covered_testable 1,872,441 unchanged, testable_total 4,002,095 ->
-# 3,757,990). The mask_v3 file, stamped with the rectangle-envelope mask, is kept
-# beside it and would now be refused on load.
+# 3,757,990). The older stampings (original and mask_v3) would be refused on load
+# and were removed on 2026-09-24.
 BOOTSTRAP_COVERAGE = f"{EXPLORATION_DATA_DIR}/coverage_bootstrap_6000000_mask_v4.npz"
 BOOTSTRAP_EPISODES = 40
 
 # ═══════════════════════════════════════════════════════════════════════
-# THE FINAL OBJECTIVE-2 STATE (read-only input to everything after it)
+# THE MAIN BRAIN (the final Objective-2 brain; read-only input to everything after it)
 #
-# The approved QA brain and its coverage, frozen read-only at closure with
-# their evidence (docs/OBJECTIVE2_WORKLOG.md, "FINAL STATE"). Objective 3 reads
-# these and never writes them: the dashboard plays this brain, and every
-# incident names it by SHA-256, checked against FINAL_OBJECTIVE2.json.
+# glitch_hunter_main_brain.zip is the approved 16,000,000-step QA brain and
+# glitch_hunter_main_brain_coverage.npz its coverage state (84.25%), both
+# read-only at the project root. Named "<name>.zip" + "<name>_coverage.npz" so
+# they are a matched pair for train_agent's resume and coverage checks.
+#
+# FINAL_OBJECTIVE2_DIR keeps the closure record, the evidence behind it, and a
+# read-only BACKUP of the same pair under the same names: the brain is not in
+# git and cost ~10 h of training, so one copy is not enough. Nothing reads the
+# backup. Objective 3 never writes either; every incident names the brain by
+# SHA-256, checked against FINAL_OBJECTIVE2.json (docs/objective2/WORKLOG.md,
+# "FINAL STATE").
 # ═══════════════════════════════════════════════════════════════════════
+MAIN_BRAIN_NAME = "glitch_hunter_main_brain"
+FINAL_BRAIN_PATH = f"{MAIN_BRAIN_NAME}.zip"
+FINAL_COVERAGE_PATH = f"{MAIN_BRAIN_NAME}_coverage.npz"
 FINAL_OBJECTIVE2_DIR = f"{CHECKPOINT_DIR_QA}/final_objective2_16000000"
 FINAL_OBJECTIVE2_RECORD = f"{FINAL_OBJECTIVE2_DIR}/FINAL_OBJECTIVE2.json"
-FINAL_BRAIN_PATH = f"{FINAL_OBJECTIVE2_DIR}/glitch_hunter_qa_16000000_steps.zip"
-FINAL_COVERAGE_PATH = f"{FINAL_OBJECTIVE2_DIR}/glitch_hunter_qa_16000000_steps_coverage.npz"
+FINAL_BRAIN_BACKUP = f"{FINAL_OBJECTIVE2_DIR}/{FINAL_BRAIN_PATH}"
+FINAL_COVERAGE_BACKUP = f"{FINAL_OBJECTIVE2_DIR}/{FINAL_COVERAGE_PATH}"
 
 # ═══════════════════════════════════════════════════════════════════════
 # GAME VARIANTS (Objective 3)
@@ -1262,7 +1276,7 @@ DEFAULT_GAME_VARIANT = CLEAN_GAME_VARIANT
 CLEAN_GAME_TREE_SHA256 = "b1f6b18467db398a41f7272c414d7f2a81ae4929b1c7a788dc572f19fe592630"
 
 # ═══════════════════════════════════════════════════════════════════════
-# INCIDENT EVIDENCE AND REPORTING (Objective 3; see docs/OBJECTIVE3.md)
+# INCIDENT EVIDENCE AND REPORTING (Objective 3; see docs/objective3/README.md)
 # ═══════════════════════════════════════════════════════════════════════
 INCIDENTS_DIR = "incidents"
 

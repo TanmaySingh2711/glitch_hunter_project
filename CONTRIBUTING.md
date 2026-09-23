@@ -50,7 +50,7 @@ and Windows.
   function.
 * Mark anything that takes more than a few seconds `@pytest.mark.slow`.
 * A test that needs a git-ignored artifact (`exploration_data/`,
-  `checkpoints/`, `backup_6M/`) must `pytest.skip` with the reason when it is
+  `checkpoints_qa/`, `glitch_hunter_main_brain.zip`) must `pytest.skip` with the reason when it is
   absent, so CI and fresh clones stay green.
 
 ## Commits

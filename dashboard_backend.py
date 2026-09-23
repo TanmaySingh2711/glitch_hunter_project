@@ -124,8 +124,9 @@ def select_checkpoint() -> tuple[str, str]:
     exactly like a bug.
 
     ─── THE APPROVED BRAIN FIRST (Objective 3) ───
-    The frozen final Objective-2 brain is the authoritative QA source, and it
-    is only used if its SHA-256 still matches the closure record. The root
+    The main brain (glitch_hunter_main_brain.zip, the approved Objective-2
+    brain) is the authoritative QA source, and it is only used if its SHA-256
+    still matches the closure record. The root
     glitch_hunter_qa.zip is an ordinary working file any training run
     overwrites, so it is only the fallback; then the 6M completion brain.
     """

@@ -5,7 +5,7 @@
 # display surface with no monitor and no sound card, which is all the
 # environment needs; the few window-manager tests skip themselves on a driver
 # that cannot hide a window. Nothing here needs the trained checkpoint's
-# companions (checkpoints/, backup_6M/, exploration_data/ are not in git):
+# companions (the main brain, checkpoints_qa/, exploration_data/ are not in git):
 # the tests that do skip with the reason when those files are absent.
 #
 # CPU torch rather than `uv sync`: pyproject.toml pins torch to PyTorch's

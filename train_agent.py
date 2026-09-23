@@ -661,6 +661,12 @@ def resume_candidates() -> list[tuple[int, str]]:
     milestone = newest_milestone(CHECKPOINT_DIR, CHECKPOINT_NAME)
     if milestone and os.path.abspath(milestone) != os.path.abspath(master):
         paths.append(milestone)
+    # The main brain (the approved Objective-2 brain) is a QA checkpoint too.
+    # Without it here, a project whose working checkpoints have been cleaned
+    # away would fall through to the 6M seed and silently start the QA phase
+    # over. It is only ever READ: training saves to CHECKPOINT_NAME, never to it.
+    if QA_PHASE and os.path.exists(xconfig.FINAL_BRAIN_PATH):
+        paths.append(xconfig.FINAL_BRAIN_PATH)
 
     out: list[tuple[int, str]] = []
     for p in paths:
@@ -769,8 +775,8 @@ def find_resume_point(explicit: str | None = None) -> Resume:
                 f"QA phase needs a brain to continue from, but neither a "
                 f"QA checkpoint nor {LEGACY_CHECKPOINT_NAME}.zip was "
                 f"found.\n"
-                f"Restore the 6M master (backup_6M/ holds a copy) before "
-                f"starting the QA phase.")
+                f"Restore the 6M master from git (git checkout -- "
+                f"{LEGACY_CHECKPOINT_NAME}.zip) before starting the QA phase.")
         return Resume(f"{LEGACY_CHECKPOINT_NAME}.zip", True)
     return Resume(latest, False)
 

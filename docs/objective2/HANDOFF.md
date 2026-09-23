@@ -9,12 +9,13 @@ committed.)
 
 > **OBJECTIVE 2 IS CLOSED (2026-09-21) - this report describes the state
 > *before* the campaign; the outcome is in
-> [OBJECTIVE2_WORKLOG.md](OBJECTIVE2_WORKLOG.md), "FINAL STATE".** The
+> [WORKLOG.md](WORKLOG.md), "FINAL STATE".** The
 > unrestricted campaign was run to exactly **16,000,000 steps** and stopped by
 > the user at **84.25%** practical spatial coverage (3,166,235 / 3,757,990
 > testable px - **not** 100%). Final brain:
-> `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` (SHA-256 `d906d09e...`),
-> paired with `checkpoints_qa/glitch_hunter_qa_16000000_steps_coverage.npz`
+> `glitch_hunter_main_brain.zip` (SHA-256 `d906d09e...`; called
+> `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip` until 2026-09-24),
+> paired with `glitch_hunter_main_brain_coverage.npz`
 > (`aa384707...`), frozen with its evidence in
 > `checkpoints_qa/final_objective2_16000000/`. Official 500-episode retention:
 > **56.6% completion (CI 52.2-60.9%) vs 46.8% baseline, progress 0.750 vs 0.710,
@@ -27,7 +28,7 @@ committed.)
 > could reach more remains unproven. Sections 15-17 below are kept as written.
 
 The working log with the full experiment history is
-[OBJECTIVE2_WORKLOG.md](OBJECTIVE2_WORKLOG.md). This report is the summary; the
+[WORKLOG.md](WORKLOG.md). This report is the summary; the
 worklog is the evidence.
 
 > **Superseded number (2026-09-21).** Every `4,002,095` in this report is the rectangle-envelope denominator. It was replaced by **3,757,990** after the real-arc envelope showed 244,105 of those pixels can never be reached by any jump (see the worklog, "Where to resume" -> CURRENT). Percentages below are historical; the same coverage reads about 5 points higher against the new denominator.
@@ -131,8 +132,8 @@ being reported.
   `--rehearsal-period`; richer startup banner.
 - New tools: `tools/build_anchor_set.py`, `tools/migrate_coverage.py`;
   `tools/evaluate_completion.py` now headless by default.
-- New docs: this report, the worklog, `docs/ANOMALY_acceleration_leak.md`,
-  `docs/evidence/`.
+- New docs: this report, the worklog, `docs/objective2/ANOMALY_acceleration_leak.md`,
+  `docs/objective2/evidence/`.
 
 ## 6. Remaining-space targeting
 
@@ -282,13 +283,13 @@ conflated: real physics, expected engine states, classifier limitations, and
 genuinely suspicious behaviour.
 
 One genuine finding is preserved with its evidence in
-`docs/ANOMALY_acceleration_leak.md`: `MAX_RUN_SPEED` is 800 and `RUN_ACCEL` is
+`docs/objective2/ANOMALY_acceleration_leak.md`: `MAX_RUN_SPEED` is 800 and `RUN_ACCEL` is
 20, but from a standstill walking and sprinting accelerate **identically**
 (0.15/frame) — the run acceleration path is effectively dead. This is a real
 engine behaviour, reported rather than worked around, and it is *why* the
 run-up distance is 70 px rather than something shorter.
 
-Raw evidence scripts are kept in `docs/evidence/` (jump physics, run-up, well
+Raw evidence scripts are kept in `docs/objective2/evidence/` (jump physics, run-up, well
 escape, well trace) and excluded from lint.
 
 ## 14. Validation results

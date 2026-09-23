@@ -318,7 +318,7 @@ def test_the_command_line_picks_game_and_probes():
 def test_the_approved_brain_is_chosen_only_when_its_hash_matches(tmp_path, monkeypatch, caplog):
     monkeypatch.chdir(tmp_path)
     final = tmp_path / config.FINAL_BRAIN_PATH
-    final.parent.mkdir(parents=True)
+    final.parent.mkdir(parents=True, exist_ok=True)
     final.write_bytes(b"the approved weights")
     (tmp_path / "glitch_hunter_qa.zip").write_bytes(b"a working copy")
     good = hashlib.sha256(b"the approved weights").hexdigest()

@@ -20,7 +20,7 @@ refuses (with the reason) rather than guessing when an input is missing.
 
 | Tool | What it does | Writes |
 |---|---|---|
-| `incidents.py` | The incident store from the command line: `list`, `show`, `verify` (re-hash every bundle against its manifest), `rerender` (new versioned reports, with a reason), `reproduce` (replay again), `recover` (finish what an interrupted run left). See docs/OBJECTIVE3.md. | nothing for list/show/verify; a NEW versioned file + manifest history for rerender/reproduce |
+| `incidents.py` | The incident store from the command line: `list`, `show`, `verify` (re-hash every bundle against its manifest), `rerender` (new versioned reports, with a reason), `reproduce` (replay again), `recover` (finish what an interrupted run left). See docs/objective3/README.md. | nothing for list/show/verify; a NEW versioned file + manifest history for rerender/reproduce |
 | `validate_incident_pipeline.py` | End-to-end proof on the real dashboard stack: the approved brain on the clean game, two SYNTHETIC probes, every stage asserted (stop, evidence, reports, replay, downloads, resume, duplicates, Objective-2 untouched). `--windowed` uses a real game window. ~30 s. | its own store, `incidents/_validation/<time>/` (ignored by the dashboard's history) |
 
 ## QA campaign set-up (run once, in this order)

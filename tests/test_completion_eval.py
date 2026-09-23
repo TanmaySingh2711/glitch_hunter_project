@@ -22,13 +22,11 @@ from exploration.lifecycle import EndReason
 
 ROOT = ce.ROOT
 PROTOCOL = ce.make_protocol(episodes=2, seed=900_000)
-SIX_M_FILES = ("mario_brain_checkpoint.zip",
-               "checkpoints/mario_brain_checkpoint_6000000_steps.zip",
-               "backup_6M/mario_brain_checkpoint.zip",
-               "backup_6M/mario_brain_checkpoint_6000000_steps.zip")
+# The 6M brain has one copy: the git-tracked master (git is its backup).
+SIX_M_FILES = ("mario_brain_checkpoint.zip",)
 BASELINE_MODEL = os.path.join(ROOT, config.BASELINE_MODEL)
 needs_6m = pytest.mark.skipif(not os.path.exists(BASELINE_MODEL),
-                              reason="backup_6M/ is not in the repository")
+                              reason=f"{config.BASELINE_MODEL} is not in this checkout")
 
 
 def scripted(actions, then=0):
@@ -263,7 +261,7 @@ def test_every_six_m_master_file_is_unchanged():                       # [10]
 @pytest.fixture(scope="module")
 def six_m():
     if not os.path.exists(BASELINE_MODEL):
-        pytest.skip("backup_6M/ is not in the repository")
+        pytest.skip(f"{config.BASELINE_MODEL} is not in this checkout")
     return ce.load_policy(BASELINE_MODEL)
 
 

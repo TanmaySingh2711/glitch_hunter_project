@@ -36,7 +36,7 @@ The bootstrap is therefore a FLOOR on "already familiar", not a ceiling.
 
 The model is used for inference only. learn() is never called, no gradient is
 taken, and nothing here writes to mario_brain_checkpoint.zip, checkpoints/ or
-backup_6M/ - it only reads the baseline and writes one .npz.
+the main brain - it only reads the baseline and writes one .npz.
 """
 
 from __future__ import annotations
@@ -90,7 +90,7 @@ def main() -> None:
         raise SystemExit(
             f"{args.model} not found.\n"
             f"The bootstrap reads the immutable 6M baseline. Restore it from "
-            f"checkpoints/ if backup_6M/ is missing.")
+            f"git (git checkout -- mario_brain_checkpoint.zip) if it is missing.")
 
     reachable = load_testable()
     if reachable is None:

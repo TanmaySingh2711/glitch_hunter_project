@@ -3,96 +3,15 @@
   "sha256": "690d57022c1fb444454b0b47f9d1e4ff1bc1444d7110c0bc3320b7fe53a188b3",
   "recorded": "2026-09-11"
  },
- "backup_6M/mario_brain_checkpoint.zip": {
-  "sha256": "690d57022c1fb444454b0b47f9d1e4ff1bc1444d7110c0bc3320b7fe53a188b3",
-  "recorded": "2026-09-11"
- },
- "backup_6M/mario_brain_checkpoint_6000000_steps.zip": {
-  "sha256": "690d57022c1fb444454b0b47f9d1e4ff1bc1444d7110c0bc3320b7fe53a188b3",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_400000_steps.zip": {
-  "sha256": "69329d907123f17ae4c0986cec65b786a4c291bb5094a3c9b1843ce033add9fe",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_800000_steps.zip": {
-  "sha256": "76c6bada50d51e59fd66f254fc7e2c41c454906e108eb6f720d99830b4cec02c",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_1200000_steps.zip": {
-  "sha256": "b49a483f01a8fdb8ed54b89ed895d668c5b89700d39616beeee7353873e3674e",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_1600000_steps.zip": {
-  "sha256": "124802b3911b01a2f8903cb3574533c8ace5654059ab6d37e47da7f7ee15b484",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_2000000_steps.zip": {
-  "sha256": "2c6ba73d3f4b5793d8f12050d9b3fa41e97ec58a50aedc31bf7b25e616cea47a",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_2400000_steps.zip": {
-  "sha256": "fe5075a0bc12f598045501d1581dc77808af7d80bcde649cca8b0aa9b437254c",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_2800000_steps.zip": {
-  "sha256": "d1e69657e33dfa394dd0921d9b7f1d883961a2a49cf43584bdf50f36a56f190d",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_3200000_steps.zip": {
-  "sha256": "7dee639c0b523f8bf2f080fda6f53fbdf17a1d4cd2cfc5ef8000521a8ddf480a",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_3600000_steps.zip": {
-  "sha256": "4914475c1b283ea4484c1719b641adf9e01bc60cfe1ae394e1dfe1bcd767da78",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_4000000_steps.zip": {
-  "sha256": "937803fdc6a8ab2149c0ea736d91206f76029ef05acaddd106773e07d1c6d65b",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_4400000_steps.zip": {
-  "sha256": "db540a1a87375779c1195431555c62c22d74adb805363761a914f228030ae653",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_4800000_steps.zip": {
-  "sha256": "2a9e7c6dd975032e17ce4279c1b4368efb749cb67178447767d76154d8bbfc60",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_5200000_steps.zip": {
-  "sha256": "4d4d2af9e59d60483a37afba038f3de5c9ced95f57663f33897ef0bb643e6dd8",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_5600000_steps.zip": {
-  "sha256": "bf1fcf4052db531c531dd4921183784e0ee88f50f199bbe3d1e0fa24e5209083",
-  "recorded": "2026-09-11"
- },
- "checkpoints/mario_brain_checkpoint_6000000_steps.zip": {
-  "sha256": "690d57022c1fb444454b0b47f9d1e4ff1bc1444d7110c0bc3320b7fe53a188b3",
-  "recorded": "2026-09-11"
- },
  "exploration_data/reachable_mask.npz": {
   "sha256": "c48b56cddce7a61e50b5c8e365a5212ba6216260e2531e7859e029c7e34b086d",
   "recorded": "2026-09-21",
   "supersedes": "9080f13178052c17a101824c6643acd0a01ac1cf22417cc5aa50c75cc73c3a82",
   "note": "Denominator 4,002,095 -> 3,757,990 (-244,105): the REAL-ARC ENVELOPE. Methods B/C bound a jump by a rectangle (rise 183 AND reach 480 at once); no arc does both. Re-derived from 228 measured engine arcs (exploration_data/jump_arcs.npz, tools/collect_jump_arcs.py) with a generous bound (arcs slide along walls, every arc launchable from every standable anchor). It accounts for 99.74% of the 3.16M px of real play on the 14.8M state; the 8,274 px it denies are kept as observed play (exploration_data/observed_reach.npz), so coverage is lossless. The 244,105 removed px are all classified CONNECTIVITY_GAP (model gap, never a glitch). Applied by tools/build_reachability.py --tighten; the previous rectangle-envelope mask is archived at exploration_data/archive_mask_v3_rectangle/reachable_mask.npz. PREVIOUS NOTE: Denominator 4,013,723 -> 4,002,095, from two independent corrections that nearly cancel. (1) BOTH OF MARIO'S FORMS: A/B/C and the noncoverage classifier ran on the small collider (30x40) only, while coverage records the real per-form collider; big Mario (40x80) reaches 40 px higher, so ordinary big-Mario play was classified ANOMALOUS - 25,356 px in one measured run, every one inside the big envelope. Method B 4,097,097 -> 4,252,679. (2) FLAG TRIGGER: checkpoint '11' is a 6x600 rect at x 8504 spanning the whole level height; past it Mario is under the scripted flag sequence, so only the grab band (to x 8564) and the recorded slide-and-walk corridor are reachable - removes 167,210 px. Acceptance: no coverage state lost a covered pixel, and the worst anomalous count across 9 states fell from 25,356 to 2. Superseded masks kept under exploration_data/archive_*. Fingerprint ded5cd19..."
  },
- "exploration_data/coverage_bootstrap_6000000.npz": {
-  "sha256": "8a57c737eef4c953af4dd38a44640187f9dff30565c8a53a6bea653fc3916ac4",
-  "recorded": "2026-09-11"
- },
- "exploration_data/coverage_bootstrap_6000000_raw_v1.npz": {
-  "sha256": "13cab53c40c80c16f24da64c565b8f3156ccdd90cc9d823ade8f7ed2610cd2a9",
-  "recorded": "2026-09-11"
- },
  "evaluation/completion_baseline_6M.json": {
   "sha256": "c8b4ec126651db8cd895118893f745c1b0427416ed6343eab02b382659fd6cbc",
   "recorded": "2026-09-11"
- },
- "exploration_data/archive_mask_v3_rectangle/reachable_mask.npz": {
-  "sha256": "9080f13178052c17a101824c6643acd0a01ac1cf22417cc5aa50c75cc73c3a82",
-  "recorded": "2026-09-21",
-  "note": "The rectangle-envelope mask (4,002,095 px) that preceded the real-arc envelope. Coverage states stamped with it are refused by the current mask; migrate them with tools/migrate_coverage.py."
  },
  "exploration_data/jump_arcs.npz": {
   "sha256": "cc3ef3a8463acea042fbd26dc55772828cd989edc9edf743744569ad1c44c2ee",
@@ -108,26 +27,6 @@
   "sha256": "3031dca2af8a6d1f6fd3804228eda759a5fdb2b58e32adce343ea9196cc1aede",
   "recorded": "2026-09-21",
   "note": "coverage_bootstrap_6000000_mask_v3.npz re-stamped to the real-arc mask by tools/migrate_coverage.py. visited_packed byte-identical; covered_testable 1,872,441 unchanged; testable_total 4,002,095 -> 3,757,990. config.BOOTSTRAP_COVERAGE points here."
- },
- "checkpoints_qa/glitch_hunter_qa_16000000_steps.zip": {
-  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
-  "recorded": "2026-09-21",
-  "note": "FINAL OBJECTIVE-2 BRAIN (approved 2026-09-21). 16,000,000 steps; 500-episode retention test 56.6% completion, progress 0.750, HEALTHY. Paired with the coverage file below. See checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json."
- },
- "checkpoints_qa/glitch_hunter_qa_16000000_steps_coverage.npz": {
-  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
-  "recorded": "2026-09-21",
-  "note": "FINAL OBJECTIVE-2 COVERAGE STATE, the exact pair of the brain above: 3,166,235 / 3,757,990 testable px = 84.2534% (NOT 100%), mask fingerprint 21eab893."
- },
- "checkpoints_qa/final_objective2_16000000/glitch_hunter_qa_16000000_steps.zip": {
-  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
-  "recorded": "2026-09-21",
-  "note": "Frozen byte-identical copy of the final brain (read-only)."
- },
- "checkpoints_qa/final_objective2_16000000/glitch_hunter_qa_16000000_steps_coverage.npz": {
-  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
-  "recorded": "2026-09-21",
-  "note": "Frozen byte-identical copy of the final coverage state (read-only)."
  },
  "checkpoints_qa/final_objective2_16000000/evidence/glitch_hunter_qa_16000000_steps_d906d09e.json": {
   "sha256": "be13f1e04da2f5c54c0b7906d6c69ddb6bf62714414ebfdd9d045763b2ae57b5",
@@ -160,8 +59,33 @@
   "note": "The campaign's training log as it stood at 16M (whole Objective-2 campaign)."
  },
  "checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json": {
-  "sha256": "c2f3f92de3b2c7ad1cebc1e00f52a934190081190f10d78171ed9794ed3d7c2e",
-  "recorded": "2026-09-21",
+  "sha256": "41130f0195e83d4821b972c5ab1a51849079b50c54aba2810220be1a7f3912ca",
+  "recorded": "2026-09-24",
   "note": "The record that names the approved pair, its hashes, coverage and retention numbers."
+ },
+ "glitch_hunter_main_brain.zip": {
+  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
+  "recorded": "2026-09-24",
+  "note": "THE MAIN BRAIN: the approved Objective-2 brain, 16,000,000 steps; completion 56.6% (HEALTHY). Formerly checkpoints_qa/glitch_hunter_qa_16000000_steps.zip - same bytes."
+ },
+ "glitch_hunter_main_brain_coverage.npz": {
+  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
+  "recorded": "2026-09-24",
+  "note": "The main brain's coverage state: 3,166,235 / 3,757,990 testable px = 84.2534% (NOT 100%)."
+ },
+ "checkpoints_qa/final_objective2_16000000/glitch_hunter_main_brain.zip": {
+  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
+  "recorded": "2026-09-24",
+  "note": "Read-only BACKUP of the main brain (same bytes)."
+ },
+ "checkpoints_qa/final_objective2_16000000/glitch_hunter_main_brain_coverage.npz": {
+  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
+  "recorded": "2026-09-24",
+  "note": "Read-only BACKUP of the main brain's coverage."
+ },
+ "checkpoints_qa/final_objective2_16000000/evidence/console.log": {
+  "sha256": "2d606ab73f32f94b09d8a795e359bdda417a73ecf21b4ed1bcc873274f044a0e",
+  "recorded": "2026-09-24",
+  "note": "SB3 training tables of the final campaign (moved from logs/)."
  }
 }

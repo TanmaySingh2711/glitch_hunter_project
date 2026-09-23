@@ -71,7 +71,7 @@ That's it. A game window will pop up and the same footage streams live to your b
   (`python app.py --game mario_bugged`).
 
 How incidents are captured, reported, de-duplicated and replayed:
-[`docs/OBJECTIVE3.md`](docs/OBJECTIVE3.md).
+[`docs/objective3/README.md`](docs/objective3/README.md).
 
 Works fully offline — nothing is loaded from the internet.
 
@@ -112,9 +112,9 @@ tools/                  command-line scripts, one job each - see tools/README.md
 tests/                  the automated checks (see "Running the tests")
 docs/ARCHITECTURE.md    how the pieces fit together, and the invariants that hold across them
 docs/PERFORMANCE.md     where the time and memory go per worker, and how to re-measure
-docs/OBJECTIVE2_WORKLOG.md   the QA exploration phase: final state, every finding, why it stopped
-docs/OBJECTIVE2_HANDOFF.md   the 17-section report on that phase (written before the campaign ran)
-docs/OBJECTIVE3.md      bug evidence and reports: how an anomaly becomes a reviewable incident
+docs/objective2/WORKLOG.md   the QA exploration phase: final state, every finding, why it stopped
+docs/objective2/HANDOFF.md   the 17-section report on that phase (written before the campaign ran)
+docs/objective3/README.md      bug evidence and reports: how an anomaly becomes a reviewable incident
 incidents/              (created at run time, not in git) one folder of evidence per incident
 mario_clean/            the actual Super Mario Bros game (Python/Pygame). Not written by us - see Credits
 mario_bugged/           a copy of it where deliberate test bugs go (none yet) - see mario_bugged/VARIANT.md
@@ -139,10 +139,11 @@ Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security notes:
 > level: **56.6%** completion over the 500-episode protocol, against 46.8% for
 > the 6M baseline it started from.
 >
-> Final brain: `checkpoints_qa/glitch_hunter_qa_16000000_steps.zip`, frozen
-> with its coverage state and evidence in
+> Final brain: **`glitch_hunter_main_brain.zip`** (with
+> `glitch_hunter_main_brain_coverage.npz`), read-only at the project root; its
+> closure record, evidence and a backup copy are in
 > `checkpoints_qa/final_objective2_16000000/`. Full reasoning, hashes and
-> limitations: [`docs/OBJECTIVE2_WORKLOG.md`](docs/OBJECTIVE2_WORKLOG.md)
+> limitations: [`docs/objective2/WORKLOG.md`](docs/objective2/WORKLOG.md)
 > ("FINAL STATE"). The rest of this section describes how the phase works and
 > still applies.
 
@@ -171,8 +172,7 @@ drift apart.
 **The 6M brain is never written in QA mode.** `mario_brain_checkpoint.zip`
 and `checkpoints/` are read once to seed the QA phase and never touched
 again; QA training writes only `glitch_hunter_qa.zip` and `checkpoints_qa/`.
-`backup_6M/` holds a verified byte-identical copy as a second line of
-defence.
+Git is its backup (`git checkout -- mario_brain_checkpoint.zip`).
 
 ### Running it, in order
 
@@ -272,7 +272,7 @@ There are two copies of the game: `mario_clean/` (the untouched baseline,
 pinned by hash) and `mario_bugged/` (where deliberate bugs go - none yet).
 `--synthetic-probe X` adds a fake, clearly labelled "bug" at world x X, only
 to exercise the pipeline. Full design, schema and limitations:
-[`docs/OBJECTIVE3.md`](docs/OBJECTIVE3.md).
+[`docs/objective3/README.md`](docs/objective3/README.md).
 
 ---
 
@@ -337,7 +337,7 @@ persistence, the dashboard's window control, and the bug detector (including
 that it stays quiet during normal play). The `slow` ones replay the real
 engine for thousands of steps, rebuild the 3,757,990-pixel mask, and load the
 real 6M brain. Tests that need a git-ignored file (`exploration_data/`,
-`checkpoints/`, `backup_6M/`) skip themselves when it is missing.
+`checkpoints_qa/`, the main brain) skip themselves when it is missing.
 
 The same gates run on every push in CI (`.github/workflows/ci.yml`), and
 `pre-commit install` runs lint and type checks on every commit.

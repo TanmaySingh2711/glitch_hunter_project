@@ -256,7 +256,7 @@ def test_the_first_qa_run_seeds_from_the_6m_master_read_only(in_tmp, monkeypatch
     monkeypatch.setattr(ta, "QA_PHASE", True)
     monkeypatch.setattr(ta, "CHECKPOINT_NAME", "glitch_hunter_qa")
     monkeypatch.setattr(ta, "CHECKPOINT_DIR", str(in_tmp / "checkpoints_qa"))
-    with pytest.raises(SystemExit, match="backup_6M"):
+    with pytest.raises(SystemExit, match="git checkout"):
         ta.find_resume_point()
     (in_tmp / f"{ta.LEGACY_CHECKPOINT_NAME}.zip").write_bytes(b"")
     assert ta.find_resume_point() == ta.Resume(f"{ta.LEGACY_CHECKPOINT_NAME}.zip", True)

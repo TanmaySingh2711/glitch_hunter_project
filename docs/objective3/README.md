@@ -19,7 +19,7 @@ flowchart LR
 
 The game-level details are in the module docstrings; this page is the map
 and the reasoning. The working log with the history of decisions is
-[OBJECTIVE3_WORKLOG.md](OBJECTIVE3_WORKLOG.md).
+[WORKLOG.md](WORKLOG.md).
 
 ---
 
@@ -34,8 +34,8 @@ python tools/validate_incident_pipeline.py   # the end-to-end proof (~30 s, head
 ```
 
 The dashboard plays the **approved Objective-2 brain**
-(`checkpoints_qa/final_objective2_16000000/`), and only if its SHA-256 still
-matches `FINAL_OBJECTIVE2.json`; otherwise it falls back to the root working
+(`glitch_hunter_main_brain.zip`), and only if its SHA-256 still
+matches `FINAL_OBJECTIVE2.json`; otherwise it falls back to a working QA
 brain, and every incident says which one it was.
 
 ## 2. The two game variants

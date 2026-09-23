@@ -74,7 +74,7 @@ explicit = true
 line-length = 100
 target-version = "py312"
 exclude = ["mario_clean", "mario_bugged", "venv_gpu",   # vendored / generated
-           "docs/evidence"]             # preserved anomaly reproductions, kept as recorded
+           "docs/objective2/evidence"]             # preserved anomaly reproductions, kept as recorded
 
 [tool.ruff.lint]
 select = [

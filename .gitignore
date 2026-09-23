@@ -57,16 +57,12 @@ mario_brain_*checkpoint*.zip
 
 # ═══════════════════════════════════════════════════════════════════════
 # EXPLORATION / QA ARTIFACTS
-# backup_6M/        immutable copy of the 6M brain - the baseline every
-#                   tool and slow test reads (config.BASELINE_MODEL), and
-#                   restorable from checkpoints/, so not worth a second
-#                   20MB blob in history
 # exploration_data/ generated masks, jump arcs and bootstrap coverage
 # checkpoints_qa/   the QA-phase model zips + their paired coverage, and
-#                   final_objective2_16000000/ - the frozen Objective-2
-#                   pair (its SHA-256s ARE tracked, in artifacts.json)
+#                   final_objective2_16000000/ - the Objective-2 closure
+#                   record, evidence and a backup of the main brain
+#                   (their SHA-256s ARE tracked, in artifacts.json)
 # ═══════════════════════════════════════════════════════════════════════
-backup_6M/
 exploration_data/
 checkpoints_qa/
 
@@ -91,6 +87,12 @@ incidents/
 # the QA brain would add a new 20MB blob to history on every push.
 glitch_hunter_qa.zip
 glitch_hunter_qa_coverage.npz
+
+# THE MAIN BRAIN: the approved 16,000,000-step Objective-2 brain and its
+# coverage, renamed from the QA milestone on 2026-09-24. Not tracked for the
+# same 20MB reason; its SHA-256s are in artifacts.json.
+glitch_hunter_main_brain.zip
+glitch_hunter_main_brain_coverage.npz
 
 # ─── EDITORS & OS ───
 # CI runs on Windows and Linux and CONTRIBUTING.md invites contributors, so

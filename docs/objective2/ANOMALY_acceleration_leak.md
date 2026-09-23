@@ -34,7 +34,7 @@ accelerates at 0.35/frame instead of 0.15 and is not held to 6.0.
 
 ## Measured consequences
 
-Ordinary, documented movement (`docs/evidence/runup.py`, engine ground truth):
+Ordinary, documented movement (`docs/objective2/evidence/runup.py`, engine ground truth):
 
 | | measured |
 |---|---|
@@ -48,10 +48,10 @@ cap, and cleared a 172 px wall that a 166 px standing jump cannot.
 
 ## Reproduction
 
-The scripts are kept beside this file in `docs/evidence/`; each runs headless
+The scripts are kept beside this file in `docs/objective2/evidence/`; each runs headless
 from a clone with no arguments.
 
-`docs/evidence/well_trace.py` replays it deterministically (seeded, no policy
+`docs/objective2/evidence/well_trace.py` replays it deterministically (seeded, no policy
 involved) and prints the frame-by-frame state. The escape:
 
 ```

@@ -16,7 +16,7 @@ changes how fast that happens: each episode is a function of (checkpoint,
 seed) alone, so the result is identical for any worker count.
 
 Inference only. Results go to evaluation/results/; nothing under
-checkpoints/, checkpoints_qa/, backup_6M/ or exploration_data/ is written.
+a brain, checkpoints_qa/ or exploration_data/ is written.
 See evaluation/completion.py for the protocol and why it is what it is.
 """
 from __future__ import annotations

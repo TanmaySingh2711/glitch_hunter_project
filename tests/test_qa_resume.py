@@ -6,7 +6,7 @@ with the original brain already overwritten or the coverage map silently
 wrong. Three specific ones:
 
   * The QA phase writing over mario_brain_checkpoint.zip, which would destroy
-    the only copy of the completion-phase brain outside backup_6M/.
+    the only copy of the completion-phase brain (git would have to restore it).
   * A model resuming beside the wrong coverage map, which either re-pays the
     agent for ground it already explored or starves it of reward for ground
     it has not.

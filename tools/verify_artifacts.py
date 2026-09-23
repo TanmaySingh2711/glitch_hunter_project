@@ -34,13 +34,13 @@ MANIFEST = os.path.join(ROOT, "artifacts.json")
 
 # What --record captures: every file under these paths that exists.
 PROTECTED = (
-    "mario_brain_checkpoint.zip",
-    "backup_6M/mario_brain_checkpoint.zip",
-    "backup_6M/mario_brain_checkpoint_6000000_steps.zip",
-    *(f"checkpoints/mario_brain_checkpoint_{400_000 * i}_steps.zip" for i in range(1, 16)),
+    "mario_brain_checkpoint.zip",                    # Objective 1: the 6M brain
+    "glitch_hunter_main_brain.zip",                  # Objective 2: the final brain
+    "glitch_hunter_main_brain_coverage.npz",
     "exploration_data/reachable_mask.npz",
-    "exploration_data/coverage_bootstrap_6000000.npz",
-    "exploration_data/coverage_bootstrap_6000000_raw_v1.npz",
+    "exploration_data/jump_arcs.npz",
+    "exploration_data/observed_reach.npz",
+    "exploration_data/coverage_bootstrap_6000000_mask_v4.npz",
     "evaluation/completion_baseline_6M.json",
 )
 
