@@ -74,7 +74,7 @@ explicit = true
 line-length = 100
 target-version = "py312"
 exclude = ["mario_clean", "mario_bugged", "venv_gpu",   # vendored / generated
-           "docs/objective2/evidence"]             # preserved anomaly reproductions, kept as recorded
+           "tools/objective2_evidence"]             # preserved anomaly reproductions, kept as recorded
 
 [tool.ruff.lint]
 select = [
@@ -143,7 +143,8 @@ python_version = "3.12"
 files = ["agent_logic.py", "app.py", "custom_mario_env.py", "dashboard_backend.py",
          "dashboard_service.py", "game_window.py", "train_agent.py",
          "common", "evaluation", "exploration", "reporting", "rewards", "training", "tools"]
-exclude = ["^mario_clean/", "^mario_bugged/", "^venv_gpu/"]
+exclude = ["^mario_clean/", "^mario_bugged/", "^venv_gpu/",
+           "^tools/objective2_evidence/"]   # preserved anomaly reproductions, kept as recorded
 strict = true
 warn_unreachable = true
 # numpy / torch / gymnasium generics are pervasive and partly untyped at the

@@ -3,7 +3,7 @@ trace x_vel, x_accel, max_x_vel, state and position frame by frame, to see how
 Mario built >4.5 speed and got out of an 84 px well."""
 import os, sys
 os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT); os.chdir(ROOT)
 import numpy as np
 from custom_mario_env import CustomMarioEnv

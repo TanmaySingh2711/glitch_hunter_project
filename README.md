@@ -79,7 +79,7 @@ That's it. A game window will pop up and the same footage streams live to your b
   starts on the bugged one.)
 
 How incidents are captured, reported, de-duplicated and replayed:
-[`docs/objective3/README.md`](docs/objective3/README.md).
+[`docs/OBJECTIVE3.md`](docs/OBJECTIVE3.md).
 
 Works fully offline — nothing is loaded from the internet.
 
@@ -120,9 +120,9 @@ tools/                  command-line scripts, one job each - see tools/README.md
 tests/                  the automated checks (see "Running the tests")
 docs/ARCHITECTURE.md    how the pieces fit together, and the invariants that hold across them
 docs/PERFORMANCE.md     where the time and memory go per worker, and how to re-measure
-docs/objective2/WORKLOG.md   the QA exploration phase: final state, every finding, why it stopped
-docs/objective2/HANDOFF.md   the 17-section report on that phase (written before the campaign ran)
-docs/objective3/README.md      bug evidence and reports: how an anomaly becomes a reviewable incident
+docs/OBJECTIVE1.md      Objective 1: the autonomous 6M brain (brief)
+docs/OBJECTIVE2.md      Objective 2: the QA exploration agent, 16M brain (brief)
+docs/OBJECTIVE3.md      Objective 3: automated bug evidence, reports and the six benchmark bugs (brief)
 incidents/              (created at run time, not in git) one folder of evidence per incident
 mario_clean/            the actual Super Mario Bros game (Python/Pygame). Not written by us - see Credits
 mario_bugged/           a copy of it with six deliberate test bugs - see mario_bugged/VARIANT.md
@@ -151,7 +151,7 @@ Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md). Security notes:
 > `glitch_hunter_main_brain_coverage.npz`), read-only at the project root; its
 > closure record, evidence and a backup copy are in
 > `checkpoints_qa/final_objective2_16000000/`. Full reasoning, hashes and
-> limitations: [`docs/objective2/WORKLOG.md`](docs/objective2/WORKLOG.md)
+> limitations: [`docs/OBJECTIVE2.md`](docs/OBJECTIVE2.md)
 > ("FINAL STATE"). The rest of this section describes how the phase works and
 > still applies.
 
@@ -281,7 +281,7 @@ pinned by hash) and `mario_bugged/` (six deliberate benchmark bugs, declared in
 `mario_bugged/INJECTED_BUGS.json`).
 `--synthetic-probe X` adds a fake, clearly labelled "bug" at world x X, only
 to exercise the pipeline. Full design, schema and limitations:
-[`docs/objective3/README.md`](docs/objective3/README.md).
+[`docs/OBJECTIVE3.md`](docs/OBJECTIVE3.md).
 
 ---
 

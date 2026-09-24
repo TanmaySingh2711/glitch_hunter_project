@@ -933,7 +933,7 @@ class ReconciliationError(RuntimeError):
 # ══════════════════════════════════════════════════════════════════════════
 # RUN-UP ZONES — where a standing jump is not enough
 #
-# Engine ground truth (docs/objective2/evidence/jump_physics.py, runup.py): a jump rises
+# Engine ground truth (tools/objective2_evidence/jump_physics.py, runup.py): a jump rises
 # 166 px below take-off |x_vel| 4.5 and 183 px at or above it, and reaching
 # 4.5 from a standstill takes 29 frames and exactly 70 px of ground.
 #

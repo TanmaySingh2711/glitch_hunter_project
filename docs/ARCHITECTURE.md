@@ -155,7 +155,7 @@ decision, not a refactor.
   before loading the other.
   `mario_clean/` must match `CLEAN_GAME_TREE_SHA256`; `mario_bugged/` may differ
   only where `INJECTED_BUGS.json` says - per file, per marked line block, and
-  as the pinned whole diff (docs/objective3/README.md).
+  as the pinned whole diff (docs/OBJECTIVE3.md).
 * **Observing never changes the game.** Evidence (Objective 3) is off unless
   enabled and only reads the engine when on; an episode is identical either way.
   The collision and jump-physics invariants run only then, and judge the
@@ -178,7 +178,7 @@ decision, not a refactor.
 | `exploration_data/coverage_bootstrap_6000000_mask_v4.npz` | `tools/bootstrap_coverage.py`, re-stamped by `tools/migrate_coverage.py` | no | the QA campaign's starting map (`config.BOOTSTRAP_COVERAGE`) |
 | `exploration_data/anchor_states.npz` | `tools/build_anchor_set.py` | no | the states `AnchorConsolidationCallback` holds KL against |
 | `checkpoints_qa/`, `glitch_hunter_qa*.{zip,npz}` | QA training | no | matched model/coverage pairs |
-| `checkpoints_qa/final_objective2_16000000/` | by hand at closure | no | **frozen**: the closure record, the evidence, and a read-only backup of the main brain. See `docs/objective2/WORKLOG.md` |
+| `checkpoints_qa/final_objective2_16000000/` | by hand at closure | no | **frozen**: the closure record, the evidence, and a read-only backup of the main brain. See `docs/OBJECTIVE2.md` |
 | `checkpoints_qa/coverage_audit_trail.jsonl` | QA training | no | append-only coverage growth, one line per 10k steps |
 | `checkpoints_qa/reward_telemetry.jsonl` | QA training | no | append-only reward books: one line per episode (channels per phase) + 10k-step summaries |
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |

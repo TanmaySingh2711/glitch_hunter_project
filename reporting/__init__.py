@@ -4,5 +4,5 @@
         -> raw evidence persisted (IncidentStore) -> GIF / Markdown / PDF,
            replay-based reproduction -> dashboard
 
-See docs/objective3/README.md for the architecture and the reasoning behind it.
+See docs/OBJECTIVE3.md for the architecture and the reasoning behind it.
 """

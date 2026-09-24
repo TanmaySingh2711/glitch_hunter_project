@@ -61,7 +61,7 @@ JUMP_RISE_PX = 183
 JUMP_REACH_PX = 480
 
 # ─── THE OTHER JUMP HEIGHT: no run-up, no 183 ───
-# Measured in the engine (docs/objective2/evidence/jump_physics.py, runup.py): the rise
+# Measured in the engine (tools/objective2_evidence/jump_physics.py, runup.py): the rise
 # is BINARY, not a range. mario.py sets y_vel = JUMP_VEL - 0.5 only when
 # |x_vel| > 4.5 at take-off, and JUMP_VEL otherwise, giving exactly 183 px or
 # exactly 166 px and nothing between. Reaching 4.5 from a standstill takes 29
@@ -1240,7 +1240,7 @@ BOOTSTRAP_EPISODES = 40
 # read-only BACKUP of the same pair under the same names: the brain is not in
 # git and cost ~10 h of training, so one copy is not enough. Nothing reads the
 # backup. Objective 3 never writes either; every incident names the brain by
-# SHA-256, checked against FINAL_OBJECTIVE2.json (docs/objective2/WORKLOG.md,
+# SHA-256, checked against FINAL_OBJECTIVE2.json (docs/OBJECTIVE2.md,
 # "FINAL STATE").
 # ═══════════════════════════════════════════════════════════════════════
 MAIN_BRAIN_NAME = "glitch_hunter_main_brain"
@@ -1276,7 +1276,7 @@ DEFAULT_GAME_VARIANT = CLEAN_GAME_VARIANT
 CLEAN_GAME_TREE_SHA256 = "b1f6b18467db398a41f7272c414d7f2a81ae4929b1c7a788dc572f19fe592630"
 
 # ═══════════════════════════════════════════════════════════════════════
-# INCIDENT EVIDENCE AND REPORTING (Objective 3; see docs/objective3/README.md)
+# INCIDENT EVIDENCE AND REPORTING (Objective 3; see docs/OBJECTIVE3.md)
 # ═══════════════════════════════════════════════════════════════════════
 INCIDENTS_DIR = "incidents"
 
