@@ -1,12 +1,12 @@
 # ═══════════════════════════════════════════════════════════════════════
 # FASTEST WAY (one command, no ordering to remember):
-#     uv sync
+#     uv sync --active      (inside the activated venv_gpu; plain `uv sync` makes a separate .venv)
 # That reads pyproject.toml, which already encodes the torch/CUDA rules
 # explained below. If you'd rather use plain pip, follow the 3 steps.
 #
 # DO NOT run "pip install -r requirements.txt" by itself - it will not
 # work correctly. Follow the 3 steps below in order.
-# See README.md "Setup" for the full copy-paste version of this.
+# See README.md "12. Installation" for the full copy-paste version of this.
 # ═══════════════════════════════════════════════════════════════════════
 
 # STEP 1 - install PyTorch first, separately (pick ONE line):
@@ -18,7 +18,7 @@
 #   pip install stable-baselines3==2.9.0 --no-deps
 #   (Why --no-deps: it asks for a torch version newer than any CUDA build
 #   that exists, so without this flag it silently swaps out the torch you
-#   just installed in Step 1. See README.md "Why the pip install is 3 steps".)
+#   just installed in Step 1. See README.md "12. Installation" (Why this order?).)
 
 # STEP 3 - install everything else:
 #   pip install -r requirements.txt

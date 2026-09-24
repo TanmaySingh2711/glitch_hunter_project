@@ -7,7 +7,7 @@ cd /d "%~dp0"
 
 if not exist "venv_gpu\Scripts\python.exe" (
     echo venv_gpu was not found in %CD%.
-    echo Create it first - see "Setup" in README.md.
+    echo Create it first - see "12. Installation" in README.md.
     pause
     exit /b 1
 )

@@ -69,7 +69,7 @@ Last audit (2026-09-11): no known vulnerabilities in `requirements.txt`.
 not been through pip-audit yet.
 
 **Known exception - torch 2.5.1.** It is pinned because no CUDA 12.1 build
-of anything newer exists (README, "Why the pip install is 3 steps"), and
+of anything newer exists (README, "12. Installation"), and
 2.5.1 predates the fix for CVE-2025-32434 (a `torch.load(weights_only=True)`
 bypass, fixed in 2.6.0). The exposure is the one already stated under
 "Checkpoints are code": it only matters when loading an untrusted

@@ -10,6 +10,7 @@ refuses (with the reason) rather than guessing when an input is missing.
 | Tool | What it does | Writes |
 |---|---|---|
 | `check.py` | Every quality gate CI runs: ruff, mypy, tests, artifact hashes. `--full` adds the slow tests and the coverage floor. | nothing |
+| `final_brain.py` | `install`: downloads the final 16M brain bundle from the GitHub Release (or takes `--zip FILE`), verifies all four files against `artifacts.json`, and puts them in place read-only - never overwriting a different file. `bundle OUT.zip`: builds that release asset (maintainers). | the four final-brain files (install); one zip (bundle) |
 | `verify_artifacts.py` | Re-hashes the protected artifacts (the 6M brain, masks, baseline) against `artifacts.json`. | nothing (`--record` rewrites the manifest) |
 | `benchmark_step.py` | Milliseconds per agent step for the bare engine, the legacy wrapper and the QA wrapper; `--profile` shows where the time goes. | nothing |
 | `evaluate_completion.py` | Can a checkpoint still finish Level 1-1? Plays the frozen protocol and compares with the 6M baseline: HEALTHY / WARNING / REGRESSED. | `evaluation/results/` |

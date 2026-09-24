@@ -81,6 +81,10 @@ calibration_runs/
 # source - kept locally, read-only, and served by the dashboard.
 incidents/
 
+# Release assets built by `python tools/final_brain.py bundle` (the final
+# 16M brain bundle is published as a GitHub Release asset, never committed).
+dist/
+
 # The QA-phase master lives at the repo root, next to (never on top of)
 # mario_brain_checkpoint.zip. Unlike that file it is NOT tracked: the
 # completion brain is tracked so a fresh clone can watch the agent play, and

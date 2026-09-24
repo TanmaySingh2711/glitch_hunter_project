@@ -2,14 +2,14 @@
 
 ## Set up
 
-Follow the README's setup, then add the development tools:
+Follow the README's Installation section, then add the development tools:
 
 ```bash
 pip install pytest==9.1.1 pytest-cov==7.1.0 ruff==0.16.6 mypy==2.3.1 pre-commit==4.6.2
 pre-commit install          # optional: lint + type-check on every commit
 ```
 
-(`uv sync` installs the same versions from `pyproject.toml`'s `dev` group.)
+(`uv sync --active` installs the same versions from `pyproject.toml`'s `dev` group.)
 
 ## Before every commit
 
