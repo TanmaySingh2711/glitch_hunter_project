@@ -56,7 +56,10 @@ That's it. A game window will pop up and the same footage streams live to your b
 - **BUG TRACKER** (red panel) — every recorded incident, newest first, kept
   across restarts. It stays empty unless the game actually breaks a rule it's
   supposed to follow: Mario alive below the floor, far above the level,
-  moving at an impossible speed, or the score/coin counter running backwards.
+  moving at an impossible speed, the score/coin counter running backwards,
+  Mario ending up inside ground, a pipe, a step or a block, being stopped by
+  something that isn't drawn, being hurt by an enemy he never touched, or
+  jumping faster or higher than any real jump.
   An empty panel is the normal, healthy result. Each entry links to its
   **PDF report, Markdown report, exact trigger frame, GIF** and the whole
   evidence bundle.
@@ -119,7 +122,7 @@ docs/objective2/HANDOFF.md   the 17-section report on that phase (written before
 docs/objective3/README.md      bug evidence and reports: how an anomaly becomes a reviewable incident
 incidents/              (created at run time, not in git) one folder of evidence per incident
 mario_clean/            the actual Super Mario Bros game (Python/Pygame). Not written by us - see Credits
-mario_bugged/           a copy of it where deliberate test bugs go (none yet) - see mario_bugged/VARIANT.md
+mario_bugged/           a copy of it with six deliberate test bugs - see mario_bugged/VARIANT.md
 static/, templates/     the dashboard page; static/vendor/socket.io.min.js is kept locally so the
                         dashboard works with no internet connection
 mario_brain_checkpoint.zip   the trained AI's "brain" - needed for the AI to play well
@@ -264,14 +267,15 @@ episode in a separate process that says honestly whether it happens again.
 Repeat sightings of the same bug are counted, not re-reported.
 
 ```bash
-python app.py --game mario_bugged        # test the variant meant for deliberate bugs
+python app.py --game mario_bugged        # test the variant with the six deliberate bugs
 python tools/incidents.py list           # every incident, from the command line
 python tools/incidents.py verify         # re-hash every evidence file
 python tools/validate_incident_pipeline.py   # prove the whole pipeline end to end
 ```
 
 There are two copies of the game: `mario_clean/` (the untouched baseline,
-pinned by hash) and `mario_bugged/` (where deliberate bugs go - none yet).
+pinned by hash) and `mario_bugged/` (six deliberate benchmark bugs, declared in
+`mario_bugged/INJECTED_BUGS.json`).
 `--synthetic-probe X` adds a fake, clearly labelled "bug" at world x X, only
 to exercise the pipeline. Full design, schema and limitations:
 [`docs/objective3/README.md`](docs/objective3/README.md).

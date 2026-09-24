@@ -5,6 +5,13 @@ from .. import setup, tools
 from .. import constants as c
 from . import powerups
 
+# INJECTED BUG open-sky-jump: a jump that starts with Mario's left edge in
+# this open-sky stretch at the start of the level (level x 250-480) gets
+# 2.2x the take-off velocity, and releasing the jump button no longer cuts
+# it short - so it always carries him far above the top of the screen.
+SKY_JUMP_ZONE_X = (250, 480)
+SKY_JUMP_FACTOR = 2.2
+
 
 class Mario(pg.sprite.Sprite):
     def __init__(self):
@@ -480,11 +487,20 @@ class Mario(pg.sprite.Sprite):
                     setup.SFX['small_jump'].play()
                 self.state = c.JUMP
                 self.y_vel = c.JUMP_VEL
+                self.apply_sky_jump_defect()  # INJECTED BUG open-sky-jump
         elif not moved:
             self.state = c.STAND
 
         if not keys[tools.keybinding['down']]:
             self.get_out_of_crouch()
+
+
+    def apply_sky_jump_defect(self):
+        """INJECTED BUG open-sky-jump: multiplies a fresh take-off velocity
+        when the jump starts inside SKY_JUMP_ZONE_X."""
+        self.sky_jump = SKY_JUMP_ZONE_X[0] <= self.rect.x <= SKY_JUMP_ZONE_X[1]
+        if self.sky_jump:
+            self.y_vel *= SKY_JUMP_FACTOR
 
 
     def get_out_of_crouch(self):
@@ -584,6 +600,7 @@ class Mario(pg.sprite.Sprite):
                     self.y_vel = c.JUMP_VEL - .5
                 else:
                     self.y_vel = c.JUMP_VEL
+                self.apply_sky_jump_defect()  # INJECTED BUG open-sky-jump
 
 
         if keys[tools.keybinding['left']]:
@@ -666,7 +683,8 @@ class Mario(pg.sprite.Sprite):
             if self.x_vel < self.max_x_vel:
                 self.x_vel += self.x_accel
 
-        if not keys[tools.keybinding['jump']]:
+        if not keys[tools.keybinding['jump']] and not getattr(self, 'sky_jump', False):
+            # INJECTED BUG open-sky-jump: the release cut-off skips a sky jump
             self.gravity = c.GRAVITY
             self.state = c.FALL
 
@@ -677,6 +695,7 @@ class Mario(pg.sprite.Sprite):
 
     def falling(self, keys, fire_group):
         """Called when Mario is in a FALL state"""
+        self.sky_jump = False  # INJECTED BUG open-sky-jump: ends with the rise
         self.check_to_allow_fireball(keys)
         if self.y_vel < c.MAX_Y_VEL:
             self.y_vel += self.gravity

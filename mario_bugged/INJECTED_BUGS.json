@@ -1,4 +1,146 @@
 {
- "note": "Deliberate bugs in this variant. Empty on purpose: no bug has been specified yet. Each entry: {\"id\", \"summary\", \"files\": [paths relative to this folder]}.",
- "bugs": []
+ "note": "Deliberate benchmark bugs in this variant, specified by the project owner on 2026-09-24. Every changed line in the game carries 'INJECTED BUG <id>'; diff_sha256 pins the exact clean->bugged diff that was validated (reporting/variants.py, tests/test_game_variants.py, tests/test_injected_bugs.py). Coordinates are level pixels: x grows right from the level start, y grows DOWN from the top of the screen (ground top y 538, screen height 600).",
+ "manifest_version": 2,
+ "specified_by": "project owner, 2026-09-24 (six benchmark bugs, locations left to the implementer)",
+ "diff_sha256": "3efcd409b3b01742ca6cfc04c50b06ad5cccf2a1a7b3728b7257dd2cbe5b6929",
+ "bugs": [
+  {
+   "id": "stair-clip",
+   "number": 1,
+   "name": "Stair clipping",
+   "summary": "The two tall columns at the top of the first staircase have colliders two tiles too low, so their two drawn top blocks have no collision.",
+   "subsystem": "level collision geometry (step colliders)",
+   "files": [
+    "data/states/level1.py"
+   ],
+   "location": "First staircase (the pyramid pair around x 5745-6170): the two top blocks of step4 (x 5874-5914) and step5 (x 6001-6041), drawn at y 366-452.",
+   "trigger": "Landing on top of either column, walking from step3 (or step6) into it, or any contact with those top blocks.",
+   "expected_clean": "Mario stands on the columns at y 366 and is blocked by their faces.",
+   "injected_behaviour": "Mario sinks 86 px into the column (standing at y 452, wholly inside its drawn top blocks) and walks straight into the blocks from step3. The rest of the staircase is unchanged. Side effect: the gap between the two pyramids, a trap in the clean game, becomes easy to climb out of.",
+   "implementation": "level1.py setup_steps(): step4 and step5 colliders start at y 452 (height 90) instead of y 366 (height 176).",
+   "reproducibility": "Deterministic. tests/bug_probe.py 'land_on_step4', 'land_on_step5', 'walk_step3_into_step4' (control: 'control_land_on_step13', identical on both games).",
+   "objective3_detection": "Detected by the generic solid-penetration invariant (reporting/collision_invariants.py): kind 'clip_into_step', one incident per column; reproduced.",
+   "zone": {
+    "x": [
+     5800,
+     6080
+    ]
+   }
+  },
+  {
+   "id": "pipe-clip",
+   "number": 2,
+   "name": "Pipe clipping",
+   "summary": "Only the left rim of pipe 4 is solid, so Mario sinks into the pipe from its top and walks into it from the right.",
+   "subsystem": "level collision geometry (pipe collider)",
+   "files": [
+    "data/states/level1.py"
+   ],
+   "location": "Pipe 4 (the fourth, tall pipe): drawn at x 2445-2528, y 366-536. Its collider now covers only x 2445-2466.",
+   "trigger": "Walking along the pipe's top past x 2466, landing on its top right of x 2466, or walking left into its right side.",
+   "expected_clean": "The whole 83 px pipe is solid: Mario walks across its top and is stopped by either side (at x 2445 from the left, 2528 from the right).",
+   "injected_behaviour": "Mario drops into the pipe from its top (up to 40 px deep - his full height - inside the drawn pipe) and, from the right, walks 62 px into it before the rim stops him. Other pipes are untouched.",
+   "implementation": "level1.py setup_pipes(): pipe4 collider width 21 instead of 83.",
+   "reproducibility": "Deterministic. tests/bug_probe.py 'pipe4_walk_top', 'pipe4_walk_in_from_right' (controls on pipe 3, identical on both games).",
+   "objective3_detection": "Detected by the generic solid-penetration invariant: kind 'clip_into_pipe'; reproduced.",
+   "zone": {
+    "x": [
+     2415,
+     2560
+    ]
+   }
+  },
+  {
+   "id": "ceiling-clip",
+   "number": 3,
+   "name": "Ceiling clipping",
+   "summary": "A lone brick does not stop Mario while he is moving up, so a jump from below passes straight through it.",
+   "subsystem": "player/brick collision (vertical)",
+   "files": [
+    "data/states/level1.py"
+   ],
+   "location": "The lone plain brick at x 5058-5101, y 365-408, over open ground (brick20).",
+   "trigger": "Jumping into the brick from below (any overlap while Mario's y velocity is negative).",
+   "expected_clean": "Mario's head hits the brick bottom (y 408), the brick bumps, and he falls back.",
+   "injected_behaviour": "No collision while rising: Mario's body passes through the brick (fully inside it, 30x40 px) up to top y 332; no bump. Falling onto it and walking into its sides still collide.",
+   "implementation": "level1.py: brick20.solid_from_below = False (setup_bricks); check_mario_x_collisions() and check_mario_y_collisions() ignore such a brick while self.mario.y_vel < 0.",
+   "reproducibility": "Deterministic. tests/bug_probe.py 'jump_under_brick20' (control: 'control_jump_under_brick18', identical on both games).",
+   "objective3_detection": "Detected by the generic solid-penetration invariant: kind 'clip_into_block', entered from the bottom (a ceiling clip); reproduced.",
+   "zone": {
+    "x": [
+     5020,
+     5140
+    ]
+   }
+  },
+  {
+   "id": "invisible-wall",
+   "number": 4,
+   "name": "Invisible wall",
+   "summary": "A stray two-tile collider on open, empty ground blocks Mario although nothing is drawn there.",
+   "subsystem": "level collision geometry (stray step collider)",
+   "files": [
+    "data/states/level1.py"
+   ],
+   "location": "Open ground between the bricks at x 4287-4373 and the ? block at x 4544: x 4412-4452, y 452-538 (two tiles high). No block overhead, no bush or hill (the nearest ground decorations end at x 4323 and start at 4611); the drawn pixels there are identical to mario_clean's.",
+   "trigger": "Walking or jumping into x 4412 below y 452 from either side; landing on y 452 above it.",
+   "expected_clean": "Mario walks freely across x 4412-4452.",
+   "injected_behaviour": "Mario is stopped at x 4412 (right edge) by empty space, and can stand on thin air at y 452. Enemies (the Koopa near x 4400-4500) also turn around there, as at any step.",
+   "implementation": "level1.py setup_steps(): extra collider 'stray_step' added to step_group.",
+   "reproducibility": "Deterministic. tests/bug_probe.py 'walk_across_wall_spot' (control: 'control_walk_across_open_spot', identical on both games).",
+   "objective3_detection": "Detected by the generic collision-with-nothing invariant: kind 'invisible_collision' (side stop and standing on it); reproduced.",
+   "zone": {
+    "x": [
+     4370,
+     4500
+    ]
+   }
+  },
+  {
+   "id": "false-goomba-hit",
+   "number": 5,
+   "name": "False Goomba hit / early death",
+   "summary": "One Goomba's hurt box is 36 px bigger than its sprite on every side, so it hurts Mario before they touch - including from above, before a stomp can land.",
+   "subsystem": "player/enemy collision",
+   "files": [
+    "data/states/level1.py"
+   ],
+   "location": "goomba14: the leading Goomba of the last pair, spawned when Mario reaches the checkpoint at x 6800 (it walks left from the right edge of the screen toward pipe 5 / the bricks near x 7100-7300).",
+   "trigger": "Mario within 36 px of that Goomba on any side while it is alive.",
+   "expected_clean": "A Goomba hurts Mario only when their colliders touch (gap 0); landing on it stomps it.",
+   "injected_behaviour": "Mario dies (small) or shrinks (big) with 32-36 px of clear space between them; he cannot stomp this Goomba (the hit registers before his feet reach it). Its partner goomba15 and every other enemy are unchanged.",
+   "implementation": "level1.py: goomba14.hurt_margin = 36 (setup_enemies); Level1.enemy_in_hurt_margin() used by check_mario_x_collisions() when no real enemy overlap exists.",
+   "reproducibility": "Deterministic. tests/bug_probe.py 'goomba14_walks_into_mario' (controls: 'control_goomba15_walks_into_mario', 'control_goomba12_walks_into_mario', identical on both games).",
+   "objective3_detection": "Detected by the generic hit-without-contact invariant: kind 'hit_without_contact' (gap ~33 px); reproduced.",
+   "zone": {
+    "x": [
+     6760,
+     9000
+    ]
+   }
+  },
+  {
+   "id": "open-sky-jump",
+   "number": 6,
+   "name": "Abnormal open-sky jump",
+   "summary": "A jump that starts in the open sky near the start of the level launches Mario far above the top of the screen.",
+   "subsystem": "player physics (jump impulse and variable-height jump)",
+   "files": [
+    "data/components/mario.py"
+   ],
+   "location": "Open sky at the start of Level 1-1, before the first ? block: jump take-off with Mario's left edge at level x 250-480 (ground level, nothing overhead up to the first blocks at x 685).",
+   "trigger": "Any jump started (from standing or walking) while mario.rect.x is within 250..480.",
+   "expected_clean": "Take-off velocity -10 (-10.5 when running); releasing jump cuts the rise short. Highest point from the ground: top y 332 (held), 415 (4-frame tap).",
+   "injected_behaviour": "Take-off velocity x2.2 (-22 / -23.1) and releasing jump no longer cuts the rise. Mario rises about 780 px, to top y -294 (tap or hold alike), i.e. about 300 px above the top of the screen, then falls back.",
+   "implementation": "mario.py: SKY_JUMP_ZONE_X / SKY_JUMP_FACTOR, Mario.apply_sky_jump_defect() called at both take-off sites (standing(), walking()); jumping() skips the release cut-off while self.sky_jump; falling() clears the flag.",
+   "reproducibility": "Deterministic. tests/bug_probe.py 'tap_jump_at_x300' and 'held_jump_at_x300' (control: 'control_held_jump_at_x600', identical on both games).",
+   "objective3_detection": "Detected at take-off by the generic jump-physics invariant (kind 'impossible_jump': 23.1 px/frame vs the engine's fastest 12.5), and later by the pre-existing above_world invariant (y < -200); both reproduced.",
+   "zone": {
+    "x": [
+     250,
+     510
+    ]
+   }
+  }
+ ]
 }

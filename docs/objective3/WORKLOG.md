@@ -186,3 +186,116 @@ DONE. `tools/check.py --full`: lint, mypy (Windows + Linux), 685 passed /
 coverage 90.52% >= 90, artifacts 37 / 0 changed. uv.lock refreshed with
 `uv lock` (added fpdf2, fonttools, defusedxml; nothing else changed;
 `uv lock --check` clean). Nothing committed - the user decides.
+
+## 2026-09-24: the six benchmark bugs injected into mario_bugged
+
+The owner specified six bugs and left the locations to the implementer.
+mario_clean untouched (pin holds); the final brain was only loaded for inference.
+
+**Method.** The approved brain was run on the clean game as the dashboard
+plays it (greedy) and with sampled actions (40 episodes, seeds 5000-5039),
+recording Mario and every enemy per frame. Key fact: greedy play on this
+deterministic engine is ONE fixed route (clean: level complete in 434 steps,
+every episode; the real dashboard loop confirmed the same on the bugged game
+over 6 consecutive episodes). A bug that stalls or kills early hides every
+later bug from the dashboard, so each bug was placed where that route - with
+the earlier bugs already in place - naturally touches such geometry.
+
+**Final placement (dashboard route order):** open-sky-jump (take-off at
+x 250-480) -> pipe-clip (pipe 4) -> invisible-wall (x 4412) -> ceiling-clip
+(brick at 5058) -> stair-clip (step4/step5 top blocks) -> false-goomba-hit
+(goomba14, kills Mario 33 px above it). The greedy episode ends there, every
+time.
+
+**Redesigns (each measured, then fixed):**
+1. Wall at x 4220 / 3126 etc.: the brain never jumps when blocked (it holds
+   right forever) and most spots stalled or killed the run; x 3126 worked but
+   stood inside a bush (background decoration) - not "visually empty". Final
+   x 4412: no bush (decorations end 4323, start 4611), nothing overhead.
+2. Stair: sinking one tile made the greedy route drop into the pyramid gap and
+   stall (the gap is a clean-game trap too, 2/40 sampled). Two tiles (86 px):
+   Mario climbs out; no stall on any route tried; clean-game gap trap gone.
+3. Sky jump: x2.2 alone peaked at y 91 (the brain taps jump); the defect also
+   skips the early-release cut -> y -294 on a tap or a hold (detector: -200).
+4. Ceiling: a full one-way brick let Mario slip past its side while falling;
+   final: no collision only while moving up.
+5. Pipe: left rim only (21 px) instead of half-width, for a visible fall-in.
+6. Goomba: sideways-only margin on goomba15 never fired on the route; final:
+   goomba14 with a 36 px margin on every side.
+
+**Validation (final code).**
+* tests/test_injected_bugs.py: each bug normal on clean, defective on bugged,
+  repeatable; 8 control spots identical on both games.
+* Real dashboard loop, 6 episodes: all six bugs every episode; identical route.
+* Objective 3 on the real dashboard stack, no probe: stopped on "Mario far
+  above the level" (above_world, not synthetic), GIF/MD/PDF rendered, replay
+  reproduced, bundle verifies, provenance = mario_bugged + the six ids; 900
+  steps later still one incident (seen 3x), no second stop. The other five are
+  not detected by any current detector (detectors for them are feasible:
+  collider vs DRAWN solids, blocked with nothing drawn, hit with a gap).
+* 40 sampled episodes (same seeds as clean): triggered sky 27, wall 21, pipe
+  16, stair 9, ceiling 8, Goomba 4 (all six in one episode: 1). Of episodes
+  reaching each spot: pipe 16/27, wall 21/22, ceiling 8/13, stair 9/9, Goomba
+  4/8. Oracles fire 0 times on the 40 clean episodes. Cost to the agent:
+  completion 21/40 -> 4/40; stalls at pipe 4's (unchanged) left face 3 -> 9
+  (sky-jump landings leave no run-up), 2 at the invisible wall, 0 in the
+  pyramid gap (was 2); Koopa deaths 1 -> 5 (the wall turns the Koopa back).
+* Integrity: every changed line block carries its bug's marker; the whole diff
+  is pinned in the manifest; geometry differs only in the declared colliders;
+  the scripted run is identical for 338 frames and first differs inside the
+  open-sky-jump zone.
+
+## 2026-09-24: generic detectors for all six benchmark bugs
+
+Owner's brief: detect the remaining five injected bugs - and, added
+mid-task, the open-sky jump too - with GENERIC invariants (no injected x/y),
+no clean-game false positives, same Detection -> incident -> stop -> evidence
+-> report -> replay flow, above_world untouched, the brain untouched.
+
+**Design.** One module, `reporting/collision_invariants.py`, four rules run
+by the env while evidence is on (§4a of README): solid penetration
+(clip_into_step / _pipe / _ground / _block), collision with nothing
+(invisible_collision), hit without contact (hit_without_contact), impossible
+jump (impossible_jump). The reference for static solids is the level DESIGN,
+`reporting/level1_design.json` (37 rects: 4 ground, 6 pipes, 27 steps),
+generated from mario_clean by tools/build_level_design.py and tested every
+run to equal mario_clean's colliders and to be drawn (0 sky pixels inside,
+inset by the tolerance). Bricks, ? boxes and enemies are read live (sprites
+are drawn at their rects). The running game's colliders are never the
+reference; rule 2 uses them only as proof that a collision happened.
+
+**False positives found while building (each fixed at its cause, each pinned
+as a regression test; no tolerance was loosened):**
+1. Side stop at pipe 4 in clean play: level1 resolves x before y, so the pipe
+   stopped Mario 3 px lower than where the frame ended -> the side probe spans
+   both heights.
+2. Standing on the last pixel of pipe 1: my foot probe trimmed 1 px per side
+   -> full width, as the engine's own test.
+3. 16 "head bump with nothing above" in 100 clean episodes: big Mario smashes
+   the brick in the same frame -> judge against both frames' blocks.
+4. 28 "stopped with nothing beside" at ~1 px/frame: with sprint held and no
+   direction the engine zeroes x_vel by itself (RUN_ACCEL 20), no collision ->
+   rule 2 now requires a collider actually touching Mario there, and only
+   then asks whether it is drawn.
+5. One sky jump gave two impossible_jump incidents (speed, then height) ->
+   one report per episode for the rule.
+
+**Results (final code).**
+* Clean game, approved brain: 101 episodes (greedy + 100 sampled, seeds
+  7000-7099): 0 detections of any new kind. Clean jump envelope: 10.5
+  px/frame, 183 px (limits 12.5, 258). Real dashboard stack, 1300 steps: 0
+  stops, 0 incidents. tools/validate_incident_pipeline.py: see gate run.
+* Bugged game, scripted scenarios (tests/test_injected_bugs.py): each bug
+  caught by exactly its own kind; every clean scenario and every control spot
+  silent.
+* Bugged game, 40 sampled episodes vs the geometric oracles: sky 27/27,
+  wall 21/21, Goomba 4/4, stair 8/9, ceiling 7/8, pipe 11/16; 0 detections
+  without the bug. Every miss was a 1-6 px graze on one axis (inside the 6 px
+  tolerance, which exists because e.g. a pipe body is drawn narrower than its
+  lip).
+* Bugged game, real dashboard stack, 1300 steps: stopped on impossible_jump,
+  above_world, clip_into_pipe, invisible_collision, clip_into_block,
+  clip_into_step (x2: both columns), hit_without_contact - every incident
+  reproduced, GIF/MD/PDF rendered, bundle verified; later episodes only
+  counted (3-6 sightings each), no new stops.
+* Cost: +0.16 ms per engine frame, evidence on only.

@@ -41,6 +41,16 @@ SEVERITY: dict[str, tuple[str, str]] = {
                            "not blocked.")),
     "coin_drop": ("low", ("The coin total ran backwards: bookkeeping is wrong, but play itself "
                           "is not blocked.")),
+    "clip_into_step": ("medium", "Mario passed into solid level geometry: the collision that should stop him at its edge failed, so he can pass through walls, floors or ceilings, or get stuck inside them."),
+    "clip_into_pipe": ("medium", "Mario passed into solid level geometry: the collision that should stop him at its edge failed, so he can pass through walls, floors or ceilings, or get stuck inside them."),
+    "clip_into_ground": ("medium", "Mario passed into solid level geometry: the collision that should stop him at its edge failed, so he can pass through walls, floors or ceilings, or get stuck inside them."),
+    "clip_into_block": ("medium", "Mario passed into solid level geometry: the collision that should stop him at its edge failed, so he can pass through walls, floors or ceilings, or get stuck inside them."),
+    "invisible_collision": ("medium", ("Something the player cannot see stops or holds Mario: an "
+                                       "undrawn obstacle can block progress or soft-lock the run.")),
+    "hit_without_contact": ("high", ("Mario was hurt or killed by an enemy he never touched: the "
+                                     "player loses a life to a hit they could not see or avoid.")),
+    "impossible_jump": ("medium", ("Mario moved up faster or higher than the engine's own jump can "
+                                   "carry him: he can overfly or leave the level's intended bounds.")),
     "synthetic_probe": ("none", "Synthetic pipeline-test event: no game behaviour is involved."),
 }
 
@@ -52,7 +62,12 @@ _THRESHOLDS: dict[str, tuple[str, float, float]] = {
     "speed": ("abs_x_vel", MAX_PLAUSIBLE_X_VEL, config.NORMAL_PLAY_MAX_ABS_X_VEL),
     "above_world": ("height_above", -ABOVE_WORLD_Y, -config.NORMAL_PLAY_MIN_Y),
 }
-_INVARIANTS = frozenset(("below_world", "score_drop", "coin_drop"))
+# The collision invariants compare exact pixel geometry with a stated
+# tolerance (reporting/collision_invariants.py), so they are invariants too.
+_INVARIANTS = frozenset(("below_world", "score_drop", "coin_drop",
+                         "clip_into_step", "clip_into_pipe", "clip_into_ground",
+                         "clip_into_block", "invisible_collision", "hit_without_contact",
+                         "impossible_jump"))
 
 # The first two engine frames after a reset still settle the level (the
 # camera and Mario are placed on them); readings there are the least

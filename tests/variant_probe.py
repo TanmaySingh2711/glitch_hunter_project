@@ -60,27 +60,36 @@ def main(variant, switch_from=None):
     env.reset()
     state = env.game.state
     geo = hashlib.sha256()
+    rects = []
     for group in ("ground_group", "pipe_group", "step_group", "brick_group", "coin_box_group"):
         for s in sorted(getattr(state, group), key=lambda s: (s.rect.x, s.rect.y, s.rect.w)):
             geo.update(f"{group}:{s.rect.x},{s.rect.y},{s.rect.w},{s.rect.h};".encode())
+            rects.append([group, s.rect.x, s.rect.y, s.rect.w, s.rect.h])
     out["geometry"] = geo.hexdigest()
+    out["geometry_rects"] = rects
 
     st, fr = hashlib.sha256(), hashlib.sha256()
     deaths = 0
+    per_substep, per_frame = [], []
     for i, action in enumerate(SCRIPT):
         _o, _r, done, _t, info = env.step(action)
         mario = env.game.state.mario
-        st.update(json.dumps([info.get("mario_rect"), round(float(info.get("x_vel", 0)), 6),
-                              round(float(getattr(mario, "y_vel", 0)), 6), str(mario.state),
-                              info.get("score"), info.get("coins"), info.get("time_left"),
-                              info.get("is_dead")]).encode())
+        row = json.dumps([info.get("mario_rect"), round(float(info.get("x_vel", 0)), 6),
+                          round(float(getattr(mario, "y_vel", 0)), 6), str(mario.state),
+                          info.get("score"), info.get("coins"), info.get("time_left"),
+                          info.get("is_dead")]).encode()
+        st.update(row)
+        per_substep.append([info.get("mario_rect"), hashlib.sha256(row).hexdigest()[:16]])
         if i % 25 == 0:
-            fr.update(pg.surfarray.array3d(pg.display.get_surface()).tobytes())
+            frame = pg.surfarray.array3d(pg.display.get_surface()).tobytes()
+            fr.update(frame)
+            per_frame.append([i, hashlib.sha256(frame).hexdigest()[:16]])
         if done:
             deaths += 1
             env.reset()
     out.update(scripted_state=st.hexdigest(), scripted_frames=fr.hexdigest(),
-               scripted_substeps=len(SCRIPT), scripted_episode_ends=deaths)
+               scripted_substeps=len(SCRIPT), scripted_episode_ends=deaths,
+               scripted_per_substep=per_substep, scripted_per_frame=per_frame)
     print(json.dumps(out))
 
 

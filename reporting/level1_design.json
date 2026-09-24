@@ -1,0 +1,269 @@
+{
+ "format": 1,
+ "note": "Level 1-1's static solids (ground, pipes, steps) as designed and drawn. Generated from mario_clean by tools/build_level_design.py; tests/test_collision_invariants.py checks it against mario_clean and against the drawn background on every run. Do not edit by hand.",
+ "source": {
+  "variant": "mario_clean",
+  "game_tree_sha256": "b1f6b18467db398a41f7272c414d7f2a81ae4929b1c7a788dc572f19fe592630"
+ },
+ "solids": [
+  {
+   "solid": "ground",
+   "x": 0,
+   "y": 538,
+   "w": 2953,
+   "h": 60
+  },
+  {
+   "solid": "ground",
+   "x": 3048,
+   "y": 538,
+   "w": 635,
+   "h": 60
+  },
+  {
+   "solid": "ground",
+   "x": 3819,
+   "y": 538,
+   "w": 2735,
+   "h": 60
+  },
+  {
+   "solid": "ground",
+   "x": 6647,
+   "y": 538,
+   "w": 2300,
+   "h": 60
+  },
+  {
+   "solid": "pipe",
+   "x": 1202,
+   "y": 452,
+   "w": 83,
+   "h": 82
+  },
+  {
+   "solid": "pipe",
+   "x": 1631,
+   "y": 409,
+   "w": 83,
+   "h": 140
+  },
+  {
+   "solid": "pipe",
+   "x": 1973,
+   "y": 366,
+   "w": 83,
+   "h": 170
+  },
+  {
+   "solid": "pipe",
+   "x": 2445,
+   "y": 366,
+   "w": 83,
+   "h": 170
+  },
+  {
+   "solid": "pipe",
+   "x": 6989,
+   "y": 452,
+   "w": 83,
+   "h": 82
+  },
+  {
+   "solid": "pipe",
+   "x": 7675,
+   "y": 452,
+   "w": 83,
+   "h": 82
+  },
+  {
+   "solid": "step",
+   "x": 5745,
+   "y": 495,
+   "w": 40,
+   "h": 44
+  },
+  {
+   "solid": "step",
+   "x": 5788,
+   "y": 452,
+   "w": 40,
+   "h": 44
+  },
+  {
+   "solid": "step",
+   "x": 5831,
+   "y": 409,
+   "w": 40,
+   "h": 44
+  },
+  {
+   "solid": "step",
+   "x": 5874,
+   "y": 366,
+   "w": 40,
+   "h": 176
+  },
+  {
+   "solid": "step",
+   "x": 6001,
+   "y": 366,
+   "w": 40,
+   "h": 176
+  },
+  {
+   "solid": "step",
+   "x": 6044,
+   "y": 408,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6087,
+   "y": 452,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6130,
+   "y": 495,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6345,
+   "y": 495,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6388,
+   "y": 452,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6431,
+   "y": 409,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6474,
+   "y": 366,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6517,
+   "y": 366,
+   "w": 40,
+   "h": 176
+  },
+  {
+   "solid": "step",
+   "x": 6644,
+   "y": 366,
+   "w": 40,
+   "h": 176
+  },
+  {
+   "solid": "step",
+   "x": 6687,
+   "y": 408,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6728,
+   "y": 452,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 6771,
+   "y": 495,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 7760,
+   "y": 495,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 7803,
+   "y": 452,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 7845,
+   "y": 409,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 7888,
+   "y": 366,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 7931,
+   "y": 323,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 7974,
+   "y": 280,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 8017,
+   "y": 237,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 8060,
+   "y": 194,
+   "w": 40,
+   "h": 40
+  },
+  {
+   "solid": "step",
+   "x": 8103,
+   "y": 194,
+   "w": 40,
+   "h": 360
+  },
+  {
+   "solid": "step",
+   "x": 8488,
+   "y": 495,
+   "w": 40,
+   "h": 40
+  }
+ ]
+}

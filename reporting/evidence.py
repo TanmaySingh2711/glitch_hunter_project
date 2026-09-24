@@ -26,6 +26,13 @@ TITLES = {
     "speed": "Impossible horizontal speed",
     "score_drop": "Score ran backwards",
     "coin_drop": "Coin total ran backwards",
+    "clip_into_step": "Mario inside a stair step (stair clipping)",
+    "clip_into_pipe": "Mario inside a pipe (pipe clipping)",
+    "clip_into_ground": "Mario inside the ground",
+    "clip_into_block": "Mario inside a brick or ? block",
+    "invisible_collision": "Mario stopped by nothing (invisible collision)",
+    "hit_without_contact": "Enemy hit Mario without touching him",
+    "impossible_jump": "Impossible jump (faster or higher than any legal jump)",
     "synthetic_probe": "SYNTHETIC pipeline test event (not a game bug)",
 }
 # A fixed timestamp inside the ZIP, so the same frames always give the same

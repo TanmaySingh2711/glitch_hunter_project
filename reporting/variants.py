@@ -6,7 +6,19 @@
     mario_bugged/   starts as a byte-identical copy of mario_clean. Deliberate
                     bugs go here - and only here - and each one must be declared
                     in mario_bugged/INJECTED_BUGS.json, naming the files it
-                    touches. Until one is declared the two games are identical.
+                    touches.
+
+A difference from mario_clean is accepted only if it is ACCOUNTED FOR, at
+three levels (tests/test_game_variants.py):
+  * file   - a declared bug names the file (undeclared_differences);
+  * line   - every changed block of lines carries the marker
+             "INJECTED BUG <id>" of a declared bug that names that file
+             (unattributed_changes), so an extra edit inside a declared file
+             is still caught;
+  * whole  - the full clean->bugged diff hashes to the manifest's
+             `diff_sha256` (bug_diff_sha256): the implementation is exactly
+             the one that was validated, and re-validating is the only way to
+             change it.
 
 A variant's IDENTITY is the SHA-256 of its game tree: every file under data/
 and resources/ (the code and the assets the engine loads), by relative path.
@@ -16,14 +28,16 @@ per-variant metadata files at the variant root (VARIANT.md,
 INJECTED_BUGS.json) are not part of the game and are ignored too.
 
 Both variants are imported as the top-level package `data` (the upstream
-layout, left untouched), so one process can host only ONE of them -
-custom_mario_env enforces that.
+layout, left untouched), so a process hosts ONE of them at a time -
+custom_mario_env enforces that (release_game_variant unloads one first).
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
+import re
 from typing import Any
 
 from exploration import config
@@ -32,6 +46,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAME_TREE_PARTS = ("data", "resources")
 _TEXT_SUFFIXES = frozenset((".py", ".txt", ".md", ".json"))
 BUG_MANIFEST_NAME = "INJECTED_BUGS.json"
+BUG_MARKER = re.compile(r"INJECTED BUG ([a-z0-9][a-z0-9-]*)")
 
 
 def game_dir(variant: str) -> str:
@@ -108,6 +123,65 @@ def undeclared_differences(variant: str) -> list[str]:
     declared = {f for bug in injected_bugs(variant) for f in bug["files"]}
     changed = {f for f in set(clean) | set(other) if clean.get(f) != other.get(f)}
     return sorted(changed - declared)
+
+
+def _text_lines(path: str) -> list[str]:
+    with open(path, encoding="utf-8") as fh:
+        return fh.read().replace("\r\n", "\n").split("\n")
+
+
+def _changed_files(variant: str) -> list[str]:
+    clean = game_tree_files(game_dir(config.CLEAN_GAME_VARIANT))
+    other = game_tree_files(game_dir(variant))
+    return sorted(f for f in set(clean) | set(other) if clean.get(f) != other.get(f))
+
+
+def unattributed_changes(variant: str) -> list[str]:
+    """Changed blocks of lines ("file:first-last", in the variant) that do not
+    carry the marker of a declared bug naming that file. Empty is the only
+    acceptable answer. A pure deletion has no line to carry a marker, so it is
+    always reported: a bug that removes code must leave a marked line."""
+    names = {b["id"]: set(b["files"]) for b in injected_bugs(variant)}
+    out = []
+    for rel in _changed_files(variant):
+        a_path = os.path.join(game_dir(config.CLEAN_GAME_VARIANT), rel)
+        b_path = os.path.join(game_dir(variant), rel)
+        if not (os.path.exists(a_path) and os.path.exists(b_path)) or \
+                os.path.splitext(rel)[1].lower() not in _TEXT_SUFFIXES:
+            out.append(f"{rel}: added, removed or binary")
+            continue
+        a, b = _text_lines(a_path), _text_lines(b_path)
+        matcher = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+        for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            ids = {m for line in b[j1:j2] for m in BUG_MARKER.findall(line)}
+            if not any(rel in names.get(i, ()) for i in ids):
+                out.append(f"{rel}:{j1 + 1}-{max(j1 + 1, j2)}")
+    return out
+
+
+def bug_diff_sha256(variant: str) -> str:
+    """SHA-256 of the unified clean->variant diff of every changed game file
+    (text, LF line endings, files in path order)."""
+    h = hashlib.sha256()
+    for rel in _changed_files(variant):
+        a_path = os.path.join(game_dir(config.CLEAN_GAME_VARIANT), rel)
+        b_path = os.path.join(game_dir(variant), rel)
+        a = _text_lines(a_path) if os.path.exists(a_path) else []
+        b = _text_lines(b_path) if os.path.exists(b_path) else []
+        for line in difflib.unified_diff(a, b, f"a/{rel}", f"b/{rel}", n=3, lineterm=""):
+            h.update(line.encode("utf-8") + b"\n")
+    return h.hexdigest()
+
+
+def declared_diff_sha256(variant: str) -> str | None:
+    """The `diff_sha256` the variant's bug manifest pins (None: no bugs, no pin)."""
+    if variant == config.CLEAN_GAME_VARIANT:
+        return None
+    with open(os.path.join(game_dir(variant), BUG_MANIFEST_NAME), encoding="utf-8") as fh:
+        pinned = json.load(fh).get("diff_sha256")
+    return pinned if isinstance(pinned, str) else None
 
 
 def variant_identity(variant: str) -> dict[str, Any]:

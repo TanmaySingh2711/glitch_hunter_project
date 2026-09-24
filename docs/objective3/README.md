@@ -27,7 +27,7 @@ and the reasoning. The working log with the history of decisions is
 
 ```bash
 python app.py                           # the dashboard on the CLEAN game
-python app.py --game mario_bugged       # ... on the variant that will carry deliberate bugs
+python app.py --game mario_bugged       # ... on the variant with the six deliberate bugs
 python app.py --synthetic-probe 1000    # PIPELINE TEST: a labelled fake "bug" at world x 1000
 python tools/incidents.py list          # the incident store from the command line
 python tools/validate_incident_pipeline.py   # the end-to-end proof (~30 s, headless)
@@ -43,8 +43,8 @@ brain, and every incident says which one it was.
 | | `mario_clean/` | `mario_bugged/` |
 |---|---|---|
 | what | the canonical game every brain was trained and measured on | where deliberate bugs go |
-| today | unchanged (git-moved from `mario_clone/`, history kept) | byte-identical copy - **no bugs yet** |
-| protected by | `config.CLEAN_GAME_TREE_SHA256` (the tree hash of `mario_clone/` taken just before the rename) | every difference from clean must be declared in `INJECTED_BUGS.json` |
+| today | unchanged (git-moved from `mario_clone/`, history kept) | **six declared benchmark bugs** (2026-09-24), nothing else |
+| protected by | `config.CLEAN_GAME_TREE_SHA256` (the tree hash of `mario_clone/` taken just before the rename) | every difference from clean is accounted for by a bug in `INJECTED_BUGS.json`: per file, per changed line block (`INJECTED BUG <id>` marker), and as a whole (pinned `diff_sha256`) |
 | used by | training, tools, evaluator, dashboard default | only `--game mario_bugged`, and replays of its incidents |
 
 A variant's identity is the SHA-256 of its **game tree** (`data/` + `resources/`,
@@ -55,19 +55,27 @@ silently running the wrong code. The dashboard's game switch first unloads the
 loaded one completely (`release_game_variant`); a switched game plays byte for
 byte like a freshly started one (`tests/test_game_variants.py`).
 
-**Proof that the two are identical today** (`tests/test_game_variants.py`):
-the trees are equal file by file, and each variant, in its own process, plays
-the same scripted run and produces identical fingerprints of: the 600 NOOP
-frames (equal to the pre-Objective-3 pin `LEGACY_NOOP_600_SHA256`), every
-collider in the level, every substep's physics state over a 725-frame run
-that sprints, jumps into pipes, retreats and dies, and every 25th full frame.
+**The six bugs** (full declarations: `mario_bugged/INJECTED_BUGS.json`;
+summary table: `mario_bugged/VARIANT.md`): 1 `stair-clip`, 2 `pipe-clip`,
+3 `ceiling-clip`, 4 `invisible-wall`, 5 `false-goomba-hit`,
+6 `open-sky-jump`. Each was placed from measurements of the approved brain
+on the clean game (where its greedy route and 40 sampled episodes go), and
+is proved against mario_clean by `tests/test_injected_bugs.py`: normal on
+the clean game, defective on the bugged one, repeatable, and a control spot
+per bug identical on both.
 
-**Adding a bug later** (only when the owner names one):
-edit files under `mario_bugged/data/` → add
-`{"id": ..., "summary": ..., "files": [...]}` to `mario_bugged/INJECTED_BUGS.json`
-→ update `test_no_bug_has_been_injected_yet` → run the suite. `mario_clean/`
-must still match its pin. Incidents from the bugged game name its tree hash
-and declared bugs.
+**Proof that nothing else differs** (`tests/test_game_variants.py`): the
+changed files, changed line blocks and whole diff are all accounted for (see
+the table); the level geometry differs only in the declared colliders; and
+each variant, in its own process, plays the same 725-frame scripted run
+identically - same NOOP frames (the pre-Objective-3 pin
+`LEGACY_NOOP_600_SHA256`), same physics state and frames - until the two
+first differ, which must happen inside a declared bug's zone (today frame
+338, a jump taken inside the open-sky-jump zone).
+
+**Changing a bug** (only when the owner specifies it): see
+`mario_bugged/VARIANT.md`. `mario_clean/` must still match its pin.
+Incidents from the bugged game name its tree hash and declared bugs.
 
 ## 3. Architecture
 
@@ -75,6 +83,8 @@ and declared bugs.
 |---|---|
 | `custom_mario_env.py` | the detector; with `enable_evidence()`, freezes a `Detection` at the trigger substep (off by default: training is untouched) |
 | `reporting/events.py` | `Detection` (the boundary), `SyntheticProbe`, the closed detector registry |
+| `reporting/collision_invariants.py` | the collision and jump-physics invariants (§4a), run by the env while evidence is on |
+| `reporting/level_design.py` + `level1_design.json` | the level's designed static solids, taken from mario_clean and checked against it and against the drawn background |
 | `reporting/pipeline.py` | `SessionRecorder` (caller-side context), `IncidentPipeline` (capture + worker) |
 | `reporting/evidence.py` | Detection + context → raw evidence files and the canonical record |
 | `reporting/schema.py` | the canonical incident schema, ids, validation, deterministic JSON |
@@ -91,9 +101,10 @@ and declared bugs.
 ## 4. Event lifecycle
 
 1. **Detect** — `CustomMarioEnv._detect_glitches` runs after every engine
-   frame (the same five checks as before: below_world, above_world, speed,
-   score_drop, coin_drop; each once per episode). Semantics are unchanged,
-   with one audited correction (§12).
+   frame: the five engine invariants as before (below_world, above_world,
+   speed, score_drop, coin_drop; each once per episode; semantics unchanged,
+   with one audited correction, §12), and, while evidence is on, the
+   collision and jump-physics invariants (§4a).
 2. **Freeze** — on the first report of a kind in an episode, still inside
    that substep: the full-resolution frame is copied off the display surface,
    and a `Detection` takes copies of the info dict, Mario's extra fields
@@ -121,6 +132,36 @@ and declared bugs.
 8. **Resume** — only Start does it (it clears `bug_found`); the same session
    and episode continue. Reset ends the session and clears it; the incident
    stays.
+
+## 4a. Collision and jump-physics invariants
+
+Generic rules about what the engine does to Mario (`reporting/collision_invariants.py`).
+None names a place: each is checked everywhere, against what is DRAWN - the
+level's designed ground, pipes and steps (`reporting/level1_design.json`,
+extracted from the pinned mario_clean and proved on every test run to be
+its geometry and to be drawn, zero sky pixels inside) and the live bricks,
+? boxes and enemies (sprites, drawn at their rects). The running game's
+colliders are never the reference - a wrong collider cannot be its own alibi.
+
+| Rule | Fires when | Kinds |
+|---|---|---|
+| solid penetration | Mario's collider is more than `PENETRATION_TOL` (6 px, the reachability model's own tolerance) inside a drawn solid on both axes; the engine resolves every contact flush, so a correct build shows 0 | `clip_into_step`, `clip_into_pipe`, `clip_into_ground`, `clip_into_block` (entered from below = a ceiling clip) |
+| collision with nothing | the engine's collision response acts (a side stop with a collider flush on that side, standing on a collider, a head bump under one) and the collider it acted with is not on anything drawn | `invisible_collision` |
+| hit without contact | Mario dies to an enemy, or shrinks, while no enemy or shell came within 2 px of him at any point of that frame (swept boxes) | `hit_without_contact` |
+| impossible jump | he rises faster than the engine's fastest declared jump (12.5 px/frame; ordinary take-offs are 10-10.5, stomp bounces 7), or climbs higher above where he last stood than that speed can carry him (258 px) | `impossible_jump` |
+
+Suspended exactly where the engine suspends collision (dead, flagpole,
+castle walk, grow/shrink transitions). Read-only; +0.16 ms per frame, and
+only while evidence is on, so training and evaluation are unchanged.
+`above_world` is untouched and still fires on the open-sky jump too.
+
+**Validation** (`docs/objective3/WORKLOG.md`): 101 clean-game episodes
+of the approved brain (greedy + 100 sampled) - zero reports; clean play's
+own jump envelope is 10.5 px/frame and 183 px, inside the limits. On
+mario_bugged every injected bug is caught by its own rule on the dashboard
+route, reproduced and fully reported; in 40 sampled episodes it was caught
+every time it went deeper than the tolerance (the only misses were 1-6 px
+grazes), and never without the bug happening.
 
 ## 5. The canonical record
 
@@ -240,8 +281,10 @@ after a restart is still recognised.
 
 ## 11. Severity, confidence, reproduction - kept apart
 
-* **Severity** = impact if real, fixed per kind with its reason: below_world
-  high; above_world, speed medium; score_drop, coin_drop low; synthetic none.
+* **Severity** = impact if real, fixed per kind with its reason: below_world,
+  hit_without_contact high; above_world, speed, the clip_into_* kinds,
+  invisible_collision, impossible_jump medium; score_drop, coin_drop low;
+  synthetic none.
   Nothing is "critical" today (reserved for a crash or corruption, which no
   detector reports).
 * **Detector confidence** = does the evidence support a genuine engine state?
@@ -316,7 +359,10 @@ before and after its run.
 
 | File | Proves |
 |---|---|
-| `test_game_variants.py` | clean pin, no undeclared difference, per-process isolation, identical behaviour of both variants |
+| `test_game_variants.py` | clean pin, every difference accounted for (file, marked line, pinned diff), per-process isolation, identical behaviour outside the declared bugs |
+| `test_injected_bugs.py` | each bug normal on clean, defective on bugged, repeatable, caught by its own detector; controls silent |
+| `test_collision_invariants.py` | each rule, its limits, the clean-game false positives found while building it (regressions), the design file |
+| `test_bug_incidents.py` | (slow) one dashboard episode per game: every bug a reproduced, reported incident; the clean game reports nothing |
 | `test_incident_capture.py` | exact trigger frame, observation invariance, trace/action log bounds and episode boundaries, detector semantics, clock top-ups |
 | `test_incident_pipeline.py` | schema, immutability, unique ids, duplicates, severity/confidence, rendering, failures, retries, recovery, path validation, audit fixes |
 | `test_incident_reproduce.py` | honest reproduction statuses on real replays |
@@ -329,9 +375,17 @@ and `--windowed`; see the worklog for the results of each run.
 
 ## 17. Limitations (stated, not hidden)
 
-* No real game bug has been found: the clean game produced none, and the
-  bugged variant has none yet. Everything end to end was proven with the
-  SYNTHETIC probe, which is labelled as such everywhere.
+* The clean game has produced no incident. All six deliberate bugs in
+  mario_bugged are caught with no probe by generic rules (§4a); a clip
+  shallower than the 6 px tolerance is deliberately not reported.
+* The static-solid reference is Level 1-1's design file; another level
+  would need its own (tools/build_level_design.py).
+* The dashboard plays greedily on a deterministic engine: every episode is
+  the same route. On the bugged game that route meets all six bugs, in the
+  order sky jump, pipe, invisible wall, ceiling, stair, false Goomba hit -
+  and the last one kills Mario, so a greedy episode on the bugged game never
+  finishes the level. Sampled play meets them at the rates in
+  `docs/objective3/WORKLOG.md`.
 * The window, when paused, can show a frame up to 3 frames after the
   trigger; the incident holds the exact one.
 * Context frames are JPEG stream frames at 480x360, one per agent step; only

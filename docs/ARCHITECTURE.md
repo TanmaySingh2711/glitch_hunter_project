@@ -154,9 +154,13 @@ decision, not a refactor.
   the dashboard's switch unloads one completely (`release_game_variant`)
   before loading the other.
   `mario_clean/` must match `CLEAN_GAME_TREE_SHA256`; `mario_bugged/` may differ
-  only where `INJECTED_BUGS.json` says (docs/objective3/README.md).
+  only where `INJECTED_BUGS.json` says - per file, per marked line block, and
+  as the pinned whole diff (docs/objective3/README.md).
 * **Observing never changes the game.** Evidence (Objective 3) is off unless
   enabled and only reads the engine when on; an episode is identical either way.
+  The collision and jump-physics invariants run only then, and judge the
+  engine against what is drawn (`reporting/level1_design.json`, live
+  sprites), never against its own colliders.
 * **An incident is on disk before testing stops.** `IncidentPipeline.capture`
   writes the raw evidence on the game thread; reports are derived afterwards,
   and their failure never loses the incident. Evidence is never overwritten.
@@ -194,6 +198,6 @@ decision, not a refactor.
 | when a QA episode ends | `exploration/lifecycle.py` | `pytest tests/test_episode_lifecycle.py` |
 | what the dashboard shows | `dashboard_backend.py`, `static/`, `templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py` |
 | incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
-| the game itself (deliberate bugs) | `mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py` |
+| the game itself (deliberate bugs) | `mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |
 | anything | - | `python tools/check.py` |

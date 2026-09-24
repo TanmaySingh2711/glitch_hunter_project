@@ -90,7 +90,10 @@ class Level1(tools._State):
         pipe1 = collider.Collider(1202, 452, 83, 82)
         pipe2 = collider.Collider(1631, 409, 83, 140)
         pipe3 = collider.Collider(1973, 366, 83, 170)
-        pipe4 = collider.Collider(2445, 366, 83, 170)
+        # INJECTED BUG pipe-clip: pipe 4's collider is 21 px wide instead of
+        # 83, so only the left rim of the drawn pipe is solid. Walking along its
+        # top past x 2466 drops Mario into the pipe; from the right he walks in.
+        pipe4 = collider.Collider(2445, 366, 21, 170)
         pipe5 = collider.Collider(6989, 452, 83, 82)
         pipe6 = collider.Collider(7675, 452, 83, 82)
 
@@ -104,10 +107,15 @@ class Level1(tools._State):
         step1 = collider.Collider(5745, 495, 40, 44)
         step2 = collider.Collider(5788, 452, 40, 44)
         step3 = collider.Collider(5831, 409, 40, 44)
-        step4 = collider.Collider(5874, 366, 40, 176)
+        # INJECTED BUG stair-clip: the two tall columns at the top of the first
+        # staircase (step4 and step5) have colliders that start two tiles too
+        # low (y 452 instead of 366), so their two drawn top blocks have no
+        # collision. Mario passes into / through those blocks, and one landing
+        # on either column sinks 86 px into it, instead of being blocked.
+        step4 = collider.Collider(5874, 452, 40, 90)
 
 
-        step5 = collider.Collider(6001, 366, 40, 176)
+        step5 = collider.Collider(6001, 452, 40, 90)  # INJECTED BUG stair-clip
         step6 = collider.Collider(6044, 408, 40, 40)
         step7 = collider.Collider(6087, 452, 40, 40)
         step8 = collider.Collider(6130, 495, 40, 40)
@@ -135,6 +143,12 @@ class Level1(tools._State):
 
         step27 = collider.Collider(8488, 495, 40, 40)
 
+        # INJECTED BUG invisible-wall: a stray two-tile collider left in the
+        # step list on open, empty ground (x 4412-4452, y 452-538, between the
+        # bricks at 4330 and the ? block at 4544). Nothing is drawn there, but
+        # it blocks Mario (and anything else) exactly like a step.
+        stray_step = collider.Collider(4412, 452, 40, 86)
+
         self.step_group = pg.sprite.Group(step1,  step2,
                                           step3,  step4,
                                           step5,  step6,
@@ -148,7 +162,8 @@ class Level1(tools._State):
                                           step21, step22,
                                           step23, step24,
                                           step25, step26,
-                                          step27)
+                                          step27,
+                                          stray_step)  # INJECTED BUG invisible-wall
 
 
     def setup_bricks(self):
@@ -178,6 +193,11 @@ class Level1(tools._State):
         brick18 = bricks.Brick(4287, 365)
         brick19 = bricks.Brick(4330, 365, c.STAR, self.powerup_group)
         brick20 = bricks.Brick(5058, 365)
+        # INJECTED BUG ceiling-clip: this lone brick was given the jump-through
+        # flag, so while Mario is moving UP it does not collide with him at all:
+        # a jump from below goes straight through it instead of bumping his
+        # head. Falling onto it or walking into its side still collide.
+        brick20.solid_from_below = False
         brick21 = bricks.Brick(5187, 193)
         brick22 = bricks.Brick(5230, 193)
         brick23 = bricks.Brick(5273, 193)
@@ -279,6 +299,10 @@ class Level1(tools._State):
         goomba12 = enemies.Goomba()
         goomba13 = enemies.Goomba()
         goomba14 = enemies.Goomba()
+        # INJECTED BUG false-goomba-hit: this Goomba's hurt box is 36 px bigger
+        # than its sprite on every side, so it hurts Mario before they touch -
+        # from the side, and from above before a stomp can land.
+        goomba14.hurt_margin = 36
         goomba15 = enemies.Goomba()
 
         koopa0 = enemies.Koopa()
@@ -527,6 +551,10 @@ class Level1(tools._State):
         enemy = pg.sprite.spritecollideany(self.mario, self.enemy_group)
         shell = pg.sprite.spritecollideany(self.mario, self.shell_group)
         powerup = pg.sprite.spritecollideany(self.mario, self.powerup_group)
+        if brick and not getattr(brick, 'solid_from_below', True) and self.mario.y_vel < 0:
+            brick = None  # INJECTED BUG ceiling-clip: no collision while rising
+        if enemy is None:
+            enemy = self.enemy_in_hurt_margin()  # INJECTED BUG false-goomba-hit
 
         if coin_box:
             self.adjust_mario_for_x_collisions(coin_box)
@@ -610,6 +638,16 @@ class Level1(tools._State):
                 powerup.kill()
 
 
+    def enemy_in_hurt_margin(self):
+        """INJECTED BUG false-goomba-hit: an enemy whose enlarged hurt box
+        (hurt_margin px on every side) overlaps Mario."""
+        for enemy in self.enemy_group:
+            margin = getattr(enemy, 'hurt_margin', 0)
+            if margin and self.mario.rect.colliderect(enemy.rect.inflate(2 * margin, 2 * margin)):
+                return enemy
+        return None
+
+
     def convert_mushrooms_to_fireflowers(self):
         """When Mario becomees big, converts all fireflower powerups to
         mushroom powerups"""
@@ -691,6 +729,8 @@ class Level1(tools._State):
         coin_box = pg.sprite.spritecollideany(self.mario, self.coin_box_group)
         powerup = pg.sprite.spritecollideany(self.mario, self.powerup_group)
 
+        if brick and not getattr(brick, 'solid_from_below', True) and self.mario.y_vel < 0:
+            brick = None  # INJECTED BUG ceiling-clip: no collision while rising
         brick, coin_box = self.prevent_collision_conflict(brick, coin_box)
 
         if coin_box:

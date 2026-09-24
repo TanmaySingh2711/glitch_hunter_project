@@ -33,7 +33,9 @@ from gymnasium.wrappers import (
 
 import game_window
 from exploration import config
+from reporting.collision_invariants import CollisionInvariants
 from reporting.events import Detection, ExtraDetector, json_safe
+from reporting.level_design import load_design
 
 # Disable audio to prevent sound spam during training
 os.environ["SDL_AUDIODRIVER"] = "dummy"
@@ -214,6 +216,9 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         self.episode_index = 0                   # resets so far
         self.holds_engine_clock = False          # set by the QA wrapper that tops the clock up
         self._extra_detectors: list[ExtraDetector] = []
+        # The collision invariants (reporting/collision_invariants.py): on only
+        # while evidence is, so training and evaluation run exactly as before.
+        self._collision: CollisionInvariants | None = None
         self._trace: collections.deque[dict[str, Any]] = collections.deque(maxlen=1)
         self._episode_actions = bytearray()
         self._clock_holds: list[tuple[int, int]] = []
@@ -568,6 +573,12 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
             self._last_score = score
             self._last_coins = coins
 
+        # The collision invariants: Mario against what is DRAWN (evidence on only).
+        # Each reports once per episode per key (per solid, per contact site).
+        if self._collision is not None:
+            for kind, message, metrics, detector, key in self._collision.check(self.game.state):
+                report(kind, message, metrics, detector=detector, key=key)
+
         # Detectors added on top (today only the synthetic pipeline probe).
         # Same report-once rule, keyed per detector so two probes can both fire.
         for extra in self._extra_detectors:
@@ -607,6 +618,8 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
             self._actions_complete = True
             for extra in self._extra_detectors:
                 extra.reset()
+        if self._collision is not None:
+            self._collision.reset()
 
         # level1 is already in sys.modules from __init__, so this resolves
         # from cache rather than touching sys.path or the filesystem. No
@@ -717,6 +730,8 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         next reset(): an episode already under way has no action log from its
         start, so its incidents are marked not replayable rather than guessed."""
         self.evidence_enabled = True
+        if self._collision is None:
+            self._collision = CollisionInvariants(load_design())
         self._trace = collections.deque(maxlen=max(1, int(context_substeps)))
         self._episode_actions = bytearray()
         self._clock_holds = []
@@ -726,6 +741,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         """Back to the pre-Objective-3 behaviour: no trace, no log, no
         detections, no extra detectors."""
         self.evidence_enabled = False
+        self._collision = None
         self.dropped_detections = 0
         self._extra_detectors.clear()
         self._pending_detections.clear()
