@@ -342,6 +342,11 @@ class DashboardBackend:
         with env_lock:
             return _global_env is not None and _base(_global_env).poll_close_request()
 
+    def begin_incident_session(self) -> None:
+        """Reset: the Bug Tracker's session list starts empty again."""
+        if _pipeline is not None:
+            _pipeline.begin_session()
+
     def new_session(self) -> Generator[dict[str, Any], None, None]:
         return run_mario_agent()
 
@@ -413,7 +418,8 @@ def _capture_incidents(env: gym.Env[Any, Any], recorder: SessionRecorder) -> lis
     for det in detections:
         outcome = _pipeline.capture(det, recorder.context(_reward_mode, _provenance))
         out.append({"status": outcome.status, "incident_id": outcome.incident_id,
-                    "summary": outcome.summary, "error": outcome.error})
+                    "summary": outcome.summary, "error": outcome.error,
+                    "first_in_session": outcome.first_in_session})
     return out
 
 

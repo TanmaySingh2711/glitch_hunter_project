@@ -53,8 +53,10 @@ That's it. A game window will pop up and the same footage streams live to your b
 - **Stop Testing** — pauses the game (both the pop-up window and the browser view freeze on the same frame). The window stays where it is; minimise, move or close it yourself whenever you like.
 - **The game window's X** — closes the window and pauses testing. Nothing is lost: **Start Testing** reopens it and resumes.
 - **Reset Dashboard** — ends the session and closes the window; the next start is a fresh one. Refreshing the page only pauses.
-- **BUG TRACKER** (red panel) — every recorded incident, newest first, kept
-  across restarts. It stays empty unless the game actually breaks a rule it's
+- **BUG TRACKER** (red panel) — the incidents found in this session, newest
+  first. **Reset Dashboard** empties it, like the log (nothing is
+  deleted: every incident stays saved in `incidents/`, listed by
+  `python tools/incidents.py list`). It stays empty unless the game actually breaks a rule it's
   supposed to follow: Mario alive below the floor, far above the level,
   moving at an impossible speed, the score/coin counter running backwards,
   Mario ending up inside ground, a pipe, a step or a block, being stopped by
@@ -66,8 +68,9 @@ That's it. A game window will pop up and the same footage streams live to your b
 - **Testing Stopped - Bug Found** — when a new incident is caught, testing
   stops by itself (the evidence is already saved) and a red banner over the
   video shows what happened. It stays until you press **Start Testing**,
-  which carries on from the same moment. A later sighting of the same bug is
-  counted, but does not stop testing again.
+  which carries on from the same moment. Every detection stops testing - a
+  later sighting of the same bug too (it is counted on the same entry, not
+  added as a new one).
 - **LOG TERMINAL** (green panel) — every action the AI takes, with its reward.
 - **Select Game Environment** — which game the AI tests: **Mario Game
   (Cleaned)**, the clean baseline, or **Mario Game (Bugged)**, the copy for

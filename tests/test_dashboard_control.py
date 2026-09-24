@@ -80,6 +80,9 @@ class FakeBackend:
     def stop_audio(self):
         self._rec('stop_audio')
 
+    def begin_incident_session(self):
+        self._rec('begin_incident_session')
+
     def switch_game(self, variant):
         self._rec(f'switch_game:{variant}')
         if variant == 'broken':
@@ -251,6 +254,7 @@ def test_reset_ends_the_session_and_the_next_start_is_fresh(svc):
     svc.reset()
     svc.wait_idle()
     assert svc.session is None and svc.fake.window == 'closed'
+    assert 'begin_incident_session' in svc.fake.names()     # the Bug Tracker starts empty
     svc.start_testing()
     run_for(svc, 1)
     assert svc.fake.sessions == 2 and last_log(svc).startswith("session 2 step")

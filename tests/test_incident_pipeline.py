@@ -491,3 +491,16 @@ def test_detail_reads_an_incident_another_process_wrote(store):
     reader = IncidentPipeline(store, reproduce=False, start_worker=False, recover=False)
     incident_id = capture(writer, detection()).incident_id
     assert reader.detail(incident_id)["record"]["incident_id"] == incident_id
+
+
+def test_first_in_session_marks_the_sightings_that_stop_the_dashboard(pipe):
+    det = detection()
+    first = capture(pipe, det)
+    again = capture(pipe, det)
+    assert first.status == "new" and first.first_in_session
+    assert again.status == "duplicate" and not again.first_in_session
+    pipe.begin_session()                                   # the dashboard's Reset
+    after_reset = capture(pipe, det)
+    assert after_reset.status == "duplicate" and after_reset.first_in_session
+    assert not capture(pipe, det).first_in_session
+    assert [s["incident_id"] for s in pipe.session_summaries()] == [first.incident_id]

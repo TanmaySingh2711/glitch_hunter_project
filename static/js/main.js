@@ -222,9 +222,11 @@ document.addEventListener('DOMContentLoaded', () => {
         socket.emit('stop_testing');
         socket.emit('reset_game');
 
-        // Reset ends the session; the incident history is evidence and stays.
+        // Reset ends the session: the log and the Bug Tracker start empty
+        // (the server starts a new session list; every incident stays saved).
         logTerminal.replaceChildren(makePlaceholder('p', 'log-placeholder'));
         hideBugBanner();
+        lastIncidents = [];
         setTestingStarted(false);
 
         clearFrame();

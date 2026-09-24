@@ -253,8 +253,11 @@ frame 4 engine frames apart), then holds the red-framed trigger for 1.5 s.
   (the `bug_found` event, and `/api/status` on every (re)connect), with the
   incident's type, id, time, place, severity, confidence, reproduction,
   occurrences and links. It is never a frontend-only guess.
-* **BUG TRACKER** = the incident history from `/api/incidents`, newest first,
-  across restarts: each incident with its facts and links (PDF, Markdown,
+* **BUG TRACKER** = this session's incidents from `/api/incidents` (since the
+  dashboard started or was last reset: Reset empties it, like the log),
+  newest first; `/api/incidents?all=1` and `tools/incidents.py list` give
+  the whole history, which is never deleted. Each incident with its facts
+  and links (PDF, Markdown,
   trigger frame, GIF, whole bundle as .zip). Reports still rendering show as
   such, and fill in when `incident_updated` arrives.
 * **Select Game Environment** switches between Mario Game (Cleaned) and
@@ -274,9 +277,10 @@ Mario, 40 x 80) plus one frame of the largest motion (14 px horizontally, the
 terminal fall speed) - they would overlap if caught one frame apart.
 Otherwise it is a new incident, even for the same kind: two real bugs can
 share a category. A sighting with no position is never merged. Duplicates
-append to `occurrences.jsonl`, raise the count, and do **not** stop testing.
-The engine's own once-per-episode latch already stops a persistent fault from
-firing every frame. Known fingerprints are reloaded at start-up, so a sighting
+append to `occurrences.jsonl` and raise the count - no second incident -
+and, like every detection, stop testing until Start Testing (the owner's
+rule, 2026-09-24). The engine's own once-per-episode latch stops a
+persistent fault from firing every frame. Known fingerprints are reloaded at start-up, so a sighting
 after a restart is still recognised.
 
 ## 11. Severity, confidence, reproduction - kept apart

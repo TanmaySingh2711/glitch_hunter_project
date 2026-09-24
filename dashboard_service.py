@@ -24,6 +24,8 @@ WHAT THE USER CONTROLS
   X       (the window's own close button, while running or paused) hide the
           window and pause. The session is kept; Start brings it back.
   Reset   end the session and close the window; the next Start is fresh.
+          The Bug Tracker starts a new session list too (every incident
+          stays saved in the store).
   Game    (the "Select Game Environment" list) a Reset, then the other game
           variant is loaded in place of this one; the next Start plays it.
   A browser refresh / closed tab pauses, and changes nothing else.
@@ -33,8 +35,9 @@ suspended generator, so nothing about the episode, the policy or its
 telemetry is discarded, and the dashboard writes no checkpoint, coverage or
 lifecycle file at all.
 
-BUG FOUND (Objective 3). When a step reports a NEW incident, this thread
-pauses before it takes another step - the evidence is already on disk by then
+BUG FOUND (Objective 3). When a step reports a bug - a new incident or a
+repeat sighting of a known one - this thread pauses before it takes another
+step - the evidence is already on disk by then
 (reporting/pipeline.capture ran inside that step) - and remembers it as
 `bug_found` until the user presses Start (resume) or Reset. Nothing resumes
 by itself, not even when the reports finish rendering. A later sighting of an
@@ -71,6 +74,7 @@ class Backend(Protocol):
     def poll_close_request(self) -> bool: ...
     def new_session(self) -> Session: ...
     def switch_game(self, variant: str) -> bool: ...
+    def begin_incident_session(self) -> None: ...
     def stop_audio(self) -> None: ...
 
 
@@ -208,6 +212,10 @@ class GameWindowService:
                 self.bug_found = None
                 self.emit('bug_cleared', {})
             self.pause_reason = 'reset'
+            try:
+                self.backend.begin_incident_session()
+            except Exception:             # the reset itself has already happened
+                _log.exception("could not start a new incident session view")
         elif cmd.startswith('switch:'):
             self._handle('reset')
             variant = cmd.split(':', 1)[1]
@@ -271,8 +279,11 @@ class GameWindowService:
         self._handle_incidents(item.get('incidents') or ())
 
     def _handle_incidents(self, outcomes: Any) -> None:
-        """A new incident stops testing, here, before another step runs."""
-        new = [o["summary"] for o in outcomes if o.get("status") == "new" and o.get("summary")]
+        """Every recorded bug sighting stops testing, here, before another
+        step runs - a new incident, or a repeat of a known one (which only
+        raises that incident's count; no second incident is created)."""
+        new = [o["summary"] for o in outcomes
+               if o.get("status") in ("new", "duplicate") and o.get("summary")]
         for o in outcomes:
             if o.get("status") == "duplicate" and o.get("summary"):
                 self.emit('incident_occurrence', o["summary"])

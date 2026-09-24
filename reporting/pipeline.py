@@ -55,6 +55,9 @@ class CaptureOutcome:
     incident_id: str | None
     summary: dict[str, Any] | None
     error: str | None = None
+    # True the first time this incident is seen in the current session (a
+    # new incident always; a known one after a Reset) - the dashboard stops.
+    first_in_session: bool = False
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -115,6 +118,9 @@ class IncidentPipeline:
         self._records: dict[str, dict[str, Any]] = {}
         self._known: list[tuple[str, dict[str, Any]]] = []
         self._counts: collections.Counter[str] = collections.Counter()
+        # The dashboard's view: incidents seen (new or again) since the last
+        # begin_session() - the Bug Tracker shows these; the store keeps all.
+        self._session: dict[str, int] = {}
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._busy = 0
         self._idle = threading.Condition(self._lock)
@@ -197,7 +203,9 @@ class IncidentPipeline:
                         "session_agent_step": ctx.session_agent_step, "site": fp["site"],
                         "metrics": dict(det.metrics), "synthetic": det.synthetic})
                     self._counts[dup] += 1
-                    return CaptureOutcome("duplicate", dup, self.summary(dup))
+                    first = dup not in self._session
+                    self._session[dup] = self._session.get(dup, 0) + 1
+                    return CaptureOutcome("duplicate", dup, self.summary(dup), first_in_session=first)
                 incident_id, bundle = self.store.create_bundle(created)
                 self._known.append((incident_id, fp))
                 registered = incident_id
@@ -233,7 +241,10 @@ class IncidentPipeline:
                 self._records[incident_id] = record
                 self.store.write_manifest(bundle, self._initial_manifest(record, bundle))
             self._enqueue(incident_id)
-            return CaptureOutcome("new", incident_id, self.summary(incident_id))
+            with self._lock:
+                self._session[incident_id] = self._session.get(incident_id, 0) + 1
+            return CaptureOutcome("new", incident_id, self.summary(incident_id),
+                                  first_in_session=True)
         except Exception as exc:
             log.exception("incident capture failed")
             if registered is not None:
@@ -459,6 +470,26 @@ class IncidentPipeline:
         for incident_id in reversed(self.incident_ids()):
             try:
                 out.append(self.summary(incident_id))
+            except (StoreError, OSError, ValueError, KeyError):
+                log.warning("incident %s is no longer readable; left out of the list",
+                            incident_id)
+        return out
+
+    def begin_session(self) -> None:
+        """Starts a new dashboard session view (the dashboard's Reset). Nothing
+        is deleted: every incident stays in the store and in summaries()."""
+        with self._lock:
+            self._session.clear()
+
+    def session_summaries(self) -> list[dict[str, Any]]:
+        """The incidents seen in this session, most recently first seen first,
+        each with `seen_this_session`."""
+        with self._lock:
+            seen = list(self._session.items())
+        out = []
+        for incident_id, count in reversed(seen):
+            try:
+                out.append({**self.summary(incident_id), "seen_this_session": count})
             except (StoreError, OSError, ValueError, KeyError):
                 log.warning("incident %s is no longer readable; left out of the list",
                             incident_id)

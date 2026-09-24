@@ -153,8 +153,14 @@ def _pipeline_or_404() -> Any:
 
 @app.route('/api/incidents')
 def api_incidents() -> dict[str, Any]:
+    # The Bug Tracker shows this session's incidents (since the dashboard
+    # started or was last reset); ?all=1 lists every incident in the store.
     pipeline = backend.pipeline
-    return {"incidents": pipeline.summaries() if pipeline is not None else []}
+    if pipeline is None:
+        return {"incidents": [], "scope": "session"}
+    if request.args.get('all') == '1':
+        return {"incidents": pipeline.summaries(), "scope": "all"}
+    return {"incidents": pipeline.session_summaries(), "scope": "session"}
 
 
 @app.route('/api/incidents/<incident_id>')

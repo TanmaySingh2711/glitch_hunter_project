@@ -107,12 +107,28 @@ def test_reset_clears_the_bug_but_not_the_evidence(make_svc):
     assert s.bug_found is None and s.status()["pause_reason"] == "reset"
 
 
-def test_a_repeat_sighting_is_announced_but_does_not_stop_testing(make_svc):
+def test_a_repeat_sighting_stops_testing_too_and_is_announced(make_svc):
+    """Every detection stops testing (the owner's rule); a repeat is the same
+    incident with a higher count, not a new one."""
     s = make_svc({2: [{"status": "duplicate", "summary": _summary(occurrences=2)}]})
     s.start_testing()
-    assert wait_for(lambda: s.steps >= 5)
-    assert s.testing and s.bug_found is None
+    assert wait_for(lambda: not s.testing and s.steps == 2)
+    assert s.status()["pause_reason"] == "bug_found"
+    assert s.bug_found == [_summary(occurrences=2)]
     assert ("incident_occurrence", _summary(occurrences=2)) in s.events
+    s.start_testing()
+    assert wait_for(lambda: s.steps >= 5) and s.bug_found is None
+
+
+def test_a_known_bug_seen_first_time_in_a_new_session_stops_testing(make_svc):
+    """After a Reset the Bug Tracker is empty: a bug already in the store is
+    new to this session, so it stops testing like a new one."""
+    s = make_svc({2: [{"status": "duplicate", "first_in_session": True,
+                       "summary": _summary(occurrences=3)}]})
+    s.start_testing()
+    assert wait_for(lambda: not s.testing and s.steps == 2)
+    assert s.status()["pause_reason"] == "bug_found"
+    assert s.bug_found == [_summary(occurrences=3)]
 
 
 def test_an_unrecorded_detection_still_stops_testing_and_says_why(make_svc):
@@ -231,13 +247,40 @@ def test_status_reports_the_backend_truth(served, monkeypatch):
 
 def test_the_history_lists_every_incident_newest_first(served):
     _app, client, ids = served
-    listed = client.get("/api/incidents").get_json()["incidents"]
+    listed = client.get("/api/incidents?all=1").get_json()["incidents"]
     assert [i["incident_id"] for i in listed] == sorted(ids, reverse=True)
     synthetic = [i for i in listed if i["synthetic"]]
     assert len(synthetic) == 1 and synthetic[0]["confidence"] == "not_applicable"
     for inc in listed:
         assert {"report.pdf", "report.md", "trigger.png", "context.gif"} <= set(inc["available"])
         assert inc["finalized"] and inc["occurrences"] == 1
+
+
+def test_the_bug_tracker_lists_this_session_and_reset_empties_it(served):
+    """Reset starts a new session list: the tracker is empty again, yet
+    every incident is still in the store (?all=1) and still served."""
+    app, client, ids = served
+    pipe = db._pipeline
+    pipe.begin_session()
+    body = client.get("/api/incidents").get_json()
+    assert body == {"incidents": [], "scope": "session"}
+    assert len(client.get("/api/incidents?all=1").get_json()["incidents"]) == len(ids)
+    assert client.get(f"/incidents/{ids[0]}/report.md").status_code == 200
+    app.backend.begin_incident_session()                 # what the service's Reset calls
+    assert client.get("/api/incidents").get_json()["incidents"] == []
+
+
+def test_a_new_or_repeated_sighting_joins_the_session_list():
+    import threading
+
+    from reporting.pipeline import IncidentPipeline
+    pipe = IncidentPipeline.__new__(IncidentPipeline)
+    pipe._lock, pipe._session = threading.RLock(), {"INC-A": 1, "INC-B": 2}
+    pipe.summary = lambda i: {"incident_id": i}              # type: ignore[method-assign]
+    assert [s["incident_id"] for s in pipe.session_summaries()] == ["INC-B", "INC-A"]
+    assert pipe.session_summaries()[0]["seen_this_session"] == 2
+    pipe.begin_session()
+    assert pipe.session_summaries() == []
 
 
 def test_detail_and_files_are_served(served):
@@ -298,7 +341,7 @@ def test_the_routes_work_before_the_pipeline_exists(monkeypatch):
     import app
     monkeypatch.setattr(db, "_pipeline", None)
     client = app.app.test_client()
-    assert client.get("/api/incidents").get_json() == {"incidents": []}
+    assert client.get("/api/incidents").get_json() == {"incidents": [], "scope": "session"}
     assert client.get("/incidents/INC-20260923-120000-abcdef/report.pdf").status_code == 404
 
 

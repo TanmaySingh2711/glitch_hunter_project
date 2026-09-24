@@ -12,7 +12,7 @@ labelled synthetic - and every stage of Objective 3 is asserted:
     -> dashboard reports "bug found" -> GIF / Markdown / PDF rendered
     -> replay reproduces it -> files download, nothing else does
     -> resume -> a second, different incident -> resume -> the first one's
-       site again in a later episode: counted, NOT a new incident, no stop
+       site again in a later episode: counted, NOT a new incident, stops again
     -> the frozen Objective-2 files are byte-identical afterwards
 
 Writes only its own store (default incidents/_validation/<time>/, which the
@@ -201,15 +201,16 @@ def main(argv: list[str] | None = None) -> int:
           None if second is None else second["incident_id"])
     check("the session carried on rather than restarting", svc.steps > steps_at_stop)
 
-    # ── 5. the first site again, in a later episode: counted, no stop ─────
+    # ── 5. the first site again, in a later episode: counted, stops again ─
     print("stage 5: a repeat sighting")
     svc.start_testing()
     got = _wait(lambda: any(e == "incident_occurrence" for e, _p in events), args.timeout * 2)
     check("a later episode's sighting was recorded as an occurrence", got)
-    time.sleep(0.5)
     repeats = [p for e, p in events if e == "incident_occurrence"]
-    check("a repeat does not stop testing", svc.testing or svc.status()["pause_reason"] != "bug_found"
-          or (svc.bug_found or [{}])[0].get("incident_id") not in {r["incident_id"] for r in repeats})
+    check("a repeat stops testing again, on the same incident",
+          _wait(lambda: svc.bug_found is not None, 10)
+          and svc.bug_found[0]["incident_id"] in {r["incident_id"] for r in repeats}
+          and svc.status()["pause_reason"] == "bug_found")
     svc.stop_testing()
     svc.wait_idle()
     pipe.wait_idle(args.timeout)

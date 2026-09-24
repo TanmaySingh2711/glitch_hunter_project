@@ -54,8 +54,9 @@
         <!-- Middle-Right: Bug Tracker -->
         <aside class="panel bug-panel">
             <h3 class="panel-heading panel-heading--bug">BUG TRACKER</h3>
-            <!-- Incident history from /api/incidents: every captured incident,
-                 newest first, kept across restarts. -->
+            <!-- This session's incidents from /api/incidents (since the
+                 dashboard started or was last reset); every incident stays
+                 saved in the store (/api/incidents?all=1). -->
             <div id="bug-terminal" role="log" aria-live="polite">
                 <ul id="bug-list">
                     <li id="bug-placeholder" class="placeholder">start testing...</li>
