@@ -156,6 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     `${label}: ${status === 'failed' ? 'failed' : 'rendering...'}`));
             }
         }
+        const bundle = el('a', 'evidence-link evidence-link--bundle', 'Download all (.zip)');
+        bundle.href = `/runs/${encodeURIComponent(report.run_id)}/bundle.zip`;
+        box.appendChild(bundle);
         return box;
     }
 

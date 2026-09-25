@@ -458,7 +458,7 @@ Then open **http://localhost:5000**.
 On the clean game the Bug Tracker should stay at *No bugs found yet…*: that is
 the expected, healthy result. **When a clean-game run ends, testing stops.**
 If Mario reached the castle, a green *Level Complete – No Bugs Found* banner
-appears with the run report (PDF, Markdown, final frame, GIF), which is also
+appears with the run report (PDF, Markdown, final frame, GIF, or all as a `.zip`), which is also
 listed in the Bug Tracker; if he died, the banner says so. Press **Reset
 Dashboard**, then **START TESTING**, for a new run. On the bugged game with
 the 16M brain, the agent runs into all six benchmark bugs within its first
@@ -563,7 +563,7 @@ hash), so a report can never be attributed to the wrong game. Details:
 | **Select Game Environment** | Switch between *Mario Game (Cleaned)* and *Mario Game (Bugged)* |
 | **START TESTING / Stop Testing** | Start or pause; Start always resumes from the same moment |
 | **Reset Dashboard** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays) |
-| **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level Complete – No Bugs Found* with its run report (PDF, Markdown, final frame, GIF) |
+| **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level Complete – No Bugs Found* with its run report (PDF, Markdown, final frame, GIF, and the whole report as a `.zip`) |
 | **Pause on every bug** | *Testing Stopped – Bug Found* banner with the bug's type, incident id, time, world position, severity, confidence, reproduction status and times seen |
 | **Bug Tracker** | Every bug found in this session, newest first; a repeat raises its *Seen* count instead of adding a duplicate |
 | **Evidence links** | PDF report, Markdown report, trigger frame, GIF, and the whole evidence bundle as a `.zip` |

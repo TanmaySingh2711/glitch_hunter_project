@@ -119,3 +119,11 @@ def test_the_app_serves_run_files_and_404s_everything_else(tmp_path, monkeypatch
     assert client.get(f"/runs/{r['run_id']}/report.md?download=1").mimetype == "text/markdown"
     assert client.get(f"/runs/{r['run_id']}/secret.txt").status_code == 404
     assert client.get("/runs/not-a-run/report.pdf").status_code == 404
+    bundle = client.get(f"/runs/{r['run_id']}/bundle.zip")
+    assert bundle.status_code == 200 and bundle.mimetype == "application/zip"
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(bundle.data)) as zf:
+        assert sorted(zf.namelist()) == sorted(f"{r['run_id']}/{n}" for n in rr.FILES)
+    assert client.get("/runs/RUN-20260925-100123-ffffff/bundle.zip").status_code == 404
+    assert client.get("/runs/..%2F..%2Fapp.py/bundle.zip").status_code == 404

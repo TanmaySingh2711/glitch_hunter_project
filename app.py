@@ -63,6 +63,7 @@ from common.logging_setup import configure_logging
 from dashboard_backend import DashboardBackend, DashboardConfig
 from dashboard_service import THREAD_NAME, GameWindowService
 from exploration import config
+from reporting.run_report import FILES as RUN_FILES
 from reporting.store import StoreError
 
 log = logging.getLogger(__name__)
@@ -217,6 +218,29 @@ def incident_file(incident_id: str, name: str) -> Response:
                          download_name=f"{incident_id}_{name}", max_age=0)
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.route('/runs/<run_id>/bundle.zip')
+def run_bundle(run_id: str) -> Response:
+    """The whole run report as one download, like an incident's bundle."""
+    reports = backend.run_reports
+    if reports is None:
+        abort(404)
+    paths = []
+    for name in RUN_FILES:                # only real, allow-listed report files
+        try:
+            paths.append((name, reports.path(run_id, name)))
+        except KeyError:
+            continue
+    if not paths:
+        abort(404)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, path in paths:
+            zf.write(path, arcname=f"{run_id}/{name}")
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"{run_id}.zip", max_age=0)
 
 
 @app.route('/runs/<run_id>/<name>')

@@ -29,9 +29,10 @@ kept narrow.
   is a 404; `tests/test_dashboard_incidents.py` tries a dozen such requests.
   Files are sent with `X-Content-Type-Options: nosniff`, and the page puts
   incident text into the DOM with `textContent`, never as HTML.
-* **Run reports are served the same way.** `/runs/<id>/<file>` accepts only a
-  well-formed id of an existing clean-run report and a file name from a fixed
-  list (`reporting/run_report.RunReports.path`); `tests/test_run_report.py`
+* **Run reports are served the same way.** `/runs/<id>/<file>` and
+  `/runs/<id>/bundle.zip` accept only a well-formed id of an existing
+  clean-run report and file names from a fixed list
+  (`reporting/run_report.RunReports.path`); `tests/test_run_report.py`
   checks the refusals.
 * **A replay runs only what the bundle names from a closed list.** Incident
   reproduction starts a local Python process (`reporting/reproduce.py`) that
