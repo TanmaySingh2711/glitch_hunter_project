@@ -45,7 +45,8 @@ finish the level. Its 6M brain is the baseline for everything that follows.
 * **Observation:** 4 stacked 84×84 grayscale frames; the agent acts every 4
   engine frames (`wrap_observation`).
 * **Learning:** Stable-Baselines3 PPO, `CnnPolicy`, 8 `SubprocVecEnv` workers,
-  torch 2.5.1 (CUDA 12.1).
+  trained on torch 2.5.1 (CUDA 12.1); the project now runs torch 2.14.0,
+  on which this brain plays move-for-move the same.
 * **Reward** (`rewards/legacy.py`, `REWARD_MODE = "legacy_completion"`): new
   tiles, progress milestones, +500 for the flag; small death penalty.
 * **Episode ends:** engine timer, death, a stuck rule, or a step limit.

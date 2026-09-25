@@ -48,6 +48,9 @@ The sprite sheets in `<variant>/resources/graphics/` and the audio in
 from **Super Mario Bros.**, which is the intellectual property of
 **Nintendo Co., Ltd.**
 
+The same graphics appear in this project's screenshots and recordings: the
+images in `assets/` and the frames, GIFs and PDFs of every incident report.
+
 These assets are **not licensed** by this project, by the upstream author, or
 by anyone else here. They are included only because the original educational
 project included them. Nintendo has not granted any permission for their use.
@@ -70,9 +73,34 @@ https://github.com/socketio/socket.io
 
 ## Python dependencies
 
-The packages listed in `requirements.txt` and `pyproject.toml` (PyTorch,
-Stable-Baselines3, Gymnasium, Pygame, Flask, Flask-SocketIO, OpenCV, NumPy,
-cloudpickle) are each
-distributed under their own licenses — mostly MIT, BSD, and Apache 2.0. They
-are installed from PyPI at setup time and are not redistributed as part of
-this repository. Refer to each project for its exact terms.
+The runtime packages in `requirements.txt` and `pyproject.toml` are
+installed from PyPI (PyTorch from its own index) at setup time and are **not
+redistributed** as part of this repository. Each keeps its own license
+(as declared in its package metadata):
+
+| Package | Used for | License |
+|---|---|---|
+| PyTorch | the neural network | BSD-3-Clause |
+| Stable-Baselines3 | PPO | MIT |
+| Gymnasium | the environment API | MIT |
+| Pygame | the game engine | LGPL (version 2.1, per its license file) |
+| NumPy | arrays | BSD-3-Clause (bundled parts: 0BSD, MIT, Zlib, CC0-1.0) |
+| cloudpickle | checkpoint serialisation | BSD-3-Clause |
+| OpenCV (`opencv-python`) | frame stream, PNG evidence | Apache-2.0 |
+| Pillow | incident GIFs | MIT-CMU |
+| fpdf2 | PDF incident reports | LGPL-3.0-only |
+| Flask | the dashboard server | BSD-3-Clause |
+| Flask-SocketIO | live dashboard updates | MIT |
+
+Pygame and fpdf2 are LGPL: they are used as ordinary, unmodified installed
+libraries, which the LGPL permits for software under any license. The
+development tools (pytest, pytest-cov, Ruff, mypy, pre-commit, uv) are not
+part of the running project. Refer to each project for its exact terms.
+
+---
+
+## The final 16M brain (GitHub Release asset)
+
+`glitch_hunter_final_brain_16M.zip`, installed by `tools/final_brain.py`, is
+this project's own work (trained weights, coverage map, reachability mask
+and closure record); it contains no third-party code or assets.

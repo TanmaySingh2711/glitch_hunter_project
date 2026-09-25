@@ -21,7 +21,7 @@ dependencies = [
     "flask-socketio==5.6.1",
     "opencv-python==5.0.0.93",
     "stable-baselines3==2.9.0",
-    "torch==2.5.1",
+    "torch==2.14.0",
     # Incident reports (reporting/render.py): the PDF, and the GIF + the
     # images fpdf2 embeds.
     "fpdf2==2.8.8",
@@ -43,27 +43,20 @@ dev = [
 # never open (train_agent.py detects its absence and carries on).
 tensorboard = ["tensorboard>=2.18"]
 
-# ─── Why uv replaces the 3-step pip dance ───
-# stable-baselines3 2.9.0 declares torch>=2.8, but no CUDA 12.1 build of
-# torch newer than 2.5.1 exists. With plain pip that means installing SB3
-# normally silently REPLACES your GPU torch with a CPU one - hence the
-# documented "install torch first, then SB3 with --no-deps, then the rest"
-# sequence. uv can express that intent directly instead:
-#   - the explicit index below pins torch to PyTorch's own CUDA 12.1 wheels
-#   - the override tells the resolver to disregard SB3's torch lower bound,
-#     which is exactly what --no-deps was doing by hand, but scoped to the
-#     one package it needs to apply to rather than disabling ALL of SB3's
-#     dependency resolution.
-# Result: `uv sync` in place of three ordered commands.
-[tool.uv]
-override-dependencies = ["torch==2.5.1"]
-
+# ─── Where torch comes from ───
+# PyPI's Windows torch wheels are CPU-only, so the explicit index below takes
+# torch from PyTorch's own CUDA 12.6 wheels (they also run, on the CPU, on a
+# machine without an NVIDIA GPU). 2.14.0 is the pin because it has no
+# published advisories (SECURITY.md) and satisfies stable-baselines3's
+# torch>=2.8, so SB3 installs normally - no override, no --no-deps.
+# It replaced 2.5.1+cu121, which the 6M brain was trained on; both brains
+# play identically on it (SECURITY.md, "Dependencies").
 [tool.uv.sources]
-torch = { index = "pytorch-cu121" }
+torch = { index = "pytorch-cu126" }
 
 [[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 # ═══════════════════════════════════════════════════════════════════════

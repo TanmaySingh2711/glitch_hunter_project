@@ -17,6 +17,7 @@ from typing import Any, cast
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.utils import FloatSchedule
 
 from common.logging_setup import write_progress
@@ -27,6 +28,13 @@ from exploration.lifecycle import EpisodePhase
 from rewards.qa import QA_CHANNELS
 
 log = logging.getLogger(__name__)
+
+
+def _actor_critic(model: Any) -> ActorCriticPolicy:
+    """The PPO policy with its real type. BaseCallback only knows a
+    BasePolicy, and torch types an unknown nn.Module attribute as
+    `Tensor | Module`, so `policy.action_net` would not type-check."""
+    return cast(ActorCriticPolicy, model.policy)
 
 
 class ExactMilestoneCheckpointCallback(BaseCallback):
@@ -277,7 +285,7 @@ class AnchorConsolidationCallback(BaseCallback):
                 f"{self.anchor_path} was recorded for reference {recorded_for[:12]}..., "
                 f"not {self.reference_path} ({actual[:12]}...). Rebuild it with "
                 f"tools/build_anchor_set.py --reference {self.reference_path}.")
-        policy = self.model.policy
+        policy = _actor_critic(self.model)
         self.reference = _PPO.load(self.reference_path, device=policy.device).policy
         self.reference.set_training_mode(False)
         for p in self.reference.parameters():
@@ -299,7 +307,7 @@ class AnchorConsolidationCallback(BaseCallback):
             ref_dist: Any = self.reference.get_distribution(obs)
             ref = ref_dist.distribution.probs
         with torch.set_grad_enabled(grad):
-            cur_dist: Any = self.model.policy.get_distribution(obs)
+            cur_dist: Any = _actor_critic(self.model).get_distribution(obs)
             cur = cur_dist.distribution.probs
             return (ref * (torch.log(ref + 1e-12) - torch.log(cur + 1e-12))).sum(-1).mean()
 
@@ -438,7 +446,7 @@ class ValueWarmupCallback(BaseCallback):
         """Everything the ACTION distribution depends on. With shared features
         that includes the feature extractor: training the critic through it
         would move the logits, so it is frozen along with the action head."""
-        policy = self.model.policy
+        policy = _actor_critic(self.model)
         params = list(policy.features_extractor.parameters())
         params += list(policy.action_net.parameters())
         params += list(policy.mlp_extractor.policy_net.parameters())

@@ -9,7 +9,7 @@
 # the tests that do skip with the reason when those files are absent.
 #
 # CPU torch rather than `uv sync`: pyproject.toml pins torch to PyTorch's
-# CUDA 12.1 index for training machines, and pulling ~2.5 GB of CUDA wheels
+# CUDA 12.6 index for training machines, and pulling ~2.5 GB of CUDA wheels
 # onto a CI runner to run CPU-only tests would be pure waste. The versions
 # are the same pins as pyproject.toml; only the build of torch differs.
 name: CI
@@ -56,8 +56,7 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install dependencies (CPU torch)
         run: |
-          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install stable-baselines3==2.9.0 --no-deps
+          pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt "mypy==2.3.1"
       - run: mypy
 
@@ -82,8 +81,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1
       - name: Install dependencies (CPU torch)
         run: |
-          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install stable-baselines3==2.9.0 --no-deps
+          pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt "pytest==9.1.1" "pytest-cov==7.1.0"
       # `slow` = the multi-minute reachability rebuild and real-engine runs
       # thousands of steps long; they run locally before every merge

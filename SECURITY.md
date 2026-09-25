@@ -41,6 +41,15 @@ kept narrow.
   checkpoint runs whatever it contains. Only load checkpoints you (or this
   repository) produced; `tools/verify_artifacts.py` confirms the protected
   ones are still the bytes that were recorded in `artifacts.json`.
+* **The final 16M brain is verified twice before it is used.** It is not in
+  git; `tools/final_brain.py install` downloads it over HTTPS from this
+  repository's GitHub Release, checks all four files against the SHA-256
+  values tracked in `artifacts.json`, and writes nothing unless every one
+  matches. It accepts only the four expected file names (no other path can
+  be written) and never overwrites a different file. The dashboard then loads
+  `glitch_hunter_main_brain.zip` only if its SHA-256 matches the closure
+  record `FINAL_OBJECTIVE2.json`; otherwise it logs a warning and uses the
+  latest local QA checkpoint, or the 6M brain.
 * **Everything else is data.** Coverage files and masks are `.npz` archives
   read with `allow_pickle=False`, and every field is validated (format
   version, grid geometry, mask fingerprint, the bitmap's own counts) before
@@ -64,18 +73,18 @@ pip install pip-audit
 pip-audit -r requirements.txt      # set PYTHONUTF8=1 first on Windows
 ```
 
-Last audit (2026-09-11): no known vulnerabilities in `requirements.txt`.
-`fpdf2` and `pillow` were added on 2026-09-23 (incident reports) and have
-not been through pip-audit yet.
+Last audit (2026-09-25, pip-audit): **no known vulnerabilities** in
+`requirements.txt` (which includes `stable-baselines3`, `fpdf2` and
+`pillow`) or in `torch==2.14.0`. pip-audit checks the version number on
+PyPI; the `+cu126` GPU wheels come from PyTorch's own index.
 
-**Known exception - torch 2.5.1.** It is pinned because no CUDA 12.1 build
-of anything newer exists (README, "12. Installation"), and
-2.5.1 predates the fix for CVE-2025-32434 (a `torch.load(weights_only=True)`
-bypass, fixed in 2.6.0). The exposure is the one already stated under
-"Checkpoints are code": it only matters when loading an untrusted
-checkpoint, which this project never does. Upgrade torch as soon as a CUDA
-build that fits the install allows it. pip-audit cannot check the `+cu121`
-wheels itself, since they are not on PyPI.
+**torch upgrade (2026-09-25).** The project used to pin torch 2.5.1 (CUDA
+12.1), which has 19 published advisories - among them two ways to run code
+while loading a checkpoint (CVE-2025-32434, CVE-2026-24747) and
+memory-corruption or crash bugs in specific operators. It now pins 2.14.0
+(CUDA 12.6), which has none. Before the switch, both brains (16M and 6M) were
+run for 1,500 steps on each game under both versions: every move and every
+position was identical.
 
 Keep the virtual environment's own `pip` and `setuptools` current
 (`python -m pip install -U pip setuptools`); older versions carry

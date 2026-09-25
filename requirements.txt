@@ -2,27 +2,24 @@
 # FASTEST WAY (one command, no ordering to remember):
 #     uv sync --active      (inside the activated venv_gpu; plain `uv sync` makes a separate .venv)
 # That reads pyproject.toml, which already encodes the torch/CUDA rules
-# explained below. If you'd rather use plain pip, follow the 3 steps.
+# explained below. If you'd rather use plain pip, follow the 2 steps.
 #
 # DO NOT run "pip install -r requirements.txt" by itself - it will not
-# work correctly. Follow the 3 steps below in order.
+# give you the GPU build of PyTorch. Follow the 2 steps below in order.
 # See README.md "12. Installation" for the full copy-paste version of this.
 # ═══════════════════════════════════════════════════════════════════════
 
 # STEP 1 - install PyTorch first, separately (pick ONE line):
-#   Have an NVIDIA GPU:  pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
-#   No NVIDIA GPU:       pip install torch==2.5.1
+#   Have an NVIDIA GPU:  pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cu126
+#   No NVIDIA GPU:       pip install torch==2.14.0
 #   (torch alone: nothing here uses torchvision or torchaudio.)
+#   (Why first: on Windows PyPI only has the CPU build, so a plain install
+#   would never give you the GPU one. See README.md "12. Installation".)
 
-# STEP 2 - install stable-baselines3 on its own, with --no-deps:
-#   pip install stable-baselines3==2.9.0 --no-deps
-#   (Why --no-deps: it asks for a torch version newer than any CUDA build
-#   that exists, so without this flag it silently swaps out the torch you
-#   just installed in Step 1. See README.md "12. Installation" (Why this order?).)
-
-# STEP 3 - install everything else:
+# STEP 2 - install everything else:
 #   pip install -r requirements.txt
 
+stable-baselines3==2.9.0
 gymnasium==1.3.0
 cloudpickle==3.1.2
 numpy==2.5.2

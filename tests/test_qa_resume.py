@@ -191,4 +191,4 @@ def test_value_head_reset_preserves_the_policy():
     assert torch.all(policy.value_net.bias == 0)
     # It should now predict close to nothing, which is much nearer the truth
     # for the QA reward than anything it previously believed.
-    assert float(policy.value_net.weight.abs().mean()) < 0.05
+    assert float(policy.value_net.weight.detach().abs().mean()) < 0.05

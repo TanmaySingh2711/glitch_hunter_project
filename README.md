@@ -237,7 +237,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | Language | **Python 3.12** |
 | Game engine | **Pygame 2.6.1** (the Mario clone) |
 | RL environment | **Gymnasium 1.3.0** |
-| Reinforcement learning | **Stable-Baselines3 2.9.0** (PPO, `CnnPolicy`) on **PyTorch 2.5.1** (CUDA 12.1 build) |
+| Reinforcement learning | **Stable-Baselines3 2.9.0** (PPO, `CnnPolicy`) on **PyTorch 2.14.0** (CUDA 12.6 build) |
 | Numerics and data | **NumPy 2.5.2**, cloudpickle 3.1.2, JSON / JSON Lines, SHA-256 manifests |
 | Image and video | **OpenCV 5.0** (frame stream, PNG evidence), **Pillow 12.3** (GIFs) |
 | Reports | **fpdf2 2.8.8** (PDF), Markdown |
@@ -333,7 +333,7 @@ source venv_gpu/bin/activate
 ### Step 3 — Install the dependencies
 
 **Option A — uv (recommended on Windows and Linux).** One command, exact
-versions from `uv.lock`, including the CUDA 12.1 build of PyTorch (it also
+versions from `uv.lock`, including the CUDA 12.6 build of PyTorch (it also
 runs on machines without an NVIDIA GPU):
 
 ```bash
@@ -344,26 +344,21 @@ uv sync --active
 > `--active` matters: it installs into the activated `venv_gpu`. Without it,
 > uv creates a separate `.venv` folder that the commands below do not use.
 
-**Option B — pip (three steps, in this exact order).** Use this on macOS, or
+**Option B — pip (two steps, in this order).** Use this on macOS, or
 if you want the smaller CPU-only PyTorch:
 
 ```bash
 # 1. PyTorch first - pick ONE line
-pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121   # NVIDIA GPU
-pip install torch==2.5.1                                                      # CPU only / macOS
+pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cu126   # NVIDIA GPU
+pip install torch==2.14.0                                                      # CPU only / macOS
 
-# 2. Stable-Baselines3 without its dependencies
-pip install stable-baselines3==2.9.0 --no-deps
-
-# 3. Everything else
+# 2. Everything else
 pip install -r requirements.txt
 ```
 
-> **Why this order?** PyTorch is pinned to 2.5.1, the newest build for CUDA
-> 12.1. Stable-Baselines3 asks for a newer torch, so installing it normally
-> would silently swap your PyTorch for a different build. `--no-deps` (or uv's
-> override in `pyproject.toml`) prevents that. Do **not** install `eventlet`:
-> the dashboard is designed to run without it.
+> **Why this order?** On Windows, PyPI only has the CPU build of PyTorch, so
+> PyTorch comes first, from its own CUDA 12.6 index; step 2 then keeps it.
+> Do **not** install `eventlet`: the dashboard is designed to run without it.
 
 **Linux only:** OpenCV needs the system OpenGL library:
 
@@ -592,9 +587,9 @@ seconds). Visuals not yet included: a page of a generated PDF report.
 | [mario_bugged/VARIANT.md](mario_bugged/VARIANT.md) | The six benchmark bugs and how changes to the bugged game are controlled |
 | [mario_bugged/INJECTED_BUGS.json](mario_bugged/INJECTED_BUGS.json) | The full declaration of every injected bug |
 | [tools/README.md](tools/README.md) | Every command-line tool and what it writes |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup and the quality gate |
-| [SECURITY.md](SECURITY.md) | What the dashboard exposes and how it is kept safe |
-| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Terms for the game code and assets |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, the quality gate, rules for bugs and detectors, releasing the brain |
+| [SECURITY.md](SECURITY.md) | What the dashboard exposes, how it is kept safe, the dependency audit |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Terms for the game code and assets, and the license of every Python library |
 
 ---
 
@@ -603,12 +598,13 @@ seconds). Visuals not yet included: a page of a generated PDF report.
 This project's own code is released under the **MIT License**. See [LICENSE](LICENSE).
 
 It covers the Python modules, dashboard, tests, tools, documentation and the
-6M model weights (`mario_brain_checkpoint.zip`). It does **not** cover:
+trained weights: the 6M brain (`mario_brain_checkpoint.zip`) and the final 16M
+brain (the `v1.0.0` release asset). It does **not** cover:
 
 | Component | Terms |
 |---|---|
 | `mario_clean/`, `mario_bugged/` (the Mario clone) | Third-party code by Justin Meister, published **without an open-source license**. The author describes it as intended for **non-commercial educational purposes**. Do not use it commercially |
-| Game graphics, music and sounds | **Nintendo** intellectual property (*Super Mario Bros.*), not licensed by this project. This project is not affiliated with or endorsed by Nintendo |
+| Game graphics, music and sounds | **Nintendo** intellectual property (*Super Mario Bros.*), not licensed by this project; they also appear in the screenshots in `assets/` and in incident reports. This project is not affiliated with or endorsed by Nintendo |
 | `static/vendor/socket.io.min.js` | Socket.IO client, under its own MIT license |
 
 Full details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
