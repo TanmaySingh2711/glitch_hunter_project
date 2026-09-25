@@ -119,6 +119,17 @@ def test_an_unknown_source_changes_nothing(state_file):
     assert laptop.modes == {"ac": ORIGINAL_AC, "dc": ORIGINAL_DC}
 
 
+def test_a_machine_without_power_modes_is_left_alone(state_file):
+    # Windows Server and some desktops have no power modes: nothing to read.
+    laptop = Laptop()
+    guard = desktop.PowerModeGuard(source=lambda: "ac", mode=lambda s: None, setter=laptop.set,
+                                   spawn_restorer=laptop._spawn)
+    guard.apply()
+    guard.stop()
+    assert laptop.modes == {"ac": ORIGINAL_AC, "dc": ORIGINAL_DC}
+    assert not state_file.exists() and laptop.spawned == 0
+
+
 def test_the_restorer_steps_aside_for_a_running_dashboard(state_file, monkeypatch):
     import os
     state_file.write_text(json.dumps({"originals": {"dc": "x"}, "owner_pid": os.getpid()}))
@@ -200,7 +211,11 @@ def test_the_power_source_and_its_mode_can_be_read():
     source = desktop.power_source()
     assert source in ("ac", "dc")
     mode = desktop.power_mode(source)
-    assert mode and len(mode) == 36
+    if mode is None:
+        # Windows Server (the CI runner) has no power modes at all; the
+        # guard then leaves the machine alone (test_the_guard_* above).
+        pytest.skip("this Windows edition has no power mode")
+    assert len(mode) == 36
     # Setting the mode it already has changes nothing on this machine.
     assert desktop.set_power_mode(mode) is True
     assert desktop.power_mode(source) == mode
