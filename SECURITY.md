@@ -44,7 +44,9 @@ kept narrow.
 full speed on battery (`desktop.py`). It needs no administrator rights and
 changes only two things. Its own process opts out of Windows' power
 throttling. While the dashboard runs, the Windows power mode is set to *Best
-performance*. Your own power mode is put back when the dashboard stops (Ctrl+C,
+performance* - when it starts and whenever the laptop is plugged in or
+unplugged; a mode you pick yourself in between is left alone. Your own power
+mode is put back when the dashboard stops (Ctrl+C,
 or closing its window). Windows only lets a normal user change the mode of
 the power source in use, so a battery mode changed while on battery is put
 back the next time the laptop is on battery, by a small background process

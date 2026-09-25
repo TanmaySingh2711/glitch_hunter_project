@@ -63,8 +63,8 @@ def test_show_restores_a_window_minimised_behind_sdls_back(fakes):
     if sys.platform == "win32":
         assert ("ShowWindow", 4321, game_window.SW_RESTORE) in user32.calls
         assert game_window.is_minimized() is False
-    else:
-        assert "restore" in sdl.calls
+    else:                                   # minimised-ness is only known on Win32
+        assert sdl.calls == ["show"]
 
 
 def test_show_leaves_a_visible_window_alone(fakes):
@@ -96,3 +96,52 @@ def test_without_a_window_everything_is_a_no_op(monkeypatch):
     assert game_window.show_minimized() is False
     assert game_window.show() is False and game_window.hide() is False
     assert game_window.is_minimized() is False
+
+
+# ── the real Win32 calls, on a real (tkinter) window ─────────────────────────
+@pytest.fixture
+def tk_window():
+    if sys.platform != "win32":
+        pytest.skip("Win32 only")
+    import tkinter
+    try:
+        root = tkinter.Tk()
+    except tkinter.TclError:
+        pytest.skip("no display for a test window")
+    root.title("game_window test")
+    root.geometry("300x200+0+0")
+    root.update()
+    hwnd = int(root.frame(), 16)
+    import ctypes
+    top = ctypes.windll.user32.GetAncestor(hwnd, 2) or hwnd       # GA_ROOT
+    yield root, top
+    root.destroy()
+
+
+def test_the_cursor_monitors_work_area_is_real():
+    if sys.platform != "win32":
+        pytest.skip("Win32 only")
+    area = game_window.current_work_area()
+    assert area is not None
+    left, top, right, bottom = area
+    assert right > left and bottom > top
+
+
+def test_a_real_window_is_centred_minimised_restored_and_brought_forward(tk_window,
+                                                                        monkeypatch):
+    root, hwnd = tk_window
+    monkeypatch.setattr(game_window, "_hwnd", lambda: hwnd)
+    area = game_window.current_work_area()
+    origin = game_window.center_on_current_display()
+    assert origin is not None
+    root.update()
+    assert area[0] <= origin[0] <= area[2] and area[1] <= origin[1] <= area[3]
+    monkeypatch.setattr(game_window, "_sdl_window", lambda: type("W", (), {
+        "show": lambda self: None, "restore": lambda self: None})())
+    assert game_window.show_minimized() is True
+    root.update()
+    assert game_window.is_minimized() is True
+    assert game_window.show() is True                 # restores through Win32
+    root.update()
+    assert game_window.is_minimized() is False
+    assert isinstance(game_window.bring_to_front(), bool)

@@ -266,6 +266,19 @@ def test_reset_ends_the_session_and_the_next_start_is_fresh(svc):
     assert svc.fake.sessions == 2 and last_log(svc).startswith("session 2 step")
 
 
+def test_a_slow_step_keeps_the_pace_instead_of_halving_it(svc):
+    """A 30 ms step (a laptop on battery) still gets ~30 steps/s. The old
+    rule - wait as long again as the step took - gave it 16."""
+    svc.fake.step_delay = 0.030
+    svc.start_testing()
+    run_for(svc, 3)
+    start, t0 = svc.steps, time.monotonic()
+    time.sleep(1.5)
+    rate = (svc.steps - start) / (time.monotonic() - t0)
+    svc.stop_testing()
+    assert 23 <= rate <= 32, f"{rate:.1f} steps/s"
+
+
 def test_a_finished_clean_run_stops_testing_and_keeps_its_result(svc):
     svc.fake.run_end_at = 3
     svc.start_testing()

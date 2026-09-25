@@ -167,6 +167,10 @@ branch = true
 [tool.coverage.report]
 skip_covered = true
 show_missing = true
+# Two decimals, so tools/check.py's --cov-fail-under floor means what it says:
+# coverage compares the total ROUNDED to this precision, and at the default
+# (0) a measured 89.93% counted as 90% and passed a 90% floor.
+precision = 2
 exclude_also = [
     "if __name__ == .__main__.:",
     "raise NotImplementedError",

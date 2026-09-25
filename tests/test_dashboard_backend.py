@@ -267,3 +267,34 @@ def test_desktop_mode_boosts_and_guards_and_restores_on_exit(app_module, monkeyp
     assert calls[-1] == "stop", "exiting did not put the power mode back"
     assert app_module.parse_args(["--desktop"]).desktop is True
     assert app_module.parse_args([]).desktop is False
+
+
+def test_switching_the_game_unloads_everything_built_on_the_old_one(monkeypatch, tmp_path):
+    closed = []
+
+    class Env(_Env):
+        def close(self):
+            closed.append("env")
+
+    class Pipe:
+        def close(self):
+            closed.append("pipeline")
+    env = Env()
+    monkeypatch.setattr(db, "_global_env", env)
+    monkeypatch.setattr(db, "_global_model", _Model())
+    monkeypatch.setattr(db, "_pipeline", Pipe())
+    monkeypatch.setattr(db, "_provenance", {"game": "old"})
+    monkeypatch.setattr(db, "_config", db.DashboardConfig(game_variant="mario_clean",
+                                                          incidents_dir=str(tmp_path)))
+    monkeypatch.setattr(db, "release_game_variant", lambda: closed.append("game modules"))
+    with pytest.raises(ValueError, match="unknown game variant"):
+        db.switch_game_variant("mario_3")
+    assert db.switch_game_variant("mario_clean") is False and closed == []
+    assert db.switch_game_variant("mario_bugged") is True
+    assert closed == ["pipeline", "env", "game modules"]
+    assert env.unwrapped.calls == ["close"], "the old game's window was not closed"
+    assert db._global_env is None and db._global_model is None and db._pipeline is None
+    assert db._config.game_variant == "mario_bugged" and db._provenance == {}
+    monkeypatch.setattr(db, "_global_env", env)
+    with pytest.raises(RuntimeError, match="fixed once the env exists"):
+        db.configure(db.DashboardConfig(game_variant="mario_clean"))

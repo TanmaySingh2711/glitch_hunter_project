@@ -64,6 +64,13 @@ from typing import Any, Protocol
 THREAD_NAME = "game-window"
 IDLE_PUMP_S = 0.05          # event-pump period while paused: keeps the window responsive
 TARGET_FRAME_S = 1.0 / 60.0
+# The dashboard's pace: one agent step every two 60 fps frames (30 steps/s)
+# - what a step that fits in one frame always got. It used to be "wait as
+# long again as the step took", which halved the rate again whenever a step
+# ran long: measured on battery, a 22 ms step gave 44 ms per step (19/s)
+# instead of 33 ms. A fixed period keeps battery at the plugged-in pace.
+STEP_PERIOD_S = 2 * TARGET_FRAME_S
+MIN_IDLE_S = 0.004          # always this much free time after a step, for clicks and the window
 # Windows' default timer tick. A timed wait on a queue rounds UP to it
 # (measured: an 18 ms wait took 31 ms), and time.monotonic() only advances in
 # steps of it (GetTickCount64) - so step times read as 0, 15.6 or 31.2 ms and
@@ -195,9 +202,9 @@ class GameWindowService:
             if self.testing and _clock() >= next_step_at:
                 t0 = _clock()
                 self._step()
-                # Half speed, as before: the next step waits as long again
-                # as this one took (or a 60 fps frame, whichever is longer).
-                next_step_at = t0 + 2 * max(_clock() - t0, TARGET_FRAME_S)
+                # One step per STEP_PERIOD_S; a step that overruns it is
+                # followed by MIN_IDLE_S before the next.
+                next_step_at = max(t0 + STEP_PERIOD_S, _clock() + MIN_IDLE_S)
             self._check_close_button()
 
     def _command_within(self, timeout: float) -> Command | None:

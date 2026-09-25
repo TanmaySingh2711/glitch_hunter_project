@@ -20,8 +20,10 @@ user watches the browser, so it is exactly such a process. Hence two fixes:
     of EcoQoS and of timer coarsening, ask for 1 ms timers, above-normal
     priority. No administrator rights needed.
   * PowerModeGuard - while the dashboard runs, the power mode of the source
-    the laptop is on (AC or battery) is "Best performance"; the user's own
-    mode is put back when it stops. Windows only lets a normal user change the
+    the laptop is on (AC or battery) is "Best performance": set when it starts
+    and again whenever the laptop is plugged in or unplugged - never in
+    between, so a mode the user picks while it runs is left alone. The
+    user's own mode is put back when it stops. Windows only lets a normal user change the
     mode of the CURRENT source, so a mode changed on battery can only be put
     back on battery: if the dashboard stops while plugged in, a small
     background process (restore-power-mode) waits for the next time the
@@ -201,13 +203,20 @@ def _pid_alive(pid: Any) -> bool:
 
 
 def restore_due(state: dict[str, Any], source: str | None,
-                setter: Callable[[str], bool] = set_power_mode) -> dict[str, Any]:
+                setter: Callable[[str], bool] = set_power_mode,
+                mode: Callable[[str], str | None] = power_mode) -> dict[str, Any]:
     """Puts back the original mode of `source`, if one is owed. Returns the
-    state still owed afterwards."""
+    state still owed afterwards. A mode the user has chosen since (anything
+    but the Best performance this set) is theirs: it is kept, and nothing
+    more is owed for that source."""
     originals = dict(state.get("originals", {}))
-    if source in originals and setter(originals[source]):
-        log.info("[POWER] %s power mode restored", "battery" if source == "dc" else "plugged-in")
-        del originals[source]
+    if source is not None and source in originals:
+        if mode(source) not in (BEST_PERFORMANCE, None):
+            del originals[source]
+        elif setter(originals[source]):
+            log.info("[POWER] %s power mode restored",
+                     "battery" if source == "dc" else "plugged-in")
+            del originals[source]
     return {**state, "originals": originals}
 
 
@@ -226,15 +235,19 @@ class PowerModeGuard:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._handled_source: str | None = None     # the source already set up
         # Originals still owed from an earlier run are the TRUE originals:
         # what the registry shows now may be that run's own setting.
         self.state: dict[str, Any] = {"originals": dict(_load_state().get("originals", {}))}
 
     def apply(self) -> None:
+        """Sets Best performance for the current power source - once per
+        source change, so the user can still pick another mode meanwhile."""
         with self._lock:
             src = self._source()
-            if src is None:
+            if src is None or src == self._handled_source:
                 return
+            self._handled_source = src
             current = self._mode(src)
             if current is None or current == BEST_PERFORMANCE:
                 return
@@ -273,7 +286,7 @@ class PowerModeGuard:
         restorer. Safe to call more than once, from any thread."""
         self._stop.set()
         with self._lock:
-            self.state = restore_due(self.state, self._source(), self._setter)
+            self.state = restore_due(self.state, self._source(), self._setter, self._mode)
             self.state.pop("owner_pid", None)
             _save_state(self.state)
             if self.state["originals"]:
@@ -305,7 +318,7 @@ def restore_power_mode_loop() -> None:
             return
         if _pid_alive(state.get("owner_pid")):
             return                       # a running dashboard restores it itself
-        state = restore_due(state, power_source(), set_power_mode)
+        state = restore_due(state, power_source(), set_power_mode, power_mode)
         _save_state(state)
         if not state["originals"]:
             return

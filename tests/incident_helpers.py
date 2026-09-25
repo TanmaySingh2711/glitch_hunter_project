@@ -8,7 +8,6 @@ import numpy as np
 
 from exploration import config
 from reporting.events import Detection
-from reporting.pipeline import SessionRecorder
 from reporting.schema import CaptureContext, ContextFrame
 
 FAKE_TREE = "f" * 64
@@ -88,7 +87,3 @@ def context(det, frames=8, tree=FAKE_TREE, session_id="S-TEST"):
                           agent_action=3, recent_agent_actions=(3,) * min(agent_step, 8),
                           context_frames=ctx_frames, reward_mode="qa_exploration",
                           provenance=provenance(tree))
-
-
-def recorder_context(recorder: SessionRecorder):
-    return recorder.context("qa_exploration", provenance())

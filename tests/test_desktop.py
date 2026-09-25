@@ -50,6 +50,7 @@ def test_the_guard_sets_best_performance_and_puts_the_original_back(state_file):
     saved = json.loads(state_file.read_text())
     assert saved["originals"] == {"dc": ORIGINAL_DC}, "the original was not kept on disk"
     guard.apply()                                    # idempotent while running
+    assert laptop.modes["dc"] == desktop.BEST_PERFORMANCE
     guard.stop()
     assert laptop.modes == {"ac": ORIGINAL_AC, "dc": ORIGINAL_DC}
     assert not state_file.exists() and laptop.spawned == 0
@@ -67,7 +68,8 @@ def test_plugging_in_while_running_covers_both_sources(state_file):
     assert json.loads(state_file.read_text())["originals"] == {"dc": ORIGINAL_DC}
     assert laptop.spawned == 1, "nothing was left to put the battery mode back"
     laptop.source = "dc"                             # the restorer's turn
-    left = desktop.restore_due(json.loads(state_file.read_text()), "dc", laptop.set)
+    left = desktop.restore_due(json.loads(state_file.read_text()), "dc", laptop.set,
+                               lambda s: laptop.modes[s])
     assert laptop.modes["dc"] == ORIGINAL_DC and left["originals"] == {}
 
 
@@ -82,6 +84,23 @@ def test_a_new_run_restores_the_true_original_not_the_last_runs_setting(state_fi
     finally:
         guard.stop()
     assert laptop.modes["dc"] == ORIGINAL_DC
+
+
+def test_a_mode_the_user_picks_while_it_runs_is_left_alone(state_file):
+    laptop = Laptop("dc")
+    guard = laptop.guard()
+    guard.apply()
+    laptop.modes["dc"] = "user-picked-balanced"      # the user changes it meanwhile
+    guard.apply()
+    guard.apply()
+    assert laptop.modes["dc"] == "user-picked-balanced", "the guard overrode the user"
+    laptop.source = "ac"                             # plugged in: a new source is set up
+    guard.apply()
+    assert laptop.modes["ac"] == desktop.BEST_PERFORMANCE
+    laptop.source = "dc"
+    guard.stop()                                     # the user's own pick is not undone
+    assert laptop.modes["dc"] == "user-picked-balanced"
+    assert json.loads(state_file.read_text())["originals"] == {"ac": ORIGINAL_AC}
 
 
 def test_a_user_already_on_best_performance_is_left_alone(state_file):
@@ -112,10 +131,23 @@ def test_the_restorer_steps_aside_for_a_running_dashboard(state_file, monkeypatc
 def test_the_restorer_puts_the_mode_back_and_exits(state_file, monkeypatch):
     state_file.write_text(json.dumps({"originals": {"dc": ORIGINAL_DC}}))
     laptop = Laptop("dc")
+    laptop.modes["dc"] = desktop.BEST_PERFORMANCE    # what the dashboard left
     monkeypatch.setattr(desktop, "power_source", lambda: "dc")
     monkeypatch.setattr(desktop, "set_power_mode", laptop.set)
+    monkeypatch.setattr(desktop, "power_mode", lambda s: laptop.modes[s])
     desktop.restore_power_mode_loop()
     assert laptop.modes["dc"] == ORIGINAL_DC and not state_file.exists()
+
+
+def test_the_restorer_keeps_a_mode_the_user_chose_meanwhile(state_file, monkeypatch):
+    state_file.write_text(json.dumps({"originals": {"dc": ORIGINAL_DC}}))
+    laptop = Laptop("dc")
+    laptop.modes["dc"] = "user-picked"
+    monkeypatch.setattr(desktop, "power_source", lambda: "dc")
+    monkeypatch.setattr(desktop, "set_power_mode", laptop.set)
+    monkeypatch.setattr(desktop, "power_mode", lambda s: laptop.modes[s])
+    desktop.restore_power_mode_loop()
+    assert laptop.modes["dc"] == "user-picked" and not state_file.exists()
 
 
 def test_this_process_boost_is_harmless_to_call():
