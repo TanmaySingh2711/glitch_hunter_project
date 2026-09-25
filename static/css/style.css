@@ -331,7 +331,9 @@ select:disabled {
     opacity: 1;
 }
 
-.incident {
+/* A clean run's report card reads like an incident card (same font and
+   wrapping, not the tracker's monospace), in the green of its banner. */
+.incident, .run-entry {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     word-break: normal;
 }
@@ -360,6 +362,10 @@ select:disabled {
     display: block;
     color: #ff6b81;
     font-size: 0.9rem;
+}
+
+.run-entry .incident-title {
+    color: var(--accent-secondary);
 }
 
 .incident-desc {
