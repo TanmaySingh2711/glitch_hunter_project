@@ -44,7 +44,8 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 * **Replay verdicts:** reproduced / reproduced_state_only / not_reproduced / not_possible.
 * **Duplicates:** same game, detector, kind and site → the same incident, count raised.
 * **Dashboard:** every detection pauses testing; START TESTING resumes; the Bug
-  Tracker shows this session's bugs (Reset empties it; nothing is deleted).
+  Tracker shows this session's bugs (Reset, or refreshing the page, empties it;
+  nothing is deleted).
   Pick "Mario Game (Cleaned)" or "Mario Game (Bugged)" from the list.
 * **Clean-run report:** on the clean game, testing also stops when a run ends.
   A run that reaches the castle gets a run report in `run_reports/RUN-…/`

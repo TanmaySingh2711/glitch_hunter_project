@@ -272,9 +272,21 @@ def handle_connect() -> None:
 
 @socketio.on('disconnect')
 def handle_disconnect() -> None:
-    # A page refresh or a closed tab pauses testing. The game window stays
-    # as the user left it - only the user closes it (its X, or Reset).
+    # A closed tab or a dropped connection pauses testing. The game window
+    # stays as the user left it - only the user closes it (its X, or Reset).
+    # A refresh then resets everything: see page_opened.
     service.client_disconnected()
+
+
+@socketio.on('page_opened')
+def handle_page_opened() -> bool:
+    # A page that has just loaded - a refresh, a reopened tab - starts from a
+    # clean dashboard, exactly like Reset Dashboard: the session ends, the
+    # game window closes and the Bug Tracker starts empty (every incident
+    # stays saved). Answered only once the reset has run, so the page then
+    # reads the reset state rather than the old run's banners and reports.
+    service.reset()
+    return service.wait_idle()
 
 
 @socketio.on('start_testing')

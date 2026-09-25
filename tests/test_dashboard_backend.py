@@ -214,6 +214,20 @@ def test_socket_events_only_post_commands_to_the_game_thread(app_module, monkeyp
                       'stop_testing', 'reset', 'client_disconnected']
 
 
+def test_a_freshly_loaded_page_resets_the_dashboard_first(app_module, monkeypatch):
+    """A refresh is a Reset: the page is answered only once the reset ran."""
+    done = []
+    monkeypatch.setattr(app_module.service, "client_connected", lambda: None)
+    monkeypatch.setattr(app_module.service, "client_disconnected", lambda: None)
+    monkeypatch.setattr(app_module.service, "reset", lambda: done.append("reset"))
+    monkeypatch.setattr(app_module.service, "wait_idle",
+                        lambda timeout=5.0: done.append("waited") or True)
+    client = app_module.socketio.test_client(app_module.app)
+    assert client.emit('page_opened', callback=True) is True
+    assert done == ["reset", "waited"], "answered before the reset had run"
+    client.disconnect()
+
+
 def test_main_preloads_before_listening_and_warns_off_loopback(app_module, monkeypatch, caplog):
     import logging
     order = []

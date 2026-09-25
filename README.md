@@ -562,7 +562,7 @@ hash), so a report can never be attributed to the wrong game. Details:
 | **Live game view** | Watch the agent play, streamed to the browser; the game window waits minimised in the taskbar |
 | **Select Game Environment** | Switch between *Mario Game (Cleaned)* and *Mario Game (Bugged)* |
 | **START TESTING / Stop Testing** | Start or pause; Start always resumes from the same moment |
-| **Reset Dashboard** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays) |
+| **Reset Dashboard** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays). Refreshing or reopening the page does the same |
 | **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level Complete – No Bugs Found* with its run report (PDF, Markdown, final frame, GIF, and the whole report as a `.zip`) |
 | **Pause on every bug** | *Testing Stopped – Bug Found* banner with the bug's type, incident id, time, world position, severity, confidence, reproduction status and times seen |
 | **Bug Tracker** | Every bug found in this session, newest first; a repeat raises its *Seen* count instead of adding a duplicate |

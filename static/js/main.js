@@ -461,15 +461,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('connect', () => {
         if (hasConnectedBefore) {
+            // A dropped connection came back: nothing was reset, so the same
+            // session resumes on START TESTING.
             note('— reconnected, press START TESTING to resume —');
             setIdleUI();
             resetBtn.disabled = true;
             clearFrame();
+            refreshStatus();
+            refreshIncidents();
+            return;
         }
         hasConnectedBefore = true;
-        // Whatever the page thought, the server's state wins.
-        refreshStatus();
-        refreshIncidents();
+        // A freshly loaded page (a refresh, a reopened tab) starts from a clean
+        // dashboard, exactly like RESET DASHBOARD. The server answers once the
+        // reset has run; only then is its state read, so no old banner, report
+        // or bug is shown again.
+        socket.emit('page_opened', () => {
+            refreshStatus();
+            refreshIncidents();
+        });
     });
 
     // Info Modal Logic

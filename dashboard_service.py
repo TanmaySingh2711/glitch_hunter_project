@@ -29,7 +29,9 @@ WHAT THE USER CONTROLS
           stays saved in the store).
   Game    (the "Select Game Environment" list) a Reset, then the other game
           variant is loaded in place of this one; the next Start plays it.
-  A browser refresh / closed tab pauses, and changes nothing else.
+  Page    opening or refreshing the page is a Reset (app.py page_opened).
+          A closed tab or a dropped connection only pauses, and changes
+          nothing else.
 
 Pausing or closing never touches the agent's state: the session is a
 suspended generator, so nothing about the episode, the policy or its
