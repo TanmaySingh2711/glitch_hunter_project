@@ -28,7 +28,7 @@ flowchart TD
     subgraph measure["Measurement"]
         EXP["exploration/<br/>coverage · lifecycle · reachability · level_completion · config"]
         EVAL["evaluation/<br/>completion retention · Level-1 verification"]
-        REPT["reporting/<br/>incidents · evidence · reports · replay · game variants"]
+        REPT["reporting/<br/>incidents · evidence · reports · replay · run reports · game variants"]
     end
     GAME["mario_clean/ (mario_bugged/)<br/>vendored engine"]
     COMMON["common/<br/>logging · atomic file I/O · tool start-up"]
@@ -198,6 +198,8 @@ decision, not a refactor.
 | when a QA episode ends | `exploration/lifecycle.py` | `pytest tests/test_episode_lifecycle.py` |
 | what the dashboard shows | `dashboard_backend.py`, `static/`, `templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py` |
 | incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
+| the clean game's run report | `reporting/run_report.py`, `dashboard_backend._finish_run` | `pytest tests/test_run_report.py tests/test_dashboard_backend.py` |
+| `run_dashboard.bat`: speed on battery, centred windows | `desktop.py`, `game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |
 | the game itself (deliberate bugs) | `mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |
 | anything | - | `python tools/check.py` |

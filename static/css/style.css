@@ -300,6 +300,37 @@ select:disabled {
     color: var(--text-muted);
 }
 
+/* A clean-game run that ended: green when it reached the castle with no
+   bug, neutral grey otherwise (Mario died, time ran out, stuck). */
+.run-banner {
+    background: rgba(18, 22, 34, 0.94);
+    border-bottom-color: var(--text-muted);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.run-banner__title {
+    color: var(--text-main);
+}
+
+.run-banner--pass {
+    background: rgba(6, 36, 20, 0.94);
+    border-bottom-color: var(--accent-secondary);
+    box-shadow: 0 6px 24px rgba(57, 255, 136, 0.3);
+}
+
+.run-banner--pass .run-banner__title {
+    color: var(--accent-secondary);
+}
+
+#bug-terminal li.run-entry {
+    color: var(--text-main);
+    border: 1px solid rgba(57, 255, 136, 0.4);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    opacity: 1;
+}
+
 .incident {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     word-break: normal;

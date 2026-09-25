@@ -29,10 +29,27 @@ kept narrow.
   is a 404; `tests/test_dashboard_incidents.py` tries a dozen such requests.
   Files are sent with `X-Content-Type-Options: nosniff`, and the page puts
   incident text into the DOM with `textContent`, never as HTML.
+* **Run reports are served the same way.** `/runs/<id>/<file>` accepts only a
+  well-formed id of an existing clean-run report and a file name from a fixed
+  list (`reporting/run_report.RunReports.path`); `tests/test_run_report.py`
+  checks the refusals.
 * **A replay runs only what the bundle names from a closed list.** Incident
   reproduction starts a local Python process (`reporting/reproduce.py`) that
   reads the bundle; extra detectors are rebuilt only from a fixed registry
   (`reporting.events.detector_from_spec`), never from code in the bundle.
+
+## What run_dashboard.bat changes on this computer
+
+`app.py --desktop` (what `run_dashboard.bat` starts) keeps the dashboard at
+full speed on battery (`desktop.py`). It needs no administrator rights and
+changes only two things. Its own process opts out of Windows' power
+throttling. While the dashboard runs, the Windows power mode is set to *Best
+performance*. Your own power mode is put back when the dashboard stops (Ctrl+C,
+or closing its window). Windows only lets a normal user change the mode of
+the power source in use, so a battery mode changed while on battery is put
+back the next time the laptop is on battery, by a small background process
+that then exits. Until then the original values are kept in
+`.dashboard_power.json` in the project folder.
 
 ## Files it loads
 

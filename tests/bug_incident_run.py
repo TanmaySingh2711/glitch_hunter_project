@@ -21,7 +21,8 @@ import dashboard_backend as db
 
 
 def main(variant, store_dir, max_steps=700):
-    db.configure(db.DashboardConfig(game_variant=variant, incidents_dir=store_dir))
+    db.configure(db.DashboardConfig(game_variant=variant, incidents_dir=store_dir,
+                                    run_reports_dir=os.path.join(store_dir, "run_reports")))
     env, _model = db._ensure_global_env_and_model()
     pipe = db.ensure_pipeline()
     base = db._base(env)

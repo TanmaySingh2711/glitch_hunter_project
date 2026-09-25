@@ -255,6 +255,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 glitch_hunter_project/
 ├── app.py                    # Start here: the dashboard server (python app.py)
 ├── run_dashboard.bat         # Windows: double-click to start the dashboard
+├── desktop.py                # run_dashboard.bat's helpers: full speed on battery, centred windows
 ├── dashboard_service.py      # the single game thread (Start / Stop / Reset / pause on bug)
 ├── dashboard_backend.py      # loads the brain, runs the game, streams frames, captures incidents
 ├── custom_mario_env.py       # the game as a Gymnasium environment + built-in detectors
@@ -285,8 +286,8 @@ glitch_hunter_project/
 
 Not in git: the final 16M brain's four files (installed in Step 4 of
 Installation, into the project root, `checkpoints_qa/` and
-`exploration_data/`) and `incidents/`, which the dashboard creates for
-evidence.
+`exploration_data/`), and `incidents/` and `run_reports/`, which the
+dashboard creates for bug evidence and clean-run reports.
 
 ---
 
@@ -418,8 +419,11 @@ brain, or `mario_brain_checkpoint.zip (legacy_completion)` for the fallback.
 ### Start the dashboard
 
 **Windows, one click:** open the project folder in **File Explorer** and
-double-click **`run_dashboard.bat`**. A terminal window opens, and your
-browser opens **http://localhost:5000** after about 12 seconds.
+double-click **`run_dashboard.bat`**. A terminal window opens in the centre
+of the screen, and your browser opens **http://localhost:5000** (also
+centred) as soon as the dashboard is ready, usually within 10 seconds. While
+it runs, the laptop is kept at full speed even on battery (power mode *Best
+performance*); your own power mode comes back when the dashboard stops.
 
 > Double-clicking the file inside VS Code only opens it in the editor. From
 > VS Code's terminal, run `.\run_dashboard.bat` instead.
@@ -439,8 +443,9 @@ Then open **http://localhost:5000**.
 1. **Choose the game** in *Select Game Environment*: **Mario Game (Cleaned)**
    or **Mario Game (Bugged)**. Switching resets the dashboard and loads that
    game.
-2. Click **START TESTING**. A game window opens and the same view streams to
-   the browser. The Log Terminal shows every action the agent takes.
+2. Click **START TESTING**. The game streams to the browser, and the game
+   window waits minimised in the taskbar (click it there to watch it,
+   centred). The Log Terminal shows every action the agent takes.
 3. **When a bug is detected, testing stops.** A red *Testing Stopped – Bug
    Found* banner appears over the video with the bug's details, and the bug
    is added to the **Bug Tracker**.
@@ -451,8 +456,13 @@ Then open **http://localhost:5000**.
 5. Click **START TESTING** again to resume from the same moment.
 
 On the clean game the Bug Tracker should stay at *No bugs found yet…*: that is
-the expected, healthy result. On the bugged game with the 16M brain, the agent
-runs into all six benchmark bugs within its first episode.
+the expected, healthy result. **When a clean-game run ends, testing stops.**
+If Mario reached the castle, a green *Level Complete – No Bugs Found* banner
+appears with the run report (PDF, Markdown, final frame, GIF), which is also
+listed in the Bug Tracker; if he died, the banner says so. Press **Reset
+Dashboard**, then **START TESTING**, for a new run. On the bugged game with
+the 16M brain, the agent runs into all six benchmark bugs within its first
+episode; it plays on from run to run and stops only on bugs.
 
 ### Where the evidence is saved
 
@@ -467,6 +477,10 @@ Every incident gets its own folder, `incidents/INC-<date>-<time>-<id>/`:
 | `trajectory.json`, `context_frames.zip` | per-frame state and frames before the trigger |
 | `reproduction.json` | the replay result |
 | `manifest.json` | SHA-256 of every file |
+
+A clean-game run that reaches the castle gets a run report in
+`run_reports/RUN-<date>-<time>-<id>/`: `run.json` (the record), `final.png`,
+`finish.gif`, `report.md` and `report.pdf`.
 
 Evidence is never deleted or overwritten. **Reset Dashboard** only clears the
 Bug Tracker's view of the current session.
@@ -492,6 +506,8 @@ Get-NetTCPConnection -LocalPort 5000 -State Listen | ForEach-Object { Stop-Proce
 |---|---|
 | `--game mario_clean` / `--game mario_bugged` | the game to start on (default: clean) |
 | `--incidents-dir PATH` | save evidence somewhere other than `incidents/` |
+| `--run-reports-dir PATH` | save clean-run reports somewhere other than `run_reports/` |
+| `--desktop` | what `run_dashboard.bat` uses: full speed on battery too (see `desktop.py`) |
 | `--no-reproduce` | skip the replay step (faster; reports are still written) |
 | `--synthetic-probe X` | pipeline testing only: raise a clearly labelled *fake* bug at world x ≥ X |
 | `GLITCH_HUNTER_PORT` (env var) | use a port other than 5000 |
@@ -504,7 +520,7 @@ Get-NetTCPConnection -LocalPort 5000 -State Listen | ForEach-Object { Stop-Proce
 ```bash
 python tools/check.py                         # lint, types, tests, artifact hashes (a few minutes)
 python tools/check.py --full                  # + slow tests and the 90% coverage floor (~30 min)
-python tools/validate_incident_pipeline.py    # 36-check end-to-end test of the reporting pipeline (~30 s)
+python tools/validate_incident_pipeline.py    # 37-check end-to-end test of the reporting pipeline (~30 s)
 python train_agent.py --dry-run-resume        # shows what a training run would load; trains nothing
 ```
 
@@ -524,6 +540,7 @@ The repository contains **two copies of the same game**:
 | Content | the original game, unmodified | the same game + the 6 declared benchmark bugs |
 | Protected by | a pinned SHA-256 of its whole game tree: any edit fails the test suite | every difference must be declared in `INJECTED_BUGS.json`, marked in the code with `INJECTED BUG <id>`, and match a pinned diff hash |
 | Select it with | *Mario Game (Cleaned)* or `--game mario_clean` (default) | *Mario Game (Bugged)* or `--game mario_bugged` |
+| When a run ends | testing stops; reaching the castle writes a run report (*No Bugs Found* when no detector fired) | the agent plays on; testing stops only on bugs |
 
 **Why intentional bugs never go into the clean game.** The clean game is the
 reference that proves a report is real. A detector that fires on the clean
@@ -542,15 +559,16 @@ hash), so a report can never be attributed to the wrong game. Details:
 
 | Feature | What you can do |
 |---|---|
-| **Live game view** | Watch the agent play, streamed to the browser while the game window runs alongside |
+| **Live game view** | Watch the agent play, streamed to the browser; the game window waits minimised in the taskbar |
 | **Select Game Environment** | Switch between *Mario Game (Cleaned)* and *Mario Game (Bugged)* |
 | **START TESTING / Stop Testing** | Start or pause; Start always resumes from the same moment |
-| **Reset Dashboard** | End the session, close the game window, clear the log and the Bug Tracker (saved evidence stays) |
+| **Reset Dashboard** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays) |
+| **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level Complete – No Bugs Found* with its run report (PDF, Markdown, final frame, GIF) |
 | **Pause on every bug** | *Testing Stopped – Bug Found* banner with the bug's type, incident id, time, world position, severity, confidence, reproduction status and times seen |
 | **Bug Tracker** | Every bug found in this session, newest first; a repeat raises its *Seen* count instead of adding a duplicate |
 | **Evidence links** | PDF report, Markdown report, trigger frame, GIF, and the whole evidence bundle as a `.zip` |
 | **Log Terminal** | Every action the agent takes and its reward; detected bugs appear in red |
-| **Game window** | Closing it with its X just pauses testing; START TESTING reopens it |
+| **Game window** | Starts minimised in the taskbar; click it to watch it, centred. Closing it with its X pauses testing; START TESTING brings it back |
 | **Agent actions (i)** | The list of the agent's 10 actions |
 | **Offline** | Works with no internet connection |
 

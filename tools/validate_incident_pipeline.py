@@ -102,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
 
     protected_before = _protected()
     db.configure(db.DashboardConfig(game_variant=config.CLEAN_GAME_VARIANT,
-                                    synthetic_probes=tuple(args.probes), incidents_dir=out))
+                                    synthetic_probes=tuple(args.probes), incidents_dir=out,
+                                    run_reports_dir=os.path.join(out, "run_reports")))
     app.backend.notify = lambda e, p: events.append((e, p))
     svc = GameWindowService(app.backend, emit=lambda e, p: events.append((e, p)),
                             log=lambda *_a: None)
@@ -204,7 +205,22 @@ def main(argv: list[str] | None = None) -> int:
     # ── 5. the first site again, in a later episode: counted, stops again ─
     print("stage 5: a repeat sighting")
     svc.start_testing()
-    got = _wait(lambda: any(e == "incident_occurrence" for e, _p in events), args.timeout * 2)
+    # The clean game stops when a run ends (dashboard_service RUN END); START
+    # then plays the next run - which is where the first site is met again.
+    deadline = time.monotonic() + args.timeout * 2
+    runs_ended = 0
+    got = False
+    while time.monotonic() < deadline:
+        if any(e == "incident_occurrence" for e, _p in events):
+            got = True
+            break
+        if svc.run_result is not None and not svc.testing:
+            runs_ended += 1
+            svc.start_testing()
+            _wait(lambda: svc.run_result is None, 10)
+        time.sleep(0.05)
+    check("a finished clean run stopped testing, and START played the next run",
+          runs_ended >= 1 and any(e == "run_finished" for e, _p in events), runs_ended)
     check("a later episode's sighting was recorded as an occurrence", got)
     repeats = [p for e, p in events if e == "incident_occurrence"]
     check("a repeat stops testing again, on the same incident",

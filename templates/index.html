@@ -48,6 +48,13 @@
                     <div id="bug-banner-body"></div>
                     <p class="bug-banner__hint">The evidence is saved. Review it, then press START TESTING to continue.</p>
                 </section>
+                <!-- Shown only while the SERVER reports run_result: a clean-game run
+                     ended (dashboard_service RUN END). -->
+                <section id="run-banner" class="bug-banner run-banner hidden" role="status" aria-live="polite">
+                    <h2 id="run-banner-title" class="bug-banner__title run-banner__title"></h2>
+                    <div id="run-banner-body"></div>
+                    <p class="bug-banner__hint">Press RESET DASHBOARD, then START TESTING, for a new run.</p>
+                </section>
             </div>
         </main>
 

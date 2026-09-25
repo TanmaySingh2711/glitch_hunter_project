@@ -1279,6 +1279,9 @@ CLEAN_GAME_TREE_SHA256 = "b1f6b18467db398a41f7272c414d7f2a81ae4929b1c7a788dc572f
 # INCIDENT EVIDENCE AND REPORTING (Objective 3; see docs/OBJECTIVE3.md)
 # ═══════════════════════════════════════════════════════════════════════
 INCIDENTS_DIR = "incidents"
+# Clean-game runs that reach the castle get a run report here - the
+# "no bugs found" counterpart of an incident (reporting/run_report.py).
+RUN_REPORTS_DIR = "run_reports"
 
 # ─── HOW MUCH CONTEXT BEFORE A TRIGGER ───
 # Enough to hold the whole manoeuvre that led to the trigger AND the approach

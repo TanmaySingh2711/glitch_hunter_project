@@ -80,6 +80,12 @@ calibration_runs/
 # GIFs, reports and replays, one folder per incident. Runtime evidence, not
 # source - kept locally, read-only, and served by the dashboard.
 incidents/
+# The clean game's run reports ("no bugs found"; reporting/run_report.py).
+run_reports/
+# run_dashboard.bat's record of the power modes it must put back (desktop.py);
+# exists only until they are restored.
+.dashboard_power.json
+.dashboard_power.json.tmp
 
 # Release assets built by `python tools/final_brain.py bundle` (the final
 # 16M brain bundle is published as a GitHub Release asset, never committed).

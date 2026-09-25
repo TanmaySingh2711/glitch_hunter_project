@@ -102,6 +102,10 @@ class SessionRecorder:
         if jpeg:
             self._frames.append(schema.ContextFrame(self.session_step, self.episode_step, jpeg))
 
+    def recent_frames(self) -> tuple[bytes, ...]:
+        """The episode's last stream frames (JPEG), oldest first."""
+        return tuple(f.jpeg for f in self._frames)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # THE PIPELINE

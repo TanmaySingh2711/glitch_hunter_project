@@ -12,7 +12,8 @@ window or the env itself - see THE GAME WINDOW HAS ONE OWNER below.
 
 Incident evidence (Objective 3) is served read-only under /api/incidents and
 /incidents/<id>/<file>; see INCIDENT FILES below for how those requests are
-kept inside the incident store.
+kept inside the incident store. A clean-game run that reaches the castle gets
+a run report ("no bugs found"), served the same way under /runs/<id>/<file>.
 """
 from __future__ import annotations
 
@@ -218,6 +219,26 @@ def incident_file(incident_id: str, name: str) -> Response:
     return response
 
 
+@app.route('/runs/<run_id>/<name>')
+def run_file(run_id: str, name: str) -> Response:
+    """One file of a clean-game run report (reporting/run_report.py): the
+    same id + allow-listed-name rule as an incident's files."""
+    reports = backend.run_reports
+    if reports is None:
+        abort(404)
+    try:
+        path = reports.path(run_id, name)
+    except KeyError:
+        abort(404)
+    ext = os.path.splitext(name)[1].lower()
+    download = request.args.get('download') == '1'
+    mimetype = ("text/markdown" if download else "text/plain")         if ext == ".md" else _MIMETYPES.get(ext, "application/octet-stream")
+    response = send_file(path, mimetype=mimetype, as_attachment=download,
+                         download_name=f"{run_id}_{name}", max_age=0)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @socketio.on('connect')
 def handle_connect() -> None:
     # A (re)connecting client starts from "not running", and the dashboard
@@ -300,9 +321,31 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                          "first time each episode Mario reaches world x >= X (repeatable)")
     ap.add_argument("--incidents-dir", default=None,
                     help=f"where incident bundles are written (default: {config.INCIDENTS_DIR}/)")
+    ap.add_argument("--run-reports-dir", default=None,
+                    help=f"where clean-game run reports are written "
+                         f"(default: {config.RUN_REPORTS_DIR}/)")
     ap.add_argument("--no-reproduce", action="store_true",
                     help="skip the replay-based reproduction of each incident")
+    ap.add_argument("--desktop", action="store_true",
+                    help="what run_dashboard.bat uses: full speed on battery too "
+                         "(desktop.py), restored when the dashboard stops")
     return ap.parse_args(argv)
+
+
+def _desktop_mode() -> None:
+    """run_dashboard.bat's speed settings (desktop.py): this process is never
+    throttled, and the laptop's power mode is Best performance while the
+    dashboard runs - put back on exit, Ctrl+C or the console window's X."""
+    import atexit
+
+    import desktop
+    applied = desktop.boost_this_process()
+    if applied:
+        log.info("[POWER] this process: %s", ", ".join(applied))
+    guard = desktop.PowerModeGuard()
+    guard.start()
+    atexit.register(guard.stop)
+    desktop.install_console_close_handler(guard.stop)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -311,11 +354,14 @@ def main(argv: list[str] | None = None) -> None:
     backend.configure(DashboardConfig(
         game_variant=args.game, synthetic_probes=tuple(args.synthetic_probe),
         incidents_dir=args.incidents_dir or DashboardConfig().incidents_dir,
+        run_reports_dir=args.run_reports_dir or DashboardConfig().run_reports_dir,
         reproduce=not args.no_reproduce))
     if args.synthetic_probe:
         log.warning("SYNTHETIC PIPELINE TEST MODE: probes at x = %s. Incidents they produce are "
                     "pipeline tests, not game bugs, and are labelled so.", args.synthetic_probe)
     host, port = bind_address()
+    if args.desktop:
+        _desktop_mode()
 
     # ─── PRE-LOAD THE MODEL BEFORE ACCEPTING CONNECTIONS ───
     # PPO.load() onto the GPU is a real blocking call (1-3+ seconds of pure

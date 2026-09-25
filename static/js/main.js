@@ -121,18 +121,93 @@ document.addEventListener('DOMContentLoaded', () => {
         bugBannerBody.replaceChildren();
     }
 
+    // ─── CLEAN-GAME RUN END ───
+    // When a run of the clean game ends the server stops testing and says how
+    // (run_finished / /api/status run_result). A run that reached the castle
+    // also has a run report - "No Bugs Found" when no detector fired - listed
+    // in the Bug Tracker until Reset, like an incident.
+    const runBanner = document.getElementById('run-banner');
+    const runBannerTitle = document.getElementById('run-banner-title');
+    const runBannerBody = document.getElementById('run-banner-body');
+    const RUN_TITLES = {
+        level_complete: 'Level Complete',
+        death: 'Testing Stopped - Mario Died',
+        timeout: 'Testing Stopped - Time Ran Out',
+        safety_reset: 'Testing Stopped - The Agent Got Stuck',
+    };
+    const RUN_FILES = [
+        ['report.pdf', 'PDF report'], ['report.md', 'Markdown report'],
+        ['final.png', 'Final frame'], ['finish.gif', 'GIF'],
+    ];
+    let sessionRuns = [];      // this session's run reports, oldest first
+
+    function runLinks(report) {
+        const box = el('div', 'evidence-links');
+        for (const [name, label] of RUN_FILES) {
+            if ((report.available || []).includes(name)) {
+                const a = el('a', 'evidence-link', label);
+                a.href = `/runs/${encodeURIComponent(report.run_id)}/${encodeURIComponent(name)}`;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                box.appendChild(a);
+            } else {
+                const status = (report.renders || {})[name];
+                box.appendChild(el('span', 'evidence-pending',
+                    `${label}: ${status === 'failed' ? 'failed' : 'rendering...'}`));
+            }
+        }
+        return box;
+    }
+
+    function runCard(report) {
+        const li = el('li', 'bug-entry run-entry');
+        li.appendChild(el('strong', 'incident-title', `Run report - ${report.headline}`));
+        li.appendChild(el('p', 'incident-desc',
+            `${report.outcome} after ${report.agent_steps} agent steps (${report.run_id}).`));
+        li.appendChild(runLinks(report));
+        return li;
+    }
+
+    function rememberRun(report) {
+        if (!report) return;
+        const i = sessionRuns.findIndex((r) => r.run_id === report.run_id);
+        if (i >= 0) sessionRuns[i] = report; else sessionRuns.push(report);
+    }
+
+    function showRunBanner(result) {
+        const report = result.report;
+        const pass = !!report && report.bugs === 0;
+        runBannerTitle.textContent = (RUN_TITLES[result.end_reason] || 'Testing Stopped - Run Ended')
+            + (report ? ` - ${report.headline}` : '');
+        runBanner.classList.toggle('run-banner--pass', pass);
+        runBannerBody.replaceChildren();
+        if (report) {
+            runBannerBody.appendChild(el('p', 'incident-desc', pass
+                ? 'Mario reached the castle and none of the detectors fired. The run report is saved.'
+                : 'Mario reached the castle. The run report is saved.'));
+            runBannerBody.appendChild(runLinks(report));
+        }
+        runBanner.classList.remove('hidden');
+    }
+
+    function hideRunBanner() {
+        runBanner.classList.add('hidden');
+        runBannerBody.replaceChildren();
+    }
+
     // With nothing recorded the tracker mirrors the log: "start testing..."
     // until testing has started, then "No bugs found yet".
     let testingStarted = false;
     let lastIncidents = [];
     function renderHistory(incidents) {
         lastIncidents = incidents;
+        const runs = sessionRuns.map(runCard);
         if (!incidents.length) {
-            bugList.replaceChildren(el('li', 'placeholder',
-                testingStarted ? 'No bugs found yet...' : 'start testing...'));
+            bugList.replaceChildren(...(runs.length ? runs : [el('li', 'placeholder',
+                testingStarted ? 'No bugs found yet...' : 'start testing...')]));
             return;
         }
-        bugList.replaceChildren(...incidents.map((i) => incidentCard(i, true)));
+        bugList.replaceChildren(...incidents.map((i) => incidentCard(i, true)), ...runs);
         // Keep the banner's links current as its reports finish rendering.
         if (bannerIds.length) {
             const current = incidents.filter((i) => bannerIds.includes(i.incident_id));
@@ -163,6 +238,13 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 hideBugBanner();
             }
+            if (s.run_result) {
+                rememberRun(s.run_result.report);
+                showRunBanner(s.run_result);
+                renderHistory(lastIncidents);
+            } else {
+                hideRunBanner();
+            }
             if (!s.testing) setIdleUI();
         } catch (err) {
             console.warn('could not load status', err);
@@ -177,6 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
         resetBtn.disabled = false;
         startBtn.textContent = 'Testing...';
         hideBugBanner();     // the server clears bug_found on resume, and says so
+        hideRunBanner();     // ...and run_result: Start plays the next run
         setTestingStarted(true);
 
         const logPlaceholder = document.getElementById('log-placeholder');
@@ -226,7 +309,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // (the server starts a new session list; every incident stays saved).
         logTerminal.replaceChildren(makePlaceholder('p', 'log-placeholder'));
         hideBugBanner();
+        hideRunBanner();
         lastIncidents = [];
+        sessionRuns = [];
         setTestingStarted(false);
 
         clearFrame();
@@ -314,6 +399,9 @@ document.addEventListener('DOMContentLoaded', () => {
         error: '— testing paused after an error (see the server console) —',
         bug_found: '— BUG FOUND: testing stopped. The evidence is saved; press START TESTING to continue —',
         capture_failed: '— an anomaly was detected but its evidence could not be saved (see the server console) —',
+        level_complete: '— LEVEL COMPLETE: testing stopped. Press RESET DASHBOARD, then START TESTING, for a new run —',
+        mario_died: '— MARIO DIED: testing stopped. Press RESET DASHBOARD, then START TESTING, for a new run —',
+        run_ended: '— the run ended: testing stopped. Press RESET DASHBOARD, then START TESTING, for a new run —',
     };
     socket.on('testing_paused', (data) => {
         const reason = (data && data.reason) || '';
@@ -327,6 +415,23 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshIncidents();
     });
     socket.on('bug_cleared', hideBugBanner);
+    socket.on('run_finished', (result) => {
+        if (!result) return;
+        rememberRun(result.report);
+        showRunBanner(result);
+        setIdleUI();
+        renderHistory(lastIncidents);
+    });
+    socket.on('run_cleared', hideRunBanner);
+    socket.on('run_report_updated', (report) => {     // its GIF/MD/PDF finished rendering
+        if (!report || !sessionRuns.some((r) => r.run_id === report.run_id)) return;
+        rememberRun(report);
+        renderHistory(lastIncidents);
+        if (!runBanner.classList.contains('hidden')) {
+            runBannerBody.querySelectorAll('.evidence-links').forEach((box) =>
+                box.replaceWith(runLinks(report)));
+        }
+    });
     socket.on('incident_updated', refreshIncidents);      // a report finished rendering
     socket.on('incident_occurrence', (inc) => {
         note(`— seen again: ${inc.title} (${inc.incident_id}), now ${inc.occurrences}x —`);

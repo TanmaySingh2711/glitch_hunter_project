@@ -30,9 +30,12 @@ from common.fileio import sha256_of
 from custom_mario_env import PROJECT_ROOT, CustomMarioEnv, release_game_variant, wrap_observation
 from exploration import config
 from exploration import coverage as coverage_mod
+from exploration.lifecycle import classify_end
+from reporting import schema
 from reporting.events import SyntheticProbe
 from reporting.pipeline import IncidentPipeline, SessionRecorder
 from reporting.provenance import objective2_record, session_provenance
+from reporting.run_report import RunReports, build_run_record, new_run_id
 from reporting.store import IncidentStore
 
 log = logging.getLogger(__name__)
@@ -53,6 +56,7 @@ class DashboardConfig:
     # the reporting pipeline, and everything they produce is labelled so.
     synthetic_probes: tuple[int, ...] = ()
     incidents_dir: str = os.path.join(PROJECT_ROOT, config.INCIDENTS_DIR)
+    run_reports_dir: str = os.path.join(PROJECT_ROOT, config.RUN_REPORTS_DIR)
     reproduce: bool = True
 
 
@@ -62,6 +66,7 @@ _global_model: PPO | None = None
 _brain_path: str | None = None
 _reward_mode = "legacy_completion"
 _pipeline: IncidentPipeline | None = None
+_run_reports: RunReports | None = None
 _provenance: dict[str, Any] = {}
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -238,7 +243,9 @@ def ensure_pipeline(notify: Callable[[str, dict[str, Any]], Any] | None = None
                     ) -> IncidentPipeline:
     """The incident pipeline, created once (after the env and brain, whose
     identity every incident records)."""
-    global _pipeline, _provenance
+    global _pipeline, _provenance, _run_reports
+    if _run_reports is None or _run_reports.root != _config.run_reports_dir:
+        _run_reports = RunReports(_config.run_reports_dir, notify=notify)
     if _pipeline is None:
         _provenance = session_provenance(_brain_path, _reward_mode, _config.game_variant)
         _pipeline = IncidentPipeline(IncidentStore(_config.incidents_dir), notify=notify,
@@ -268,13 +275,14 @@ def describe() -> dict[str, Any]:
 
 
 def open_agent_window() -> str:
-    """Ensures the env/model exist and the game window is visible and
-    focused; returns what open_window() had to do. Called on every 'Start
-    Testing' click (not just the first), so the window reliably comes to the
-    front even if it's buried behind other windows from earlier."""
+    """Ensures the env/model exist and the game window is in the taskbar;
+    returns what open_window() had to do. Called on every 'Start Testing'
+    click: a closed or hidden window appears there minimised (the live view
+    is on the dashboard; clicking the taskbar button shows the window,
+    centred), and one the user already has open is left as it is."""
     with env_lock:
         env, _model = _ensure_global_env_and_model()
-        return _base(env).open_window()
+        return _base(env).open_window(minimized=True)
 
 
 def close_agent_window() -> None:
@@ -307,6 +315,10 @@ class DashboardBackend:
     @property
     def pipeline(self) -> IncidentPipeline | None:
         return _pipeline
+
+    @property
+    def run_reports(self) -> RunReports | None:
+        return _run_reports
 
     def describe(self) -> dict[str, Any]:
         return describe()
@@ -423,15 +435,49 @@ def _capture_incidents(env: gym.Env[Any, Any], recorder: SessionRecorder) -> lis
     return out
 
 
+def _finish_run(env: gym.Env[Any, Any], info: dict[str, Any], recorder: SessionRecorder,
+                started: Any, furthest_x: int, bugs: list[dict[str, Any]]) -> dict[str, Any]:
+    """How a clean-game run ended - and, when it reached the castle, its
+    run report (reporting/run_report.py): the "no bugs found" counterpart of
+    an incident. A report that cannot be written is logged, never raised: the
+    run has ended either way."""
+    end_reason = str(info.get('episode_end_reason')
+                     or classify_end(info, bool(info.get('safety_reset_reason'))))
+    out: dict[str, Any] = {'end_reason': end_reason, 'report': None}
+    if end_reason != 'level_complete' or _run_reports is None:
+        return out
+    try:
+        base = _base(env)
+        record = build_run_record(
+            run_id=new_run_id(schema.utc_now()), created=schema.utc_now(), started=started,
+            session_id=recorder.session_id, env_episode_index=recorder.env_episode_index,
+            agent_steps=recorder.episode_step, end_reason=end_reason, info=info,
+            furthest_x=furthest_x, bugs=bugs, reward_mode=_reward_mode, provenance=_provenance)
+        size = tuple(getattr(base.c_module, 'SCREEN_SIZE', (800, 600)))
+        out['report'] = _run_reports.write(record, base.render_scaled((int(size[0]), int(size[1]))),
+                                           recorder.recent_frames())
+        log.info("[RUN] %s: %s after %d agent steps -> %s", record['run_id'],
+                 out['report']['headline'], recorder.episode_step, _run_reports.root)
+    except Exception:
+        log.exception("could not write the run report")
+    return out
+
+
 def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     """An endless session: one dict per agent step - the JPEG frame, the
     action, the step number, the reward, the log line and what became of any
     anomaly the step detected - resetting the episode whenever it ends. The
-    caller owns the pacing."""
+    caller owns the pacing.
+
+    On the clean game the step that ends an episode also carries 'run_end'
+    (why it ended, and the run report when Mario reached the castle), so the
+    dashboard can stop there. The bugged game carries none and plays on."""
     env, model = _ensure_global_env_and_model()
     obs = _reset_obs(env)
     recorder = SessionRecorder()
     recorder.begin_episode(int(getattr(_base(env), "episode_index", 0)))
+    run_started, furthest_x = schema.utc_now(), 0
+    run_bugs: dict[str, dict[str, Any]] = {}
 
     step_count = 0
     fps_window_start = time.perf_counter()
@@ -455,6 +501,15 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
         # The GIF's context is these same stream frames: no second capture,
         # so the evidence costs the game loop nothing per step.
         recorder.push_frame(frame_bytes)
+        for o in incidents:
+            if o.get("status") in ("new", "duplicate") and o.get("summary"):
+                run_bugs[str(o["incident_id"])] = o["summary"]
+        rect = info.get('mario_rect')
+        if rect:
+            furthest_x = max(furthest_x, int(rect[0]))
+        run_end = (_finish_run(env, info, recorder, run_started, furthest_x,
+                               list(run_bugs.values()))
+                   if done and _config.game_variant == config.CLEAN_GAME_VARIANT else None)
 
         # ─── SERVER-SIDE FPS INSTRUMENTATION ───
         # Logs the actual measured frame rate every ~2 seconds, so "is it
@@ -468,7 +523,7 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
             fps_window_start = now
             fps_window_frames = 0
 
-        yield {
+        item: dict[str, Any] = {
             'frame': frame_bytes,
             'action': action_val,
             'step': step_count,
@@ -476,7 +531,12 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
             'log': step_log_line(step_count, action_val, float(reward), info),
             'incidents': incidents,
         }
+        if run_end is not None:
+            item['run_end'] = run_end
+        yield item
 
         if done:
             obs = _reset_obs(env)
             recorder.begin_episode(int(getattr(_base(env), "episode_index", 0)))
+            run_started, furthest_x = schema.utc_now(), 0
+            run_bugs = {}

@@ -46,6 +46,12 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 * **Dashboard:** every detection pauses testing; START TESTING resumes; the Bug
   Tracker shows this session's bugs (Reset empties it; nothing is deleted).
   Pick "Mario Game (Cleaned)" or "Mario Game (Bugged)" from the list.
+* **Clean-run report:** on the clean game, testing also stops when a run ends.
+  A run that reaches the castle gets a run report in `run_reports/RUN-…/`
+  (`reporting/run_report.py`): `run.json`, `final.png`, `finish.gif`,
+  `report.md`, `report.pdf` - "No Bugs Found" when no detector fired. It
+  covers that run and those 12 detectors only; it does not prove the game
+  bug-free.
 
 ## The six benchmark bugs (`mario_bugged/INJECTED_BUGS.json`)
 
@@ -78,7 +84,7 @@ diff is pinned by hash; `mario_clean` stays byte-identical to its pin.
 | Clean game, 101 brain episodes + dashboard runs | **0 false alarms** |
 | Bugged game, dashboard route | all 6 bugs stop testing, each **reproduced**, GIF/MD/PDF done |
 | Bugged game, 40 sampled episodes | caught every clip deeper than 6 px; never fired without the bug |
-| Pipeline validation tool | 36/36 checks |
+| Pipeline validation tool | 37/37 checks |
 | Full quality gate | lint, types, 730 tests, coverage 90.64%, Objective-2 artifacts unchanged |
 
 ## Problems found and fixed

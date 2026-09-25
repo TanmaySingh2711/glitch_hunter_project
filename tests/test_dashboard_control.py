@@ -31,6 +31,9 @@ class FakeBackend:
         self.close_requested = False
         self.sessions = 0
         self.step_delay = 0.0
+        self.run_end_at = None           # step on which each run ends (clean game)
+        self.run_end = {'end_reason': 'level_complete',
+                        'report': {'run_id': 'RUN-1', 'headline': 'No Bugs Found'}}
         self.lock = threading.Lock()
 
     def _rec(self, name):
@@ -74,7 +77,10 @@ class FakeBackend:
                 n += 1
                 if self.step_delay:
                     time.sleep(self.step_delay)
-                yield {'frame': b'', 'log': f"session {sid} step {n}"}
+                item = {'frame': b'', 'log': f"session {sid} step {n}"}
+                if self.run_end_at and n % self.run_end_at == 0:
+                    item['run_end'] = self.run_end
+                yield item
         return run()
 
     def stop_audio(self):
@@ -260,6 +266,43 @@ def test_reset_ends_the_session_and_the_next_start_is_fresh(svc):
     assert svc.fake.sessions == 2 and last_log(svc).startswith("session 2 step")
 
 
+def test_a_finished_clean_run_stops_testing_and_keeps_its_result(svc):
+    svc.fake.run_end_at = 3
+    svc.start_testing()
+    assert wait_for(lambda: not svc.testing and svc.steps >= 3)
+    svc.wait_idle()
+    assert svc.steps == 3, "testing went on after the run ended"
+    assert svc.pause_reason == 'level_complete'
+    assert svc.status()['run_result'] == svc.fake.run_end
+    assert ('testing_paused', {'reason': 'level_complete'}) in svc.events
+    assert ('run_finished', svc.fake.run_end) in svc.events
+
+
+def test_start_after_a_finished_run_plays_the_next_run(svc):
+    svc.fake.run_end_at = 3
+    svc.start_testing()
+    assert wait_for(lambda: not svc.testing and svc.steps >= 3)
+    svc.start_testing()
+    run_for(svc, 1)
+    assert svc.run_result is None and ('run_cleared', {}) in svc.events
+    assert svc.fake.sessions == 1 and last_log(svc).startswith("session 1 step")
+
+
+def test_reset_after_a_finished_run_clears_it_and_the_next_start_is_fresh(svc):
+    svc.fake.run_end = {'end_reason': 'death', 'report': None}
+    svc.fake.run_end_at = 2
+    svc.start_testing()
+    assert wait_for(lambda: not svc.testing and svc.steps >= 2)
+    svc.wait_idle()
+    assert svc.pause_reason == 'mario_died'
+    svc.reset()
+    svc.wait_idle()
+    assert svc.run_result is None and svc.status()['run_result'] is None
+    svc.start_testing()
+    run_for(svc, 1)
+    assert svc.fake.sessions == 2
+
+
 def test_switching_the_game_resets_first_then_loads_the_other_game(svc):
     svc.start_testing()
     run_for(svc, 3)
@@ -386,6 +429,31 @@ def test_real_window_centres_on_create_and_reshow_only(env, monkeypatch):
     assert env.game.screen is pg.display.get_surface()
     info = env.step(1)[4]
     assert info['mario_rect'][0] >= x, "the episode restarted"
+
+
+def test_start_puts_the_window_in_the_taskbar_minimised(env):
+    """The dashboard's Start: a created or re-shown window goes to the
+    taskbar, minimised and inactive; one already open is left alone."""
+    import sys
+    if not _can_hide(env):
+        pytest.skip("this video driver cannot hide a window")
+    win32 = sys.platform == 'win32' and bool(game_window._hwnd())
+    try:
+        env.hide_window()
+        assert env.open_window(minimized=True) == 'shown'
+        assert env.window_state() == 'open'
+        if win32:
+            assert game_window.is_minimized(), "the re-shown window is not minimised"
+        assert env.open_window(minimized=True) == 'unchanged'
+        env.close_window()
+        assert env.open_window(minimized=True) == 'created'
+        if win32:
+            assert game_window.is_minimized(), "the new window is not minimised"
+        assert env.game.screen is pg.display.get_surface()
+    finally:
+        env.open_window()                # restored for the tests after this one
+    if win32:
+        assert not game_window.is_minimized()
 
 
 def test_the_sdl_window_wrapper_outlives_every_call(env):

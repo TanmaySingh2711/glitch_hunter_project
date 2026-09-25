@@ -34,6 +34,7 @@ _log = logging.getLogger(__name__)
 
 MONITOR_DEFAULTTONEAREST = 2
 SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
+SW_SHOWMINNOACTIVE, SW_RESTORE = 7, 9
 
 
 def centered_origin(area: Area, size: tuple[int, int]) -> tuple[int, int]:
@@ -201,11 +202,50 @@ def show() -> bool:
     try:
         w.show()
         if is_minimized():
-            w.restore()
+            _restore(w)
         return True
     except Exception:
         _log.debug("window-manager call failed", exc_info=True)
         return False
+
+
+def _restore(w: Any) -> None:
+    """Un-minimises. On Windows through Win32 itself: a window minimised by
+    show_minimized() is one SDL may not know about yet (it learns from the
+    event pump), and SDL_RestoreWindow does nothing to a window it believes
+    is not minimised."""
+    hwnd = _hwnd()
+    if sys.platform == 'win32' and hwnd:
+        _user32().ShowWindow(hwnd, SW_RESTORE)
+    else:
+        w.restore()
+
+
+def show_minimized() -> bool:
+    """Puts a hidden window in the taskbar, minimised, without activating
+    it - no flash on screen, no focus taken from the browser. Clicking it in
+    the taskbar restores it where it was placed (centred, by the caller)."""
+    hwnd = _hwnd()
+    if hwnd is None:
+        return False
+    if sys.platform == 'win32':
+        try:
+            _user32().ShowWindow(hwnd, SW_SHOWMINNOACTIVE)
+            return True
+        except Exception:
+            _log.debug("window-manager call failed", exc_info=True)
+            return False
+    else:
+        w = _sdl_window()
+        if w is None:
+            return False
+        try:
+            w.show()
+            w.minimize()
+            return True
+        except Exception:
+            _log.debug("window-manager call failed", exc_info=True)
+            return False
 
 
 def is_minimized() -> bool:

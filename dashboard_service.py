@@ -17,8 +17,9 @@ free: there is exactly one frame loop, and nothing is ever held across a
 sleep, because the loop's only wait is on its own command queue.
 
 WHAT THE USER CONTROLS
-  Start   show the window (created or re-shown centred; an already-open one
-          is only brought forward) and resume the SAME session.
+  Start   put the window in the taskbar, minimised (created or re-shown,
+          centred for when the user clicks it; an already-open one is left
+          as it is) and resume the SAME session.
   Stop    pause. The window stays exactly as it is - never minimised,
           hidden or closed.
   X       (the window's own close button, while running or paused) hide the
@@ -42,6 +43,14 @@ step - the evidence is already on disk by then
 `bug_found` until the user presses Start (resume) or Reset. Nothing resumes
 by itself, not even when the reports finish rendering. A later sighting of an
 incident already recorded is counted but does not pause.
+
+RUN END (clean game only). When a run of the clean game ends - Mario reaches
+the castle, dies, runs out of time, or the agent gets stuck - testing stops
+and the result is kept as `run_result` until the user presses Start or Reset.
+A run that reached the castle also has its run report ("no bugs found" when
+no detector fired; reporting/run_report.py). Start plays the next run; Reset
+clears the dashboard first. The bugged game plays on from one run to the
+next, as before, and stops only on bugs.
 """
 from __future__ import annotations
 
@@ -55,6 +64,14 @@ from typing import Any, Protocol
 THREAD_NAME = "game-window"
 IDLE_PUMP_S = 0.05          # event-pump period while paused: keeps the window responsive
 TARGET_FRAME_S = 1.0 / 60.0
+# Windows' default timer tick. A timed wait on a queue rounds UP to it
+# (measured: an 18 ms wait took 31 ms), and time.monotonic() only advances in
+# steps of it (GetTickCount64) - so step times read as 0, 15.6 or 31.2 ms and
+# the dashboard ran at about a third of game speed instead of the intended
+# half. Pacing therefore uses time.perf_counter() (0.1 us) and _next_command.
+TIMER_TICK_S = 0.0156
+CLICK_POLL_S = 0.004        # while sleeping to a step: how often a click is checked for
+_clock = time.perf_counter
 
 _log = logging.getLogger(__name__)
 
@@ -98,6 +115,8 @@ class GameWindowService:
         self.steps = 0
         # The incident(s) that stopped testing, until the user resumes or resets.
         self.bug_found: list[dict[str, Any]] | None = None
+        # How the last clean-game run ended (and its report), until Start or Reset.
+        self.run_result: dict[str, Any] | None = None
         self.pause_reason: str | None = None
 
     # ── called from any thread ────────────────────────────────────────────
@@ -149,7 +168,7 @@ class GameWindowService:
         not, why it last paused, and the bug that stopped it, if any."""
         return {"testing": self.testing, "steps": self.steps,
                 "pause_reason": None if self.testing else self.pause_reason,
-                "bug_found": self.bug_found}
+                "bug_found": self.bug_found, "run_result": self.run_result}
 
     # ── the game thread ───────────────────────────────────────────────────
     def _run(self) -> None:
@@ -162,12 +181,8 @@ class GameWindowService:
         self._ready.set()
         next_step_at = 0.0
         while True:
-            wait = (max(0.0, next_step_at - time.monotonic()) if self.testing
-                    else IDLE_PUMP_S)
-            try:
-                cmd = self._commands.get(timeout=wait)
-            except queue.Empty:
-                cmd = None
+            cmd = (self._next_command(next_step_at) if self.testing
+                   else self._command_within(IDLE_PUMP_S))
             if cmd == 'shutdown':
                 self._close_session()
                 return
@@ -177,13 +192,41 @@ class GameWindowService:
             if cmd is not None:
                 self._handle(cmd)
                 continue
-            if self.testing and time.monotonic() >= next_step_at:
-                t0 = time.monotonic()
+            if self.testing and _clock() >= next_step_at:
+                t0 = _clock()
                 self._step()
                 # Half speed, as before: the next step waits as long again
                 # as this one took (or a 60 fps frame, whichever is longer).
-                next_step_at = t0 + 2 * max(time.monotonic() - t0, TARGET_FRAME_S)
+                next_step_at = t0 + 2 * max(_clock() - t0, TARGET_FRAME_S)
             self._check_close_button()
+
+    def _command_within(self, timeout: float) -> Command | None:
+        try:
+            return self._commands.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def _next_command(self, deadline: float) -> Command | None:
+        """The next command, or None when it is time for the next step.
+
+        A timed queue wait can overrun by a whole timer tick, so it is used
+        only while more than two ticks remain; the rest is slept in short
+        time.sleep slices (high-resolution on Windows since Python 3.11) with
+        the queue checked after each. Steps land on time, and a click still
+        lands before the next step, within CLICK_POLL_S."""
+        while True:
+            remaining = deadline - _clock()
+            if remaining > 2 * TIMER_TICK_S:
+                cmd = self._command_within(remaining - 2 * TIMER_TICK_S)
+            else:
+                if remaining > 0:
+                    time.sleep(min(remaining, CLICK_POLL_S))
+                try:
+                    cmd = self._commands.get_nowait()
+                except queue.Empty:
+                    cmd = None
+            if cmd is not None or _clock() >= deadline:
+                return cmd
 
     def _handle(self, cmd: str) -> None:
         if cmd == 'start':
@@ -199,6 +242,7 @@ class GameWindowService:
                     # itself stays on disk and in the history.
                     self.bug_found = None
                     self.emit('bug_cleared', {})
+                self._clear_run_result()
             except Exception:
                 _log.exception("could not start testing")
                 self._pause('error', notify=True)
@@ -211,6 +255,7 @@ class GameWindowService:
             if self.bug_found is not None:
                 self.bug_found = None
                 self.emit('bug_cleared', {})
+            self._clear_run_result()
             self.pause_reason = 'reset'
             try:
                 self.backend.begin_incident_session()
@@ -237,7 +282,7 @@ class GameWindowService:
         "connect" - the bug is still why it is not running."""
         was_testing = self.testing
         self.testing = False
-        if was_testing or self.bug_found is None:
+        if was_testing or (self.bug_found is None and self.run_result is None):
             self.pause_reason = reason
         try:
             self.backend.stop_audio()
@@ -277,6 +322,24 @@ class GameWindowService:
         if item.get('log'):
             self.emit('agent_log', {'log': item['log']})
         self._handle_incidents(item.get('incidents') or ())
+        if item.get('run_end'):
+            self._handle_run_end(item['run_end'])
+
+    def _handle_run_end(self, run_end: dict[str, Any]) -> None:
+        """A clean-game run ended: stop, and keep how it ended until the user
+        starts the next run or resets. A bug found on the same step keeps the
+        bug as the pause reason; the run result is still recorded."""
+        self.run_result = run_end
+        reason = {'level_complete': 'level_complete', 'death': 'mario_died',
+                  'timeout': 'mario_died'}.get(str(run_end.get('end_reason')), 'run_ended')
+        if self.testing:
+            self._pause(reason, notify=True)
+        self.emit('run_finished', run_end)
+
+    def _clear_run_result(self) -> None:
+        if self.run_result is not None:
+            self.run_result = None
+            self.emit('run_cleared', {})
 
     def _handle_incidents(self, outcomes: Any) -> None:
         """Every recorded bug sighting stops testing, here, before another

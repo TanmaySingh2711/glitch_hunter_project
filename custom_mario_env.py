@@ -897,21 +897,31 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
     # Three states: OPEN, HIDDEN (hide_window: off screen, nothing destroyed)
     # and CLOSED (close_window: destroyed). open_window() centres the window
     # when it creates or re-shows it, and never re-centres one already open.
+    # open_window(minimized=True) - the dashboard's Start - puts a created or
+    # re-shown window in the taskbar instead, minimised and inactive; clicking
+    # it there restores it at that centred position.
     # ═══════════════════════════════════════════════════════════════════
     def window_state(self) -> str:
         if pg.display.get_surface() is None:
             return 'closed'
         return 'hidden' if self._window_hidden else 'open'
 
-    def open_window(self) -> str:
+    def open_window(self, minimized: bool = False) -> str:
         """Makes the game window visible and returns what it had to do:
         'created' (it was closed), 'shown' (it was hidden) or 'focused' (it
-        was already open - only restored if minimised, never moved)."""
+        was already open - only restored if minimised, never moved).
+
+        minimized=True: a created or re-shown window goes to the taskbar,
+        minimised and inactive, centred for when it is restored; one already
+        open is left exactly as the user has it ('unchanged')."""
         state = self.window_state()
+        if minimized and state == 'open':
+            return 'unchanged'
         if state == 'closed':
             game_window.request_centered_creation()
             pg.display.init()
-            new_surface = pg.display.set_mode(self.c_module.SCREEN_SIZE)
+            new_surface = pg.display.set_mode(self.c_module.SCREEN_SIZE,
+                                              pg.HIDDEN if minimized else 0)
             pg.display.set_caption(self.setup_module.ORIGINAL_CAPTION)
             # <variant>/data/states/level1.py reads setup.SCREEN directly
             # (not pg.display.get_surface()), so that module-level reference
@@ -925,12 +935,16 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
             self.game.screen = new_surface
             game_window.center_on_current_display()
         elif state == 'hidden':
-            game_window.show()
+            if not minimized:
+                game_window.show()
             game_window.center_on_current_display()
         else:
             game_window.show()          # restores it if the user minimised it
         self._window_hidden = False
-        game_window.bring_to_front()
+        if minimized:
+            game_window.show_minimized()
+        else:
+            game_window.bring_to_front()
         return {'closed': 'created', 'hidden': 'shown'}.get(state, 'focused')
 
     def hide_window(self) -> None:
