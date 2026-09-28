@@ -80,6 +80,9 @@ MIN_IDLE_S = 0.004          # always this much free time after a step, for click
 # half. Pacing therefore uses time.perf_counter() (0.1 us) and _next_command.
 TIMER_TICK_S = 0.0156
 CLICK_POLL_S = 0.004        # while sleeping to a step: how often a click is checked for
+# The live panel (AI mode, action, progress, coverage) is sent every this many
+# steps - 10 updates a second at the dashboard's pace - and on every stop.
+TELEMETRY_EVERY = 3
 _clock = time.perf_counter
 
 _log = logging.getLogger(__name__)
@@ -127,6 +130,8 @@ class GameWindowService:
         # How the last clean-game run ended (and its report), until Start or Reset.
         self.run_result: dict[str, Any] | None = None
         self.pause_reason: str | None = None
+        # The last live-panel values the session produced (None before its first step).
+        self.telemetry: dict[str, Any] | None = None
 
     # ── called from any thread ────────────────────────────────────────────
     def start(self, timeout: float | None = None) -> None:
@@ -177,7 +182,8 @@ class GameWindowService:
         not, why it last paused, and the bug that stopped it, if any."""
         return {"testing": self.testing, "steps": self.steps,
                 "pause_reason": None if self.testing else self.pause_reason,
-                "bug_found": self.bug_found, "run_result": self.run_result}
+                "bug_found": self.bug_found, "run_result": self.run_result,
+                "telemetry": self.telemetry}
 
     # ── the game thread ───────────────────────────────────────────────────
     def _run(self) -> None:
@@ -308,6 +314,7 @@ class GameWindowService:
                 _log.debug("session close failed", exc_info=True)
             self.session = None
             self.steps = 0
+            self.telemetry = None
 
     def _step(self) -> None:
         if self.session is None:          # reset between the check and the step
@@ -330,6 +337,13 @@ class GameWindowService:
         self.emit('video_frame', {'frame': item['frame']})
         if item.get('log'):
             self.emit('agent_log', {'log': item['log']})
+        if item.get('telemetry') is not None:
+            self.telemetry = item['telemetry']
+            # Every few steps, and always on a step that is about to stop
+            # testing, so a stopped panel shows the step it stopped on.
+            if (self.steps % TELEMETRY_EVERY == 0 or item.get('incidents')
+                    or item.get('run_end')):
+                self.emit('telemetry', {**item['telemetry'], 'session_steps': self.steps})
         self._handle_incidents(item.get('incidents') or ())
         if item.get('run_end'):
             self._handle_run_end(item['run_end'])

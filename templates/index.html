@@ -3,108 +3,418 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="A trained PPO agent plays a Super Mario Bros clone, streamed live with a bug tracker.">
-    <title>The Glitch Hunter</title>
+    <meta name="description" content="Glitch Hunter: an AI agent plays Super Mario Bros Level 1-1, hunts for bugs and reports them automatically.">
+    <title>Glitch Hunter · Autonomous AI game tester</title>
     <!-- Inline SVG favicon: without one the browser requests /favicon.ico on
          every load and the server logs a 404 each time. Inline keeps it to
          zero extra requests and zero extra files. -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#127918;</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='11' fill='none' stroke='%237c9cff' stroke-width='3'/><circle cx='16' cy='16' r='3.5' fill='%23f87171'/><path d='M16 1v7M16 24v7M1 16h7M24 16h7' stroke='%237c9cff' stroke-width='3'/></svg>">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version }}">
 </head>
 <body>
-    <div class="dashboard-container">
-        <!-- Left: Control Panel -->
-        <aside class="panel control-panel">
-            <h1>The Glitch Hunter</h1>
-            <div class="control-group">
-                <!-- Choosing the other game resets the dashboard and loads it
-                     (switch_game). The selection shown is the server's, from
-                     /api/status, never assumed. -->
-                <label for="env-select">Select Game Environment</label>
-                <select id="env-select">
-                    <option value="mario_clean">Mario Game (Cleaned)</option>
-                    <option value="mario_bugged">Mario Game (Bugged)</option>
-                </select>
-                <p id="synthetic-badge" class="synthetic-badge hidden">SYNTHETIC PIPELINE TEST MODE - probe events are not game bugs</p>
-            </div>
-            <div class="button-group">
-                <button id="start-btn" class="btn-primary" type="button">START TESTING</button>
-                <button id="stop-btn" class="btn-secondary" type="button" disabled>Stop Testing</button>
-                <button id="reset-btn" class="btn-secondary" type="button" disabled>Reset Dashboard</button>
-            </div>
-
-            <div class="info-button-row">
-                <button id="info-btn" class="info-button" type="button" aria-label="Show the agent's action list">i</button>
-            </div>
-        </aside>
-
-        <!-- Center: Video Feed -->
-        <main class="panel video-panel">
-            <div class="monitor">
-                <img id="video-feed" alt="Live view of the AI playing" />
-                <!-- Shown only while the SERVER reports bug_found (dashboard_service). -->
-                <section id="bug-banner" class="bug-banner hidden" role="alert" aria-live="assertive">
-                    <h2 class="bug-banner__title">Testing Stopped - Bug Found</h2>
-                    <div id="bug-banner-body"></div>
-                    <p class="bug-banner__hint">The evidence is saved. Review it, then press START TESTING to continue.</p>
-                </section>
-                <!-- Shown only while the SERVER reports run_result: a clean-game run
-                     ended (dashboard_service RUN END). -->
-                <section id="run-banner" class="bug-banner run-banner hidden" role="status" aria-live="polite">
-                    <h2 id="run-banner-title" class="bug-banner__title run-banner__title"></h2>
-                    <div id="run-banner-body"></div>
-                    <p class="bug-banner__hint">Press RESET DASHBOARD, then START TESTING, for a new run.</p>
-                </section>
-            </div>
-        </main>
-
-        <!-- Middle-Right: Bug Tracker -->
-        <aside class="panel bug-panel">
-            <h3 class="panel-heading panel-heading--bug">BUG TRACKER</h3>
-            <!-- This session's incidents from /api/incidents (since the
-                 dashboard started or was last reset); every incident stays
-                 saved in the store (/api/incidents?all=1). -->
-            <div id="bug-terminal" role="log" aria-live="polite">
-                <ul id="bug-list">
-                    <li id="bug-placeholder" class="placeholder">start testing...</li>
-                </ul>
-            </div>
-        </aside>
-
-        <!-- Right: Log Terminal -->
-        <aside class="panel log-panel">
-            <h3 class="panel-heading panel-heading--log">LOG TERMINAL</h3>
-            <div id="log-terminal" role="log" aria-live="polite">
-                <p id="log-placeholder" class="placeholder">start testing...</p>
-            </div>
-        </aside>
+<!-- Everything the page shows comes from the server: /api/status (running,
+     paused, bug found, run result, the live panel), /api/project (the
+     project's facts, read from its own files), /api/incidents and /api/runs
+     (the evidence on disk), and the Socket.IO events. Nothing is typed in. -->
+<header class="topbar">
+    <a class="brand" href="#overview" data-goto="overview" aria-label="Glitch Hunter overview">
+        <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="16" cy="16" r="3.4" class="brand__core"/><path d="M16 1.5v7M16 23.5v7M1.5 16h7M23.5 16h7" stroke="currentColor" stroke-width="2.6"/></svg>
+        <span class="brand__text">
+            <span class="brand__name">Glitch Hunter</span>
+            <span class="brand__tag">Autonomous AI game tester</span>
+        </span>
+    </a>
+    <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+        <button class="tab" role="tab" id="tab-overview" data-view="overview" aria-controls="view-overview" aria-selected="true">Overview</button>
+        <button class="tab" role="tab" id="tab-live" data-view="live" aria-controls="view-live" aria-selected="false" tabindex="-1">Live Testing <span id="tab-live-dot" class="tab__dot" hidden></span></button>
+        <button class="tab" role="tab" id="tab-method" data-view="method" aria-controls="view-method" aria-selected="false" tabindex="-1">How It Works</button>
+        <button class="tab" role="tab" id="tab-history" data-view="history" aria-controls="view-history" aria-selected="false" tabindex="-1">Bug History <span id="tab-history-count" class="tab__count" hidden></span></button>
+    </nav>
+    <div class="topbar__status">
+        <span id="system-pill" class="pill pill--neutral" role="status" aria-live="polite"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Connecting…</span></span>
+        <span id="conn-indicator" class="conn conn--wait" title="Connection to the dashboard server"><span class="conn__dot" aria-hidden="true"></span><span class="conn__text">Connecting</span></span>
     </div>
+</header>
 
-    <!-- Info Modal -->
-    <div id="info-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="info-modal-title" inert>
-        <div class="modal-content">
-            <span class="close-modal" role="button" tabindex="0" aria-label="Close">&times;</span>
-            <h2 id="info-modal-title" class="modal-title">Agent Actions</h2>
-            <!-- Keep in sync with ACTION_NAMES in agent_logic.py and the
-                 action space in custom_mario_env.py -->
-            <ul class="action-list">
-                <li><span class="action-num">0:</span> <span class="action-desc">Stand Still</span></li>
-                <li><span class="action-num">1:</span> <span class="action-desc">Walk Right</span></li>
-                <li><span class="action-num">2:</span> <span class="action-desc">Walk Right + Jump</span></li>
-                <li><span class="action-num">3:</span> <span class="action-desc">Run Right</span></li>
-                <li><span class="action-num">4:</span> <span class="action-desc">Run Right + Jump</span></li>
-                <li><span class="action-num">5:</span> <span class="action-desc">Jump</span></li>
-                <li><span class="action-num">6:</span> <span class="action-desc">Walk Left</span></li>
-                <li><span class="action-num">7:</span> <span class="action-desc">Crouch</span></li>
-                <li><span class="action-num">8:</span> <span class="action-desc">Run Left (momentum retreat)</span></li>
-                <li><span class="action-num">9:</span> <span class="action-desc">Left + Jump</span></li>
-            </ul>
+<main class="views">
+    <!-- ═════════════════════════════ OVERVIEW ═════════════════════════════ -->
+    <section id="view-overview" class="view view--scroll" role="tabpanel" aria-labelledby="tab-overview">
+        <div class="page">
+            <div class="hero">
+                <p class="eyebrow">Final project · Super Mario Bros, Level 1-1</p>
+                <h1 class="hero__title">An AI that plays the game, hunts for bugs and reports them&nbsp;— on its own.</h1>
+                <p class="hero__lead">A reinforcement-learning agent explores the level like a human tester,
+                    <b data-fact="detector-count">the</b> detectors check the game's physics on every frame, and every broken
+                    rule becomes a saved, replayed and fully documented bug report.</p>
+                <div class="hero__actions">
+                    <button class="btn btn--primary btn--lg" type="button" data-goto="live">Open Live Testing <span aria-hidden="true">→</span></button>
+                    <button class="btn btn--ghost btn--lg" type="button" data-goto="method">See how it works</button>
+                </div>
+            </div>
+
+            <h2 class="section-title">Three objectives, one system</h2>
+            <ol class="objectives">
+                <li class="objective card">
+                    <p class="objective__num"><span class="obj-badge">1</span> Objective 1</p>
+                    <h3 class="objective__title">An autonomous agent</h3>
+                    <p class="objective__goal">Build an AI agent that can autonomously explore the game.</p>
+                    <ul class="objective__built">
+                        <li>A PPO reinforcement-learning agent that learns by playing</li>
+                        <li>It sees only the screen: 4 stacked 84&times;84 grey frames</li>
+                        <li>It presses one of <b data-fact="action-count">its</b> actions every 4 game frames</li>
+                    </ul>
+                    <div class="objective__result">
+                        <p class="objective__metric" data-fact="o1-steps">—</p>
+                        <p class="objective__metric-label">training steps</p>
+                        <p class="objective__note" data-fact="o1-completion">Result not available</p>
+                    </div>
+                </li>
+                <li class="objective card">
+                    <p class="objective__num"><span class="obj-badge">2</span> Objective 2</p>
+                    <h3 class="objective__title">QA training: glitch hunting</h3>
+                    <p class="objective__goal">Train the agent with a QA-focused reward to explore the game and seek physics and collision anomalies.</p>
+                    <ul class="objective__built">
+                        <li>Reward for reaching places it has never visited</li>
+                        <li>Explores first, heads for the flag only on evidence</li>
+                        <li>A safety check stops it forgetting how to finish</li>
+                    </ul>
+                    <div class="objective__result">
+                        <p class="objective__metric" data-fact="o2-coverage">—</p>
+                        <p class="objective__metric-label">of the reachable level explored</p>
+                        <p class="objective__note" data-fact="o2-completion">Result not available</p>
+                    </div>
+                </li>
+                <li class="objective card">
+                    <p class="objective__num"><span class="obj-badge">3</span> Objective 3</p>
+                    <h3 class="objective__title">Automatic bug reporting</h3>
+                    <p class="objective__goal">Automatically capture, preserve and report every detected bug.</p>
+                    <ul class="objective__built">
+                        <li>Rules checked on every frame, against what is drawn</li>
+                        <li>Evidence frozen at the exact frame; testing pauses</li>
+                        <li>The run is replayed to confirm; GIF, Markdown and PDF written</li>
+                    </ul>
+                    <div class="objective__result">
+                        <p class="objective__metric" data-fact="o3-caught">—</p>
+                        <p class="objective__metric-label">benchmark bugs with saved evidence</p>
+                        <p class="objective__note" data-fact="o3-clean">Result not available</p>
+                    </div>
+                </li>
+            </ol>
+
+            <h2 class="section-title">Project at a glance</h2>
+            <div id="stat-grid" class="stat-grid" aria-live="polite"></div>
+            <p class="source-note">Every number here is read by the dashboard from the project's own files: the approved
+                Objective-2 record, the 500-run test results, the declared benchmark bugs, the saved evidence, the source code and git.</p>
+
+            <h2 class="section-title">What happens automatically</h2>
+            <ol class="auto-chain">
+                <li><span class="auto-chain__n">1</span>Explore the level</li>
+                <li><span class="auto-chain__n">2</span>Check every rule on every frame</li>
+                <li><span class="auto-chain__n">3</span>Freeze the evidence</li>
+                <li><span class="auto-chain__n">4</span>Pause testing</li>
+                <li><span class="auto-chain__n">5</span>Replay to confirm</li>
+                <li><span class="auto-chain__n">6</span>Write GIF, Markdown, PDF</li>
+                <li><span class="auto-chain__n">7</span>List it in the Bug Tracker</li>
+            </ol>
+            <div class="page-cta">
+                <button class="btn btn--primary btn--lg" type="button" data-goto="live">Open Live Testing <span aria-hidden="true">→</span></button>
+            </div>
         </div>
+    </section>
+
+    <!-- ═══════════════════════════ LIVE TESTING ═══════════════════════════ -->
+    <section id="view-live" class="view view--live" role="tabpanel" aria-labelledby="tab-live" hidden>
+        <div class="live">
+            <!-- Left: set-up and controls -->
+            <aside class="live__controls">
+                <fieldset class="card game-picker" id="game-picker">
+                    <legend class="card__title"><span class="step-num">1</span> Choose the game</legend>
+                    <!-- Choosing the other game resets the dashboard and loads it
+                         (switch_game). The selection shown is the server's, from
+                         /api/status, never assumed. -->
+                    <label class="game-option">
+                        <input type="radio" name="game" value="mario_clean">
+                        <span class="game-option__body">
+                            <span class="game-option__name">Clean game</span>
+                            <span class="game-option__desc">The original level, untouched. Expected: no bugs found.</span>
+                        </span>
+                    </label>
+                    <label class="game-option">
+                        <input type="radio" name="game" value="mario_bugged">
+                        <span class="game-option__body">
+                            <span class="game-option__name">Bugged game</span>
+                            <span class="game-option__desc">The same level with <b data-fact="bug-count">planted</b> benchmark bugs. Expected: the AI finds them.</span>
+                        </span>
+                    </label>
+                    <p id="synthetic-badge" class="notice notice--warn" hidden>SYNTHETIC PIPELINE TEST MODE: probe events are not game bugs.</p>
+                </fieldset>
+
+                <section class="card controls" aria-labelledby="controls-title">
+                    <h2 class="card__title" id="controls-title"><span class="step-num">2</span> Run the test</h2>
+                    <button id="start-btn" class="btn btn--primary btn--block btn--lg" type="button">Start testing</button>
+                    <div class="controls__row">
+                        <button id="stop-btn" class="btn btn--secondary" type="button" disabled>Pause</button>
+                        <button id="reset-btn" class="btn btn--secondary" type="button" disabled>Reset</button>
+                    </div>
+                    <p id="control-hint" class="controls__hint">Loading…</p>
+                </section>
+
+                <section class="card brain" aria-labelledby="brain-title">
+                    <h2 class="card__title" id="brain-title">AI brain in use</h2>
+                    <p id="brain-name" class="brain__name">—</p>
+                    <p id="brain-detail" class="brain__detail"></p>
+                    <ul id="brain-checks" class="checklist checklist--compact"></ul>
+                    <button id="info-btn" class="link-btn" type="button">Show the <span data-fact="action-count">agent's</span> actions it can take</button>
+                </section>
+            </aside>
+
+            <!-- Centre: progress, the live game and what is happening -->
+            <div class="live__stage">
+                <ol id="stepper" class="stepper" aria-label="Where the test is now"></ol>
+                <div class="monitor-wrap">
+                    <div id="monitor" class="monitor">
+                        <p id="monitor-empty" class="monitor__empty">No live view yet.<br><span>Press <b>Start testing</b> and the AI's game appears here.</span></p>
+                        <img id="video-feed" alt="Live view of the AI playing" />
+                        <img id="evidence-view" class="monitor__evidence" alt="" hidden />
+                        <span id="monitor-badge" class="monitor__badge" hidden></span>
+                        <span id="monitor-game" class="monitor__game" hidden></span>
+                    </div>
+                </div>
+                <div id="evidence-switch" class="evidence-switch" role="group" aria-label="What the screen shows" hidden></div>
+                <section id="now-card" class="now" aria-live="polite">
+                    <p class="now__label">What is happening now</p>
+                    <p id="now-title" class="now__title">Connecting to the dashboard…</p>
+                    <p id="now-body" class="now__body"></p>
+                    <p id="now-next" class="now__next"></p>
+                </section>
+            </div>
+
+            <!-- Right: result, live status, this session's bugs -->
+            <aside class="live__side">
+                <section id="result-card" class="card result" hidden aria-live="assertive"></section>
+
+                <section class="card" aria-labelledby="status-title">
+                    <h2 class="card__title" id="status-title">Live status</h2>
+                    <dl class="status-list">
+                        <div class="status-row">
+                            <dt>AI mode</dt>
+                            <dd><span id="t-mode" class="mode-chip mode-chip--none">—</span><span id="t-mode-why" class="status-row__why"></span></dd>
+                        </div>
+                        <div class="status-row">
+                            <dt>Current action</dt>
+                            <dd id="t-action">—</dd>
+                        </div>
+                        <div class="status-row">
+                            <dt>Run</dt>
+                            <dd id="t-run">—</dd>
+                        </div>
+                        <div class="status-row status-row--bar">
+                            <dt>Level progress</dt>
+                            <dd><span class="bar" aria-hidden="true"><span id="t-progress-bar" class="bar__fill"></span></span><span id="t-progress">—</span></dd>
+                        </div>
+                        <div class="status-row status-row--bar">
+                            <dt>Level explored</dt>
+                            <dd><span class="bar" aria-hidden="true"><span id="t-coverage-bar" class="bar__fill bar__fill--ok"></span></span><span id="t-coverage">—</span></dd>
+                        </div>
+                        <div class="status-row">
+                            <dt>Bug checks</dt>
+                            <dd id="t-detectors">—</dd>
+                        </div>
+                        <div class="status-row">
+                            <dt>Bugs this session</dt>
+                            <dd id="t-bugs">0</dd>
+                        </div>
+                    </dl>
+                </section>
+
+                <section class="card tracker" aria-labelledby="tracker-title">
+                    <h2 class="card__title" id="tracker-title">Bug Tracker <span class="card__sub">this session</span></h2>
+                    <!-- This session's incidents from /api/incidents (since the
+                         dashboard started or was last reset); every incident stays
+                         saved in the store and on the Bug History page. -->
+                    <ul id="bug-list" class="tracker__list" aria-live="polite"></ul>
+                </section>
+            </aside>
+
+            <details class="log" id="log-details">
+                <summary class="log__summary">Agent log <span class="log__sub">every action the AI takes, and its reward (raw)</span></summary>
+                <div id="log-terminal" class="log__terminal" role="log" aria-live="off">
+                    <p id="log-placeholder" class="placeholder">Nothing yet. The log fills in when testing starts.</p>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════ HOW IT WORKS ═══════════════════════════ -->
+    <section id="view-method" class="view view--scroll" role="tabpanel" aria-labelledby="tab-method" hidden>
+        <div class="page">
+            <p class="eyebrow">Methodology</p>
+            <h1 class="page__title">How Glitch Hunter works</h1>
+            <p class="page__lead">Each objective builds on the one before it. Objective 1 gives the project an AI that can play;
+                Objective 2 turns it into a tester; Objective 3 turns what it finds into evidence and reports.</p>
+
+            <div class="flow" aria-label="Project methodology flowchart">
+                <section class="flow__lane">
+                    <header class="flow__lane-head"><span class="obj-badge">1</span><span><b>Objective 1</b><br>An AI that can play</span></header>
+                    <div class="flow__node">
+                        <h3>Game environment</h3>
+                        <p>Super Mario Bros Level 1-1 (a Python copy of the game), wrapped as a standard AI environment. Two copies: clean and bugged.</p>
+                    </div>
+                    <div class="flow__arrow" aria-hidden="true"></div>
+                    <div class="flow__node">
+                        <h3>Autonomous agent</h3>
+                        <p>A PPO brain learns from the screen alone which buttons move Mario forward and finish the level.</p>
+                        <p class="flow__fact" data-fact="o1-flow">—</p>
+                    </div>
+                </section>
+                <div class="flow__handoff" aria-hidden="true"><span>brain</span></div>
+                <section class="flow__lane">
+                    <header class="flow__lane-head"><span class="obj-badge">2</span><span><b>Objective 2</b><br>From player to tester</span></header>
+                    <div class="flow__node">
+                        <h3>QA reward</h3>
+                        <p>The agent is paid for reaching reachable places it has never visited, not just for winning.</p>
+                    </div>
+                    <div class="flow__arrow" aria-hidden="true"></div>
+                    <div class="flow__node">
+                        <h3>QA / glitch hunting</h3>
+                        <p>It explores every ledge, gap and corner, then heads for the flag only when exploring has dried up.</p>
+                    </div>
+                    <div class="flow__arrow" aria-hidden="true"></div>
+                    <div class="flow__node flow__node--key">
+                        <h3>Final QA brain</h3>
+                        <p class="flow__fact" data-fact="o2-flow">—</p>
+                    </div>
+                </section>
+                <div class="flow__handoff" aria-hidden="true"><span>tester</span></div>
+                <section class="flow__lane">
+                    <header class="flow__lane-head"><span class="obj-badge">3</span><span><b>Objective 3</b><br>Automatic bug reports</span></header>
+                    <div class="flow__node">
+                        <h3>Bug detection</h3>
+                        <p><span data-fact="detector-count">The</span> rules checked on every frame: never inside a solid, never stopped by something invisible, never hurt without contact, never an impossible jump or speed.</p>
+                    </div>
+                    <div class="flow__arrow" aria-hidden="true"></div>
+                    <div class="flow__node">
+                        <h3>Evidence capture</h3>
+                        <p>The exact frame, the movement history and every button press are saved; testing pauses.</p>
+                    </div>
+                    <div class="flow__arrow" aria-hidden="true"></div>
+                    <div class="flow__node">
+                        <h3>Replay check</h3>
+                        <p>A separate process replays the run from its start to prove the bug happens again.</p>
+                    </div>
+                    <div class="flow__arrow" aria-hidden="true"></div>
+                    <div class="flow__node">
+                        <h3>Bug reporting</h3>
+                        <p>A GIF, a Markdown and a PDF report and a downloadable evidence bundle are written.</p>
+                    </div>
+                    <div class="flow__arrow" aria-hidden="true"></div>
+                    <div class="flow__node flow__node--key">
+                        <h3>Final QA result</h3>
+                        <p>Bugged game: every bug in the Bug Tracker. Clean game: a "No Bugs Found" run report.</p>
+                    </div>
+                </section>
+            </div>
+
+            <h2 class="section-title">One live testing step (30 times a second)</h2>
+            <ol class="cycle">
+                <li><b>See</b><span>The last 4 screen images</span></li>
+                <li><b>Decide</b><span>The brain picks one of <span data-fact="action-count">its</span> actions</span></li>
+                <li><b>Play</b><span>The game moves 4 frames</span></li>
+                <li><b>Check</b><span><span data-fact="detector-count">All</span> rules, every frame</span></li>
+                <li><b>Show</b><span>Frame and status sent to this page</span></li>
+            </ol>
+            <div class="cycle-branch">
+                <span class="cycle-branch__if">A rule is broken?</span>
+                <span class="cycle-branch__then">Stop at once, save the evidence, show <b>Bug Found</b>. Replay and reports follow in the background, without slowing the game.</span>
+            </div>
+
+            <h2 class="section-title">Why there are two games</h2>
+            <div class="two-col">
+                <div class="card">
+                    <h3 class="card__title">Clean game</h3>
+                    <p>The original level, never modified; its files are locked by a fingerprint. Every brain was trained and measured on it.
+                        Any report here would be a false alarm, so it is how the project proves the detectors stay quiet.</p>
+                </div>
+                <div class="card">
+                    <h3 class="card__title">Bugged game</h3>
+                    <p>An exact copy with <b data-fact="bug-count">known</b> deliberately planted benchmark bugs, each declared in a list and marked in the code.
+                        The detectors are general rules and do not know where any bug is; this is how the project proves they find real bugs.</p>
+                </div>
+            </div>
+            <div id="bug-catalogue" class="bug-catalogue"></div>
+
+            <h2 class="section-title">Reading the dashboard</h2>
+            <ul class="legend">
+                <li><span class="pill pill--info"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Testing</span></span> The AI is playing and every frame is being checked.</li>
+                <li><span class="pill pill--neutral"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Paused</span></span> Stopped by you; nothing is lost and Resume continues.</li>
+                <li><span class="pill pill--bug"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Bug found</span></span> A rule broke; testing stopped automatically and the evidence is saved.</li>
+                <li><span class="pill pill--ok"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">No bugs found</span></span> A clean run reached the castle and no detector fired.</li>
+                <li><span class="pill pill--warn"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Warning</span></span> Something needs attention: a fallback brain, a lost connection, a failed step.</li>
+            </ul>
+            <div class="page-cta">
+                <button class="btn btn--primary btn--lg" type="button" data-goto="live">Open Live Testing <span aria-hidden="true">→</span></button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════ BUG HISTORY ════════════════════════════ -->
+    <section id="view-history" class="view view--scroll" role="tabpanel" aria-labelledby="tab-history" hidden>
+        <div class="page">
+            <p class="eyebrow">Saved evidence</p>
+            <h1 class="page__title">Bug History</h1>
+            <p class="page__lead">Every bug ever found and every clean-run report, as saved on disk. Evidence is never deleted or changed:
+                Reset only clears the Live Testing view.</p>
+            <div id="history-summary" class="stat-grid stat-grid--compact"></div>
+
+            <h2 class="section-title">Bug incidents</h2>
+            <div id="history-incidents" class="table-wrap"></div>
+
+            <h2 class="section-title">Clean-run reports</h2>
+            <div id="history-runs" class="table-wrap"></div>
+        </div>
+    </section>
+</main>
+
+<!-- One incident, in full: opened from the Bug Tracker, the Bug Found card or Bug History. -->
+<dialog id="incident-dialog" class="dialog dialog--wide" aria-labelledby="incident-dialog-title">
+    <div class="dialog__head">
+        <div>
+            <p id="incident-dialog-kicker" class="dialog__kicker"></p>
+            <h2 id="incident-dialog-title" class="dialog__title"></h2>
+        </div>
+        <button class="dialog__close" type="button" data-close aria-label="Close">&times;</button>
     </div>
-    <!-- Served locally, not from a CDN. This dashboard is a localhost tool
-         and was previously unusable with no internet connection: the CDN
-         script would fail to load and every button silently did nothing. -->
-    <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}?v={{ asset_version }}"></script>
-    <script src="{{ url_for('static', filename='js/main.js') }}?v={{ asset_version }}"></script>
+    <div id="incident-dialog-body" class="dialog__body"></div>
+</dialog>
+
+<!-- The agent's actions. Keep in sync with ACTION_NAMES in agent_logic.py and
+     the action space in custom_mario_env.py. -->
+<dialog id="info-modal" class="dialog" aria-labelledby="info-modal-title">
+    <div class="dialog__head">
+        <h2 id="info-modal-title" class="dialog__title">The agent's actions</h2>
+        <button class="dialog__close close-modal" type="button" data-close aria-label="Close">&times;</button>
+    </div>
+    <div class="dialog__body">
+        <p class="dialog__text">Every step, the brain chooses exactly one of these button combinations.</p>
+        <ul class="action-list">
+            <li><span class="action-num">0</span> <span class="action-desc">Stand Still</span></li>
+            <li><span class="action-num">1</span> <span class="action-desc">Walk Right</span></li>
+            <li><span class="action-num">2</span> <span class="action-desc">Walk Right + Jump</span></li>
+            <li><span class="action-num">3</span> <span class="action-desc">Run Right</span></li>
+            <li><span class="action-num">4</span> <span class="action-desc">Run Right + Jump</span></li>
+            <li><span class="action-num">5</span> <span class="action-desc">Jump</span></li>
+            <li><span class="action-num">6</span> <span class="action-desc">Walk Left</span></li>
+            <li><span class="action-num">7</span> <span class="action-desc">Crouch</span></li>
+            <li><span class="action-num">8</span> <span class="action-desc">Run Left (momentum retreat)</span></li>
+            <li><span class="action-num">9</span> <span class="action-desc">Left + Jump</span></li>
+        </ul>
+    </div>
+</dialog>
+
+<!-- Served locally, not from a CDN. This dashboard is a localhost tool
+     and was previously unusable with no internet connection: the CDN
+     script would fail to load and every button silently did nothing. -->
+<script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}?v={{ asset_version }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>

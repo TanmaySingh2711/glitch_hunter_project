@@ -232,6 +232,7 @@ def test_main_preloads_before_listening_and_warns_off_loopback(app_module, monke
     import logging
     order = []
     monkeypatch.setattr(app_module.service, "start", lambda: order.append("preload"))
+    monkeypatch.setattr(app_module.dashboard_facts.TESTS, "start", lambda: order.append("tests"))
     monkeypatch.setattr(app_module.socketio, "run",
                         lambda app, **kw: order.append(("run", kw['host'], kw['port'],
                                                          kw['debug'])))
@@ -239,7 +240,7 @@ def test_main_preloads_before_listening_and_warns_off_loopback(app_module, monke
     monkeypatch.setenv("GLITCH_HUNTER_PORT", "5055")
     with caplog.at_level(logging.INFO):
         app_module.main()
-    assert order == ["preload", ("run", "0.0.0.0", 5055, False)]
+    assert order == ["preload", "tests", ("run", "0.0.0.0", 5055, False)]
     assert any("no authentication" in r.getMessage() for r in caplog.records
                if r.levelno == logging.WARNING)
 
@@ -312,3 +313,89 @@ def test_switching_the_game_unloads_everything_built_on_the_old_one(monkeypatch,
     monkeypatch.setattr(db, "_global_env", env)
     with pytest.raises(RuntimeError, match="fixed once the env exists"):
         db.configure(db.DashboardConfig(game_variant="mario_clean"))
+
+
+# ── the live panel ─────────────────────────────────────────────────────────
+class _Coverage:
+    """The coverage map's surface the live panel reads."""
+
+    def __init__(self):
+        self.testable = np.ones((2, 2), dtype=bool)
+        self.testable_total = 1000
+        self.episode_new = 0
+
+
+def test_every_step_carries_the_live_panel(injected, monkeypatch):
+    monkeypatch.setattr(db, "_coverage", None)
+    session = db.run_mario_agent()
+    first = next(session)
+    t = first['telemetry']
+    assert t['run'] == 1 and t['run_step'] == 1 and t['action'] == ACTION_NAMES[3]
+    assert t['x'] == 100 and t['coverage'] is None and t['phase'] is None
+    assert t['progress'] == 0.0                 # x 100 is behind the spawn point
+    next(session)
+    next(session)                               # step 3 ends the episode ...
+    assert next(session)['telemetry']['run'] == 2, "... and the next run is counted"
+    session.close()
+
+
+def test_coverage_is_the_training_map_plus_what_is_new_since_loading(monkeypatch):
+    cov = _Coverage()
+    monkeypatch.setattr(db, "_coverage", cov)
+    monkeypatch.setattr(db, "_coverage_base", 900)
+    monkeypatch.setattr(db, "_coverage_banked", 0)
+    cov.episode_new = 7
+    assert db.coverage_now() == {"covered": 907, "total": 1000, "new_since_start": 7}
+    db._bank_coverage()                         # a reset is about to zero the episode count
+    cov.episode_new = 0
+    cov.episode_new += 2
+    assert db.coverage_now() == {"covered": 909, "total": 1000, "new_since_start": 9}
+    cov.testable = None
+    assert db.coverage_now() is None, "no reachable-space mask: nothing honest to show"
+    monkeypatch.setattr(db, "_coverage", None)
+    assert db.coverage_now() is None
+    db._bank_coverage()                         # harmless without a map
+
+
+def test_the_progress_is_measured_from_the_spawn_to_the_castle_door():
+    from evaluation.completion import CASTLE_DOOR_X, SPAWN_X
+    t = db.telemetry({'episode_phase': 'explore', 'mario_rect': (5000, 400, 30, 40)}, 3, 17, 4,
+                     (SPAWN_X + CASTLE_DOOR_X) // 2)
+    assert t['phase'] == 'explore' and t['run'] == 3 and t['run_step'] == 17
+    assert t['action'] == ACTION_NAMES[4] and t['x'] == 5000
+    assert t['progress'] == pytest.approx(0.5, abs=1e-3)
+    assert db.telemetry({}, 1, 1, 99, 0)['action'] == "Unknown"
+
+
+def test_the_brain_facts_come_from_the_loaded_model(monkeypatch):
+    import torch
+
+    class _Policy(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.shared = torch.nn.Linear(3, 2)          # 8 parameters
+            self.also_shared = self.shared                # counted once, as in SB3
+            self.head = torch.nn.Linear(2, 1)             # 3 parameters
+
+    class _PPO:
+        policy = _Policy()
+
+    monkeypatch.setattr(db, "_global_model", _PPO())
+    monkeypatch.setattr(db, "_provenance", {"brain": {"path": "b.zip", "num_timesteps": 16,
+                                                      "approved_objective2_brain": True}})
+    facts = db.DashboardBackend().brain_facts()
+    assert facts["parameters"] == 11 and facts["num_timesteps"] == 16 and facts["approved"]
+    assert facts["actions"] == len(ACTION_NAMES)
+    monkeypatch.setattr(db, "_global_model", None)
+    assert db.brain_facts()["parameters"] is None
+
+
+def test_the_project_facts_route_answers_from_the_backend(app_module, monkeypatch):
+    monkeypatch.setattr(type(app_module.backend), "pipeline", property(lambda _s: None))
+    monkeypatch.setattr(type(app_module.backend), "run_reports", property(lambda _s: None))
+    monkeypatch.setattr(app_module.backend, "brain_facts", lambda: {"parameters": 5})
+    monkeypatch.setattr(app_module.dashboard_facts, "code_census", lambda: {"commits": 1})
+    facts = app_module.app.test_client().get('/api/project').get_json()
+    assert facts["brain"] == {"parameters": 5}
+    assert facts["objective3"]["evidence"]["incidents"] == 0
+    assert facts["engineering"]["commits"] == 1 and "tests" in facts["engineering"]

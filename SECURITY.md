@@ -33,7 +33,12 @@ kept narrow.
   `/runs/<id>/bundle.zip` accept only a well-formed id of an existing
   clean-run report and file names from a fixed list
   (`reporting/run_report.RunReports.path`); `tests/test_run_report.py`
-  checks the refusals.
+  checks the refusals. `/api/runs` and `/api/project` only read: the saved
+  reports' summaries, and the project's own records (`dashboard_facts.py`).
+* **The Overview's test count runs the project's own tests' collection.**
+  Once per start, `app.py` runs `python -m pytest --collect-only` on the
+  `tests/` folder in a low-priority child process; collection imports the
+  test modules but runs no test. Nothing from outside the project is run.
 * **A replay runs only what the bundle names from a closed list.** Incident
   reproduction starts a local Python process (`reporting/reproduce.py`) that
   reads the bundle; extra detectors are rebuilt only from a fixed registry

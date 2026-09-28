@@ -17,7 +17,7 @@ flowchart TD
     end
     subgraph runtime["Runtime"]
         SVC["dashboard_service.py<br/>the one game thread"]
-        BACK["dashboard_backend.py<br/>env + model + frame stream"]
+        BACK["dashboard_backend.py<br/>env + model + frame stream + live panel"]
         TRN["training/<br/>callbacks, checkpoints, value head"]
     end
     subgraph agent["Agent"]
@@ -196,7 +196,8 @@ decision, not a refactor.
 | a reward weight or threshold | `exploration/config.py` (the balance asserts run at wrapper construction) | `pytest tests/test_phase_reward.py tests/test_reward_qa.py` |
 | the QA reward logic | `rewards/qa.py` | `pytest tests/test_reward_*.py tests/test_phase_reward.py` |
 | when a QA episode ends | `exploration/lifecycle.py` | `pytest tests/test_episode_lifecycle.py` |
-| what the dashboard shows | `dashboard_backend.py`, `static/`, `templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py` |
+| what the dashboard shows | `dashboard_backend.py` (the live panel: `telemetry`, `coverage_now`), `static/`, `templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py tests/test_dashboard_backend.py` |
+| the Overview page's facts | `dashboard_facts.py` (every number read from the project's own files) | `pytest tests/test_dashboard_facts.py` |
 | incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
 | the clean game's run report | `reporting/run_report.py`, `dashboard_backend._finish_run` | `pytest tests/test_run_report.py tests/test_dashboard_backend.py` |
 | `run_dashboard.bat`: speed on battery, centred windows | `desktop.py`, `game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |

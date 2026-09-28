@@ -346,6 +346,27 @@ class RunReports:
                 "available": [n for n in FILES if os.path.isfile(os.path.join(folder, n))],
                 "renders": renders}
 
+    def summaries(self) -> list[dict[str, Any]]:
+        """Every run report on disk, newest first (the dashboard's Bug History).
+        A folder that is not a run report, or whose run.json cannot be read,
+        is left out of the list, never allowed to break it."""
+        try:
+            names = sorted(os.listdir(self.root), reverse=True)
+        except OSError:
+            return []
+        out = []
+        for name in names:
+            if not RUN_ID_RE.fullmatch(name):
+                continue
+            try:
+                with open(os.path.join(self.root, name, "run.json"), encoding="utf-8") as fh:
+                    record = json.load(fh)
+                game = record.get("provenance", {}).get("game", {}).get("variant")
+                out.append({**self.summary(record), "game_variant": game})
+            except (OSError, ValueError, KeyError, TypeError):
+                log.warning("run report %s is not readable; left out of the list", name)
+        return out
+
     def wait(self, timeout: float = 30.0) -> None:
         """Tests: until every render thread started so far has finished."""
         for t in list(self._threads):

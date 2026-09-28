@@ -43,10 +43,12 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
   `reproduction.json`, `manifest.json` (hashes). Written atomically, read-only, never overwritten.
 * **Replay verdicts:** reproduced / reproduced_state_only / not_reproduced / not_possible.
 * **Duplicates:** same game, detector, kind and site → the same incident, count raised.
-* **Dashboard:** every detection pauses testing; START TESTING resumes; the Bug
+* **Dashboard:** every detection pauses testing; *Resume testing* continues; the Bug
   Tracker shows this session's bugs (Reset, or refreshing the page, empties it;
-  nothing is deleted).
-  Pick "Mario Game (Cleaned)" or "Mario Game (Bugged)" from the list.
+  nothing is deleted), and Bug History lists every incident and run report on disk.
+  Pick "Clean game" or "Bugged game" on the Live Testing tab. A five-step bar
+  and a *Bug found* card show each automatic stage as it completes (incident,
+  evidence, replay, reports), from the incident's own manifest.
 * **Clean-run report:** on the clean game, testing also stops when a run ends.
   A run that reaches the castle gets a run report in `run_reports/RUN-…/`
   (`reporting/run_report.py`): `run.json`, `final.png`, `finish.gif`,

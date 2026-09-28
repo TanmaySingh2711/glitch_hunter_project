@@ -219,7 +219,7 @@ flowchart TD
 
 | Layer | Role |
 |---|---|
-| **Dashboard** (`app.py`, `dashboard_service.py`, `dashboard_backend.py`, `templates/`, `static/`) | Serves the page, streams the game, pauses on bugs, serves evidence safely |
+| **Dashboard** (`app.py`, `dashboard_service.py`, `dashboard_backend.py`, `dashboard_facts.py`, `templates/`, `static/`) | Serves the page, streams the game and what the AI is doing, pauses on bugs, serves evidence safely, shows the project's measured facts |
 | **Environment + agent** (`custom_mario_env.py`, `agent_logic.py`, `rewards/`) | Runs the game one frame at a time, applies the brain's actions, runs the detectors |
 | **Exploration** (`exploration/`) | Coverage map, reachability mask, episode lifecycle, all tuned constants |
 | **Evaluation** (`evaluation/`) | The 500-episode completion-retention protocol |
@@ -258,6 +258,7 @@ glitch_hunter_project/
 ├── desktop.py                # run_dashboard.bat's helpers: full speed on battery, centred windows
 ├── dashboard_service.py      # the single game thread (Start / Stop / Reset / pause on bug)
 ├── dashboard_backend.py      # loads the brain, runs the game, streams frames, captures incidents
+├── dashboard_facts.py        # the Overview page's facts, read from the project's own files
 ├── custom_mario_env.py       # the game as a Gymnasium environment + built-in detectors
 ├── agent_logic.py            # reward wrapper
 ├── game_window.py            # game-window placement (Windows APIs)
@@ -440,29 +441,39 @@ Then open **http://localhost:5000**.
 
 ### Test the game
 
-1. **Choose the game** in *Select Game Environment*: **Mario Game (Cleaned)**
-   or **Mario Game (Bugged)**. Switching resets the dashboard and loads that
-   game.
-2. Click **START TESTING**. The game streams to the browser, and the game
-   window waits minimised in the taskbar (click it there to watch it,
-   centred). The Log Terminal shows every action the agent takes.
-3. **When a bug is detected, testing stops.** A red *Testing Stopped – Bug
-   Found* banner appears over the video with the bug's details, and the bug
-   is added to the **Bug Tracker**.
-4. Open the evidence from the banner or the Bug Tracker: **PDF report**,
-   **Markdown report**, **Trigger frame**, **GIF**, or **Download all (.zip)**.
-   Reports that are still rendering show as *rendering…* and fill in by
-   themselves.
-5. Click **START TESTING** again to resume from the same moment.
+The page has four tabs. **Overview** explains the three objectives and shows
+the project's measured results; **How It Works** is the methodology
+flowchart; **Bug History** lists every incident and run report saved on
+disk; **Live Testing** is where the test runs:
 
-On the clean game the Bug Tracker should stay at *No bugs found yet…*: that is
-the expected, healthy result. **When a clean-game run ends, testing stops.**
-If Mario reached the castle, a green *Level Complete – No Bugs Found* banner
-appears with the run report (PDF, Markdown, final frame, GIF, or all as a `.zip`), which is also
-listed in the Bug Tracker; if he died, the banner says so. Press **Reset
-Dashboard**, then **START TESTING**, for a new run. On the bugged game with
-the 16M brain, the agent runs into all six benchmark bugs within its first
-episode; it plays on from run to run and stops only on bugs.
+1. **Choose the game**: **Clean game** or **Bugged game**. Switching resets
+   the dashboard and loads that game.
+2. Click **Start testing**. The game streams to the centre of the page, and
+   the game window waits minimised in the taskbar (click it there to watch
+   it, centred). The five-step bar above the video, *What is happening now*
+   below it, and the **Live status** panel (the AI's mode, its current
+   action, level progress, coverage, detectors, bugs this session) say what
+   the AI is doing. The raw **Agent log** is one click away under the video.
+3. **When a bug is detected, testing stops.** The status turns red
+   (*Bug found*), the video switches to the saved evidence (the trigger
+   frame, then the GIF of the moments before it), and a **Bug found** card
+   shows each stage as it completes: incident created, evidence captured,
+   replay check, reports. The bug is added to the **Bug Tracker**.
+4. Open the evidence from the card, the Bug Tracker or Bug History: **PDF
+   report**, **Markdown**, **Trigger frame**, **GIF**, **Download all
+   (.zip)**, or **Full details** (everything in one window). Reports still
+   being written show as *writing…* and fill in by themselves.
+5. Click **Resume testing** to continue from the same moment.
+
+On the clean game the Bug Tracker should stay at *No bugs detected yet*: that
+is the expected, healthy result. **When a clean-game run ends, testing
+stops.** If Mario reached the castle, a green *Level complete · no bugs found*
+card appears with the run report (PDF, Markdown, final frame, GIF, or all as
+a `.zip`), which is also listed in the Bug Tracker; if he died, the card says
+so. Press **Start next run** to play again, or **Reset** first to clear the
+page. On the bugged game with the 16M brain, the agent runs into all six
+benchmark bugs within its first episode; it plays on from run to run and
+stops only on bugs.
 
 ### Where the evidence is saved
 
@@ -482,7 +493,7 @@ A clean-game run that reaches the castle gets a run report in
 `run_reports/RUN-<date>-<time>-<id>/`: `run.json` (the record), `final.png`,
 `finish.gif`, `report.md` and `report.pdf`.
 
-Evidence is never deleted or overwritten. **Reset Dashboard** only clears the
+Evidence is never deleted or overwritten. **Reset** only clears the
 Bug Tracker's view of the current session.
 
 ```bash
@@ -539,7 +550,7 @@ The repository contains **two copies of the same game**:
 | Purpose | the **trusted baseline**: every brain was trained and measured on it | the **test target** for bug detection |
 | Content | the original game, unmodified | the same game + the 6 declared benchmark bugs |
 | Protected by | a pinned SHA-256 of its whole game tree: any edit fails the test suite | every difference must be declared in `INJECTED_BUGS.json`, marked in the code with `INJECTED BUG <id>`, and match a pinned diff hash |
-| Select it with | *Mario Game (Cleaned)* or `--game mario_clean` (default) | *Mario Game (Bugged)* or `--game mario_bugged` |
+| Select it with | *Clean game* or `--game mario_clean` (default) | *Bugged game* or `--game mario_bugged` |
 | When a run ends | testing stops; reaching the castle writes a run report (*No Bugs Found* when no detector fired) | the agent plays on; testing stops only on bugs |
 
 **Why intentional bugs never go into the clean game.** The clean game is the
@@ -559,28 +570,32 @@ hash), so a report can never be attributed to the wrong game. Details:
 
 | Feature | What you can do |
 |---|---|
-| **Live game view** | Watch the agent play, streamed to the browser; the game window waits minimised in the taskbar |
-| **Select Game Environment** | Switch between *Mario Game (Cleaned)* and *Mario Game (Bugged)* |
-| **START TESTING / Stop Testing** | Start or pause; Start always resumes from the same moment |
-| **Reset Dashboard** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays). Refreshing or reopening the page does the same |
-| **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level Complete – No Bugs Found* with its run report (PDF, Markdown, final frame, GIF, and the whole report as a `.zip`) |
-| **Pause on every bug** | *Testing Stopped – Bug Found* banner with the bug's type, incident id, time, world position, severity, confidence, reproduction status and times seen |
-| **Bug Tracker** | Every bug found in this session, newest first; a repeat raises its *Seen* count instead of adding a duplicate |
-| **Evidence links** | PDF report, Markdown report, trigger frame, GIF, and the whole evidence bundle as a `.zip` |
-| **Log Terminal** | Every action the agent takes and its reward; detected bugs appear in red |
-| **Game window** | Starts minimised in the taskbar; click it to watch it, centred. Closing it with its X pauses testing; START TESTING brings it back |
-| **Agent actions (i)** | The list of the agent's 10 actions |
+| **Overview** | The three objectives and their measured results, and the project at a glance: training steps, brain size, coverage, completion, detectors, benchmark bugs with saved evidence, clean-game incidents, automated tests, code size, commits. Every number is read from the project's own files (`dashboard_facts.py`, `/api/project`); what cannot be read is left out |
+| **How It Works** | The methodology flowchart (Objective 1 → 2 → 3, and where each ends), one live testing step, why there are two games (with the six declared bugs), and what each status colour means |
+| **Live game view** | Watch the agent play, streamed to the browser; the game window waits minimised in the taskbar. Stopped on a bug or a finished run, the video can show the saved trigger frame or GIF instead |
+| **Choose the game** | Switch between *Clean game* and *Bugged game* |
+| **Start testing / Pause** | Start or pause; the button then says *Resume testing* (or *Start next run* after a clean run) and always continues from the same moment |
+| **Reset** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays). Refreshing or reopening the page does the same |
+| **Transparency** | A five-step progress bar (brain ready → exploring → bug detected → evidence and replay → report ready), *What is happening now* in plain words, and the **Live status** panel: the AI's mode (*Explore* or *Complete*), current action, run and step, level progress, reachable level explored (live, from the brain's own coverage map), active detectors, bugs this session. The status label in the top bar is always visible |
+| **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level complete · no bugs found* with its run report (PDF, Markdown, final frame, GIF, and the whole report as a `.zip`), and says plainly that this is not proof the game has no bugs |
+| **Pause on every bug** | A *Bug found* card with the bug, each automatic stage (incident created, evidence captured, replay check, reports), place, severity, confidence and times seen |
+| **Bug Tracker** | Every bug found in this session, newest first; a repeat raises its *Seen* count instead of adding a duplicate. Click one for its full details |
+| **Bug History** | Every incident and clean-run report saved on disk (`/api/incidents?all=1`, `/api/runs`), with their files |
+| **Evidence links** | PDF report, Markdown report, trigger frame, GIF, the whole evidence bundle as a `.zip`, and the raw record |
+| **Agent log** | Every action the agent takes and its reward; detected bugs appear in red |
+| **Game window** | Starts minimised in the taskbar; click it to watch it, centred. Closing it with its X pauses testing; *Resume testing* brings it back |
+| **Agent actions** | The list of the agent's 10 actions (the link under *AI brain in use*) |
 | **Offline** | Works with no internet connection |
 
 ---
 
 ## 16. Screenshots / GIFs
 
-**The dashboard while testing the clean game.** The Bug Tracker stays empty, as it should:
+**The Live Testing tab while testing the clean game.** The progress bar, *What is happening now* and the Live status panel say what the AI is doing; the Bug Tracker stays empty, as it should:
 
 <p align="center"><img src="assets/dashboard.png" alt="Dashboard testing the clean game" width="900"></p>
 
-**Testing stopped on a detected bug** (stair clipping on the bugged game), with the evidence links and the Bug Tracker:
+**Testing stopped on a detected bug** (stair clipping on the bugged game): the video shows the saved GIF, and the *Bug found* card shows every automatic stage done (incident, evidence, replay reproduced, reports) with the evidence links:
 
 <p align="center"><img src="assets/bug-found.png" alt="Testing stopped on a detected stair-clipping bug" width="900"></p>
 

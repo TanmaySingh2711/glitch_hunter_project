@@ -32,7 +32,7 @@ Changing a bug (only when the project owner specifies it):
    (`python -c "from reporting import variants; print(variants.bug_diff_sha256('mario_bugged'))"`).
 
 Run the dashboard on this variant with `python app.py --game mario_bugged`,
-or pick "Mario Game (Bugged)" in the dashboard. Every incident records the
+or pick "Bugged game" in the dashboard. Every incident records the
 variant name, its game-tree SHA-256 and the declared bug ids, so a report
 always says which game produced it.
 

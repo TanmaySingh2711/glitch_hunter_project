@@ -28,6 +28,7 @@ from stable_baselines3 import PPO
 from agent_logic import ACTION_NAMES, GlitchHunterWrapper
 from common.fileio import sha256_of
 from custom_mario_env import PROJECT_ROOT, CustomMarioEnv, release_game_variant, wrap_observation
+from evaluation.completion import progress_of
 from exploration import config
 from exploration import coverage as coverage_mod
 from exploration.lifecycle import classify_end
@@ -68,6 +69,12 @@ _reward_mode = "legacy_completion"
 _pipeline: IncidentPipeline | None = None
 _run_reports: RunReports | None = None
 _provenance: dict[str, Any] = {}
+# The coverage map the brain is shown against (QA brains only), for the
+# dashboard's live panel: its reachable pixels covered when it was loaded,
+# plus every new one since (banked at each reset, see _bank_coverage).
+_coverage: coverage_mod.SpatialCoverage | None = None
+_coverage_base = 0
+_coverage_banked = 0
 
 # ═══════════════════════════════════════════════════════════════════════
 # ENV_LOCK — serialises every touch of the environment and its pygame window
@@ -174,6 +181,7 @@ def _ensure_global_env_and_model() -> tuple[gym.Env[Any, Any], PPO]:
     be popped up (on the very first 'Start Testing' click) without
     duplicating this setup logic in two places."""
     global _global_env, _global_model, _brain_path, _reward_mode
+    global _coverage, _coverage_base, _coverage_banked
     if _global_env is not None and _global_model is not None:
         return _global_env, _global_model
 
@@ -183,8 +191,11 @@ def _ensure_global_env_and_model() -> tuple[gym.Env[Any, Any], PPO]:
     base.enable_evidence()
     for x in _config.synthetic_probes:
         base.add_detector(SyntheticProbe(x))
-    env = wrap_observation(GlitchHunterWrapper(base, reward_mode=mode,
-                                               coverage=_dashboard_coverage(mode, model_path)))
+    _coverage = _dashboard_coverage(mode, model_path)
+    # One full count, here at load; the live panel then adds what is new.
+    _coverage_base = _coverage.covered_testable() if _coverage is not None else 0
+    _coverage_banked = 0
+    env = wrap_observation(GlitchHunterWrapper(base, reward_mode=mode, coverage=_coverage))
 
     # Falls back to an untrained policy so the dashboard still runs (badly)
     # rather than crashing outright when no checkpoint is present.
@@ -219,7 +230,7 @@ def switch_game_variant(variant: str) -> bool:
     preload() then builds all of it again on the new variant, so every
     incident records the game that actually produced it.
     """
-    global _config, _global_env, _global_model, _pipeline, _provenance, _brain_path
+    global _config, _global_env, _global_model, _pipeline, _provenance, _brain_path, _coverage
     if variant not in config.GAME_VARIANTS:
         raise ValueError(f"unknown game variant {variant!r}")
     if variant == _config.game_variant:
@@ -233,6 +244,7 @@ def switch_game_variant(variant: str) -> bool:
             _global_env.close()
         _global_env = _global_model = None
         _brain_path = None
+        _coverage = None
         release_game_variant()
         _config = replace(_config, game_variant=variant)
     log.info("[DASHBOARD] game under test is now %s", variant)
@@ -272,6 +284,49 @@ def describe() -> dict[str, Any]:
             "brain_approved": brain.get("approved_objective2_brain"),
             "synthetic_probes": list(_config.synthetic_probes),
             "reward_mode": _reward_mode}
+
+
+def brain_facts() -> dict[str, Any]:
+    """The loaded brain as the dashboard's panels show it: the file, whether
+    it is the approved Objective-2 brain, how long it trained (from the file
+    itself) and how many learned parameters it has (from the loaded model)."""
+    brain = _provenance.get("brain", {})
+    model = _global_model
+    parameters = (sum(int(p.numel()) for p in model.policy.parameters())
+                  if model is not None else None)
+    return {"path": brain.get("path"), "approved": brain.get("approved_objective2_brain"),
+            "num_timesteps": brain.get("num_timesteps"), "parameters": parameters,
+            "reward_mode": _reward_mode, "actions": len(ACTION_NAMES)}
+
+
+def coverage_now() -> dict[str, int] | None:
+    """Reachable pixels covered now: the map the brain built in training plus
+    everything new since the dashboard loaded it. None when no map is shown
+    (the 6M brain, or no reachable-space mask installed)."""
+    cov = _coverage
+    if cov is None or cov.testable is None or cov.testable_total is None:
+        return None
+    new = _coverage_banked + int(cov.episode_new)
+    return {"covered": _coverage_base + new, "total": cov.testable_total,
+            "new_since_start": new}
+
+
+def _bank_coverage() -> None:
+    """Adds the ending episode's new reachable pixels to the running total,
+    before a reset zeroes the coverage map's per-episode counter."""
+    global _coverage_banked
+    if _coverage is not None:
+        _coverage_banked += int(_coverage.episode_new)
+
+
+def telemetry(info: dict[str, Any], run: int, run_step: int, action: int,
+              furthest_x: int) -> dict[str, Any]:
+    """What the live panel shows for one step - every value read from this
+    step, the loaded brain or the coverage map, never estimated."""
+    rect = info.get('mario_rect')
+    return {"run": run, "run_step": run_step, "action": ACTION_NAMES.get(action, "Unknown"),
+            "x": int(rect[0]) if rect else None, "progress": round(progress_of(furthest_x), 4),
+            "phase": info.get('episode_phase'), "coverage": coverage_now()}
 
 
 def open_agent_window() -> str:
@@ -322,6 +377,9 @@ class DashboardBackend:
 
     def describe(self) -> dict[str, Any]:
         return describe()
+
+    def brain_facts(self) -> dict[str, Any]:
+        return brain_facts()
 
     def preload(self) -> None:
         """Loads the model and builds the env - which creates the window, on
@@ -403,6 +461,7 @@ def step_log_line(step: int, action: int, reward: float, info: dict[str, Any]) -
 
 
 def _reset_obs(env: gym.Env[Any, Any]) -> np.ndarray:
+    _bank_coverage()
     obs, _info = env.reset()
     return np.array(obs, copy=True)
 
@@ -478,6 +537,7 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     recorder.begin_episode(int(getattr(_base(env), "episode_index", 0)))
     run_started, furthest_x = schema.utc_now(), 0
     run_bugs: dict[str, dict[str, Any]] = {}
+    run_number = 1                 # runs (episodes) played in this session
 
     step_count = 0
     fps_window_start = time.perf_counter()
@@ -530,6 +590,8 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
             'reward': float(reward),
             'log': step_log_line(step_count, action_val, float(reward), info),
             'incidents': incidents,
+            'telemetry': telemetry(info, run_number, recorder.episode_step, action_val,
+                                   furthest_x),
         }
         if run_end is not None:
             item['run_end'] = run_end
@@ -540,3 +602,4 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
             recorder.begin_episode(int(getattr(_base(env), "episode_index", 0)))
             run_started, furthest_x = schema.utc_now(), 0
             run_bugs = {}
+            run_number += 1

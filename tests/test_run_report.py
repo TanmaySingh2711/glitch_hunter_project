@@ -127,3 +127,29 @@ def test_the_app_serves_run_files_and_404s_everything_else(tmp_path, monkeypatch
         assert sorted(zf.namelist()) == sorted(f"{r['run_id']}/{n}" for n in rr.FILES)
     assert client.get("/runs/RUN-20260925-100123-ffffff/bundle.zip").status_code == 404
     assert client.get("/runs/..%2F..%2Fapp.py/bundle.zip").status_code == 404
+
+
+def test_every_saved_run_is_listed_newest_first_and_a_broken_one_is_skipped(tmp_path):
+    store = rr.RunReports(str(tmp_path))
+    older, newer = record(), {**record(), "run_id": "RUN-20260925-110000-def456"}
+    for r in (older, newer):
+        store.write(r, np.zeros((60, 80, 3), np.uint8), [jpeg(3)], background=False)
+    (tmp_path / "RUN-20260925-120000-bad000").mkdir()          # no run.json
+    (tmp_path / "RUN-20260925-130000-bad111").mkdir()
+    (tmp_path / "RUN-20260925-130000-bad111" / "run.json").write_text("{not json")
+    (tmp_path / "notes.txt").write_text("not a run")
+    listed = store.summaries()
+    assert [s["run_id"] for s in listed] == [newer["run_id"], older["run_id"]]
+    assert listed[0]["game_variant"] == "mario_clean" and listed[0]["bugs"] == 0
+    assert rr.RunReports(str(tmp_path / "missing")).summaries() == []
+
+
+def test_the_app_lists_the_saved_runs(tmp_path, monkeypatch):
+    import app as app_module
+    store = rr.RunReports(str(tmp_path))
+    store.write(record(), None, [jpeg(4)], background=False)
+    monkeypatch.setattr(type(app_module.backend), "run_reports", property(lambda _s: store))
+    runs = app_module.app.test_client().get("/api/runs").get_json()["runs"]
+    assert [r["run_id"] for r in runs] == [record()["run_id"]]
+    monkeypatch.setattr(type(app_module.backend), "run_reports", property(lambda _s: None))
+    assert app_module.app.test_client().get("/api/runs").get_json() == {"runs": []}

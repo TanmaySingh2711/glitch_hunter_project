@@ -117,7 +117,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
-                     "dashboard_backend", "dashboard_service", "evaluation",
+                     "dashboard_backend", "dashboard_facts", "dashboard_service", "evaluation",
                      "exploration", "game_window", "reporting", "rewards", "train_agent",
                      "training"]
 

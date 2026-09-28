@@ -530,3 +530,46 @@ def test_a_real_window_lands_inside_the_cursor_monitors_work_area(env):
     assert left <= origin[0] <= right and top <= origin[1] <= bottom
     assert isinstance(game_window.bring_to_front(), bool)
     assert game_window.is_minimized() is False
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# The live panel
+# ══════════════════════════════════════════════════════════════════════════
+def test_the_live_panel_is_sent_every_few_steps_and_kept_until_reset(svc):
+    def with_telemetry():
+        n = 0
+        while True:
+            n += 1
+            yield {'frame': b'', 'log': f"step {n}", 'telemetry': {'run': 1, 'run_step': n}}
+    svc.fake.new_session = with_telemetry
+    svc.start_testing()
+    run_for(svc, 9)
+    svc.stop_testing()
+    assert svc.wait_idle()
+    sent = [p for e, p in svc.events if e == 'telemetry']
+    assert sent and all(p['session_steps'] % ds.TELEMETRY_EVERY == 0 for p in sent)
+    assert [p['run_step'] for p in sent] == [p['session_steps'] for p in sent]
+    assert svc.status()['telemetry']['run_step'] == svc.steps
+    svc.reset()
+    assert svc.wait_idle()
+    assert svc.status()['telemetry'] is None
+
+
+def test_a_step_that_stops_testing_always_sends_the_live_panel(svc):
+    def ends_on_step_one():
+        yield {'frame': b'', 'log': "step 1", 'telemetry': {'run': 1, 'run_step': 1},
+               'run_end': svc.fake.run_end}
+        while True:
+            yield {'frame': b'', 'log': "later"}
+    svc.fake.new_session = ends_on_step_one
+    svc.start_testing()
+    assert wait_for(lambda: svc.run_result is not None)
+    sent = [p for e, p in svc.events if e == 'telemetry']
+    assert sent == [{'run': 1, 'run_step': 1, 'session_steps': 1}]
+
+
+def test_items_without_a_live_panel_are_fine(svc):
+    svc.start_testing()
+    run_for(svc, 4)
+    assert not [e for e, _p in svc.events if e == 'telemetry']
+    assert svc.status()['telemetry'] is None

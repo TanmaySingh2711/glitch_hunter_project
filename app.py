@@ -56,6 +56,7 @@ from typing import Any
 from flask import Flask, Response, abort, render_template, request, send_file
 from flask_socketio import SocketIO
 
+import dashboard_facts
 from common.logging_setup import configure_logging
 
 # dashboard_backend pulls in custom_mario_env, which sets SDL_AUDIODRIVER
@@ -134,6 +135,25 @@ def api_status() -> dict[str, Any]:
     that stopped it, and which game and brain are running. A (re)loaded page
     renders from this, so a banner can never be a frontend-only invention."""
     return {**service.status(), **backend.describe()}
+
+
+@app.route('/api/project')
+def api_project() -> dict[str, Any]:
+    """The Overview page's facts: the objectives' measured results, the
+    loaded brain, the detectors, the declared benchmark bugs, the evidence on
+    disk and the size of the codebase - all read from the project's own
+    files (dashboard_facts.py), never typed in."""
+    pipeline, runs = backend.pipeline, backend.run_reports
+    return dashboard_facts.project_facts(
+        incidents=pipeline.summaries() if pipeline is not None else [],
+        runs=runs.summaries() if runs is not None else [], brain=backend.brain_facts())
+
+
+@app.route('/api/runs')
+def api_runs() -> dict[str, Any]:
+    """Every clean-game run report on disk, newest first (Bug History)."""
+    runs = backend.run_reports
+    return {"runs": runs.summaries() if runs is not None else []}
 
 
 # ─── INCIDENT FILES ───
@@ -409,6 +429,9 @@ def main(argv: list[str] | None = None) -> None:
     log.info("Pre-loading the AI model (this can take a few seconds)...")
     service.start()
     log.info("Model loaded. Ready for connections.")
+    # The Overview page's test count: pytest's collection, in the background
+    # at low priority, never on the game thread.
+    dashboard_facts.TESTS.start()
 
     if host != LOOPBACK:
         log.warning("Listening on %s - reachable by other devices on this network, "
