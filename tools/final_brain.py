@@ -5,8 +5,8 @@ and the three files the dashboard needs with it.
     python tools/final_brain.py install --zip FILE.zip   # or use a bundle you downloaded
     python tools/final_brain.py bundle OUT.zip           # maintainers: build the release asset
 
-The four files are too large for git, so only their SHA-256 hashes are
-tracked (artifacts.json). `install` refuses any bundle whose files do not
+The four files are in git since 2026-09-29; this is the fallback for a
+checkout that lacks them. Their SHA-256 hashes are in artifacts.json. `install` refuses any bundle whose files do not
 match those hashes exactly, writes nothing until every file has been checked,
 never overwrites a different file already in place, and leaves the installed
 files read-only, as the frozen originals are. Nothing is trained or modified.

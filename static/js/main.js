@@ -38,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
         sessionIncidents: [],    // this session's incidents (Bug Tracker)
         sessionRuns: [],         // this session's run reports, oldest first
         facts: null,             // /api/project
-        evidenceChoice: 'auto',  // what the monitor shows while stopped
     };
     let currentFrameUrl = null;  // the last object URL, revoked when replaced -
                                  // otherwise each frame leaks browser memory
@@ -90,8 +89,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return svg;
     }
 
-    const num = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : '—');
-    const pct = (x, digits = 1) => (typeof x === 'number' ? `${(x * 100).toFixed(digits)}%` : '—');
+    const num = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : '-');
+    const pct = (x, digits = 1) => (typeof x === 'number' ? `${(x * 100).toFixed(digits)}%` : '-');
 
     function localTime(utc) {
         const d = new Date(utc);
@@ -118,23 +117,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!failed) s.appendChild(el('span', 'spinner'));
         s.appendChild(document.createTextNode(text));
         return s;
-    }
-
-    function checkItem(kind, title, sub) {
-        // kind: ok | wait | warn | bug | idle
-        const li = el('li');
-        const ic = el('span', `check-icon check-icon--${kind}`);
-        if (kind === 'wait') {
-            ic.appendChild(el('span', 'spinner'));
-        } else {
-            ic.appendChild(icon({ ok: 'check', warn: 'alert', bug: 'bug', idle: 'ring' }[kind] || 'dot'));
-        }
-        li.appendChild(ic);
-        const t = el('span', 'checklist__text');
-        t.appendChild(el('b', null, title));
-        if (sub) t.appendChild(el('span', 'checklist__sub', sub));
-        li.appendChild(t);
-        return li;
     }
 
     function setFact(name, text) {
@@ -200,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function incidentLinks(inc, withDetails) {
         const box = el('div', 'actions');
         const pdf = incidentFile(inc, 'report.pdf');
-        if (pdf) box.appendChild(link('Open PDF report', fileUrl(inc.incident_id, pdf), { primary: true }));
+        if (pdf) box.appendChild(link('PDF report', fileUrl(inc.incident_id, pdf), { primary: true }));
         else box.appendChild(pendingChip('PDF report: ' + (renderState(inc, 'report.pdf') === 'failed' ? 'failed' : 'writing…'),
                                          renderState(inc, 'report.pdf') === 'failed'));
         const md = incidentFile(inc, 'report.md');
@@ -218,7 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return box;
     }
 
-    const RUN_FILES = [['report.pdf', 'Open PDF report'], ['report.md', 'Markdown'],
+    const RUN_FILES = [['report.pdf', 'PDF report'], ['report.md', 'Markdown'],
                        ['final.png', 'Final frame'], ['finish.gif', 'GIF']];
 
     function runLinks(report) {
@@ -228,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 box.appendChild(link(label, runFileUrl(report.run_id, name), { primary: name === 'report.pdf' }));
             } else {
                 const failed = (report.renders || {})[name] === 'failed';
-                box.appendChild(pendingChip(`${label.replace('Open ', '')}: ${failed ? 'failed' : 'writing…'}`, failed));
+                box.appendChild(pendingChip(`${label}: ${failed ? 'failed' : 'writing…'}`, failed));
             }
         }
         box.appendChild(link('Download all (.zip)', `/runs/${encodeURIComponent(report.run_id)}/bundle.zip`, { download: true }));
@@ -320,10 +302,6 @@ document.addEventListener('DOMContentLoaded', () => {
         dot.className = `tab__dot${p === 'bug' ? ' tab__dot--bug' : p === 'clean' ? ' tab__dot--ok' : ''}`;
     }
 
-    function gameName() {
-        return GAME_NAMES[state.status.game_variant] || 'game';
-    }
-
     function renderControls(p) {
         const labels = {
             switching: 'Loading game…', testing: 'Testing…', bug: 'Resume testing',
@@ -339,115 +317,6 @@ document.addEventListener('DOMContentLoaded', () => {
             r.checked = r.value === state.status.game_variant;
             r.disabled = !state.connected || state.switching;
         }
-        const hints = {
-            connecting: 'Connecting to the dashboard server…',
-            offline: 'The dashboard server is not answering. The page reconnects by itself.',
-            switching: 'Loading the other game and the AI brain against it…',
-            ready: `Press Start testing: the AI starts playing the ${gameName().toLowerCase()} and its view appears in the centre.`,
-            testing: 'Pause stops at once and keeps everything. Reset ends this session and clears the page.',
-            paused: 'Resume continues from the same moment. Reset starts a fresh session.',
-            bug: 'Resume testing continues from the moment of the bug. The evidence stays saved.',
-            clean: 'Start next run plays the level again. Reset clears the page first.',
-            ended: 'Start next run plays the level again. Reset clears the page first.',
-            error: 'Testing stopped after an error (see the dashboard\'s terminal window).',
-            capture_failed: 'A rule broke but its evidence could not be saved (see the terminal window).',
-        };
-        $('control-hint').textContent = hints[p] || '';
-    }
-
-    function renderNow(p) {
-        const card = $('now-card');
-        const d = detectorCount();
-        const checks = d ? `${d} detectors` : 'The detectors';
-        const t = state.telemetry || {};
-        let kind = 'neutral';
-        let title = '';
-        let body = '';
-        let next = '';
-        switch (p) {
-        case 'connecting':
-            title = 'Connecting to the dashboard…';
-            break;
-        case 'offline':
-            kind = 'warn';
-            title = 'Connection lost';
-            body = 'The page cannot reach the dashboard server. Check its terminal window; the page reconnects by itself.';
-            break;
-        case 'switching':
-            kind = 'info';
-            title = 'Loading the game…';
-            body = 'The previous game is unloaded completely, then the AI brain is loaded against the new one.';
-            break;
-        case 'bug': {
-            kind = 'bug';
-            const inc = state.bugFound[0];
-            title = `Bug found: ${inc.title}`;
-            const replay = replayInfo(inc);
-            const reports = reportsInfo(inc);
-            body = 'Testing stopped automatically at the exact frame and the evidence is saved. '
-                + (replay.kind === 'wait' ? 'The run is being replayed to confirm it'
-                    : replay.kind === 'ok' ? 'The replay confirmed it' : `Replay: ${replay.label.toLowerCase()}`)
-                + (reports.kind === 'ok' ? '; the GIF, Markdown and PDF reports are ready.'
-                    : reports.kind === 'wait' ? ', and the reports are being written in the background.'
-                        : '; some reports could not be written.');
-            next = 'Look at the evidence, open the report, then press Resume testing to continue from this moment.';
-            break;
-        }
-        case 'clean':
-            kind = 'ok';
-            title = 'Level complete. No bugs found.';
-            body = `The AI reached the castle on the clean game and none of the ${d || ''} detectors fired. A run report has been saved.`.replace('  ', ' ');
-            next = 'Open the run report, or press Start next run to play the level again.';
-            break;
-        case 'ended': {
-            const r = state.runResult;
-            title = RUN_TITLES[r.end_reason] || 'The run ended';
-            body = r.end_reason === 'level_complete'
-                ? 'The run reached the castle. See its report for what the detectors found.'
-                : 'No detector fired before the run ended. On its own, a death is normal play, not a bug. Run reports are written only for runs that reach the castle.';
-            next = 'Press Start next run to play the level again, or Reset to clear the page.';
-            break;
-        }
-        case 'testing':
-            kind = 'info';
-            if (t.phase === 'explore') {
-                title = 'The AI is exploring the level';
-                body = `Its QA training pays it for reaching places it has never visited. ${checks} check the game's physics on every frame.`;
-            } else if (t.phase === 'complete') {
-                title = 'The AI is heading for the flag';
-                body = `Exploring here has dried up, so it now moves towards the finish. ${checks} keep checking every frame.`;
-            } else {
-                title = `The AI is playing the ${gameName().toLowerCase()}`;
-                body = `${checks} check the game's physics on every frame.`;
-            }
-            next = 'If any rule breaks, testing pauses by itself and a bug report is written.';
-            break;
-        case 'error':
-            kind = 'warn';
-            title = 'Testing stopped after an error';
-            body = 'See the dashboard\'s terminal window for the details.';
-            next = 'Press Resume testing to try again, or Reset to start fresh.';
-            break;
-        case 'capture_failed':
-            kind = 'warn';
-            title = 'A rule broke, but its evidence could not be saved';
-            body = 'Testing stopped so that this is not missed. See the dashboard\'s terminal window.';
-            break;
-        case 'paused':
-            title = state.pauseReason === 'window_closed' ? 'Paused: the game window was closed' : 'Testing paused';
-            body = 'Nothing is lost: the AI, the run and everything found so far are kept.';
-            next = 'Press Resume testing to continue from the same moment.';
-            break;
-        default:
-            title = 'Ready to test';
-            body = state.status.brain_path
-                ? 'The AI brain is loaded. Choose a game on the left and press Start testing.'
-                : 'Choose a game on the left and press Start testing.';
-        }
-        card.className = `now now--${kind}`;
-        $('now-title').textContent = title;
-        $('now-body').textContent = body;
-        $('now-next').textContent = next;
     }
 
     // The five stages of a test, Objective 1 to 3, lit from real state only.
@@ -496,11 +365,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const ICON = { done: 'check', ok: 'check', bug: 'bug', warn: 'alert', pending: 'ring' };
         const STATUS_WORD = { done: 'done', ok: 'done', bug: 'bug found', warn: 'needs attention', active: 'in progress', pending: 'not yet' };
         $('stepper').replaceChildren(...steps.map((st, i) => {
-            const li = el('li', `step step--${st.st}`);
+            // Every finished step looks the same (a tick), whatever it found:
+            // the top bar, the video and the result card already say how it ended.
+            const look = st.st === 'ok' || st.st === 'bug' ? 'done' : st.st;
+            const li = el('li', `step step--${look}`);
             if (st.st === 'active') li.setAttribute('aria-current', 'step');
             const ic = el('span', 'step__icon');
             if (st.st === 'active') ic.appendChild(el('span', 'spinner'));
-            else ic.appendChild(icon(ICON[st.st]));
+            else ic.appendChild(icon(ICON[look]));
             li.appendChild(ic);
             const tx = el('span', 'step__text');
             tx.appendChild(el('span', 'step__title', `${i + 1}. ${st.title}`));
@@ -553,8 +425,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const badge = $('monitor-badge');
         const B = {
             testing: ['live', null, 'LIVE · AI playing'],
-            bug: ['bug', 'bug', 'BUG FOUND · stopped at the detection frame'],
-            clean: ['ok', 'check', 'LEVEL COMPLETE · no bugs found'],
+            bug: ['bug', 'bug', 'BUG FOUND · Stopped at the detection frame'],
+            clean: ['ok', 'check', 'LEVEL COMPLETE · No bugs found'],
             paused: ['', 'pause', 'PAUSED'],
             ended: ['', 'flag', 'RUN ENDED'],
         }[p];
@@ -563,38 +435,20 @@ document.addEventListener('DOMContentLoaded', () => {
             badge.className = `monitor__badge${B[0] ? ` monitor__badge--${B[0]}` : ''}`;
             badge.replaceChildren(B[1] ? icon(B[1]) : el('span', 'live-dot'), document.createTextNode(B[2]));
         }
-        const game = $('monitor-game');
-        game.hidden = !state.status.game_variant;
-        game.textContent = gameName();
         $('monitor-empty').hidden = videoFeed.hasAttribute('src');
 
-        // Stopped on a bug or a finished run: offer the saved evidence on the
-        // monitor itself (the GIF by default, once it has been written).
+        // Stopped on a bug or a finished run: the monitor shows the saved
+        // evidence itself - the GIF once it has been written, the still frame
+        // until then.
         const sources = evidenceSources();
-        const sw = $('evidence-switch');
         const view = $('evidence-view');
         if (!sources.length) {
-            sw.hidden = true;
             view.hidden = true;
             view.removeAttribute('src');
             return;
         }
-        let choice = state.evidenceChoice;
-        if (choice === 'auto') {
-            const gif = sources.find((s) => s.key === 'gif' && s.url);
-            const still = sources.find((s) => s.key !== 'live' && s.key !== 'gif' && s.url);
-            choice = (gif || still || sources[0]).key;
-        }
-        const chosen = sources.find((s) => s.key === choice && (s.key === 'live' || s.url)) || sources[0];
-        sw.hidden = false;
-        sw.replaceChildren(el('span', 'evidence-switch__label', 'Show:'), ...sources.map((s) => {
-            const b = el('button', 'btn btn--secondary btn--sm', s.label + (s.pending ? ' (writing…)' : ''));
-            b.type = 'button';
-            b.disabled = s.key !== 'live' && !s.url;
-            b.setAttribute('aria-pressed', String(s.key === chosen.key));
-            b.addEventListener('click', () => { state.evidenceChoice = s.key; renderMonitor(phase()); });
-            return b;
-        }));
+        const chosen = sources.find((s) => s.key === 'gif' && s.url)
+            || sources.find((s) => s.key !== 'live' && s.url) || sources[0];
         monitor.classList.toggle('monitor--evidence', chosen.key !== 'live');
         if (chosen.key === 'live') {
             view.hidden = true;
@@ -626,7 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ic.appendChild(icon('bug'));
                     head.appendChild(ic);
                     const tx = el('div');
-                    tx.appendChild(el('p', 'result__kicker', 'Bug found · testing stopped automatically'));
+                    tx.appendChild(el('p', 'result__kicker', 'Bug found · Testing stopped automatically'));
                     tx.appendChild(el('p', 'result__title', state.bugFound.length > 1
                         ? `${state.bugFound.length} bugs on the same step` : inc.title));
                     head.appendChild(tx);
@@ -636,17 +490,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (state.bugFound.length > 1) body.appendChild(el('p', 'result__title', inc.title));
                 if (inc.synthetic) body.appendChild(el('p', 'tag tag--synthetic', 'SYNTHETIC TEST: not a game bug'));
                 body.appendChild(el('p', 'result__desc', inc.description));
-                const replay = replayInfo(inc);
-                const reports = reportsInfo(inc);
-                const list = el('ul', 'checklist');
-                list.append(
-                    checkItem('ok', 'Testing paused', 'Before the game moved on, at the frame the rule broke'),
-                    checkItem('ok', `Incident created: ${inc.incident_id}`, `Captured ${shortTime(inc.created_utc)}`),
-                    checkItem('ok', 'Evidence captured', 'Trigger frame, movement history and every button press'),
-                    checkItem(replay.kind, `Replay check: ${replay.label}`, replay.text),
-                    checkItem(reports.kind, 'Reports', reports.text),
-                );
-                body.appendChild(list);
                 const facts = el('dl', 'facts');
                 const loc = inc.location || {};
                 for (const [k, v] of [['Where', `world x ${loc.x}, y ${loc.y}`], ['Severity', inc.severity],
@@ -655,9 +498,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 body.appendChild(facts);
                 body.appendChild(incidentLinks(inc, true));
-                if (i === state.bugFound.length - 1) {
-                    body.appendChild(el('p', 'result__next', 'Review the evidence, then press Resume testing to continue from this moment.'));
-                }
                 parts.push(body);
                 return parts;
             }));
@@ -674,37 +514,17 @@ document.addEventListener('DOMContentLoaded', () => {
             ic.appendChild(icon(pass ? 'check' : 'flag'));
             head.appendChild(ic);
             const tx = el('div');
-            tx.appendChild(el('p', 'result__kicker', pass ? 'Level complete · no bugs found' : 'Run ended'));
+            tx.appendChild(el('p', 'result__kicker', pass ? 'Level complete · No bugs found' : 'Run ended'));
             tx.appendChild(el('p', 'result__title', pass ? 'Clean game tested successfully'
                 : (RUN_TITLES[r.end_reason] || 'The run ended') + (report ? ` · ${report.headline}` : '')));
             head.appendChild(tx);
-            const body = el('div', 'result__body');
-            const d = detectorCount();
-            const list = el('ul', 'checklist');
-            if (pass) {
-                list.append(
-                    checkItem('ok', 'Clean game tested', state.status.game_is_clean_baseline
-                        ? 'Its files match the pinned clean baseline' : 'The untouched original level'),
-                    checkItem('ok', 'Mario reached the castle', `After ${num(report.agent_steps)} agent steps`),
-                    checkItem('ok', `${d ? `${d} detectors` : 'Every detector'} active; none fired`, 'Checked on every frame of the run'),
-                    checkItem((report.available || []).includes('report.pdf') ? 'ok' : 'wait', 'Run report saved',
-                              `${report.run_id}: PDF, Markdown, final frame, GIF`),
-                );
-            } else {
-                list.append(
-                    checkItem('ok', 'No detector fired', 'Before the run ended'),
-                    checkItem('idle', RUN_TITLES[r.end_reason] || 'The run ended',
-                              report ? 'A run report was saved' : 'Run reports are written only for runs that reach the castle'),
-                );
+            const parts = [head];
+            if (report) {
+                const body = el('div', 'result__body');
+                body.appendChild(runLinks(report));
+                parts.push(body);
             }
-            body.appendChild(list);
-            if (report) body.appendChild(runLinks(report));
-            if (pass) {
-                body.appendChild(el('p', 'result__honest',
-                    `"No bugs found" covers this run's path and these ${d || ''} checks only. It is not proof that the game has no bugs.`.replace('  ', ' ')));
-            }
-            body.appendChild(el('p', 'result__next', 'Start next run plays the level again; Reset clears the page.'));
-            card.replaceChildren(head, body);
+            card.replaceChildren(...parts);
             card.hidden = false;
             return;
         }
@@ -715,55 +535,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── LIVE STATUS PANEL ───
     function renderTelemetry() {
         const t = state.telemetry;
-        const mode = $('t-mode');
-        const why = $('t-mode-why');
-        const legacy = state.status.reward_mode === 'legacy_completion';
-        if (!t) {
-            mode.className = 'mode-chip mode-chip--none';
-            mode.textContent = '—';
-            why.textContent = 'Shown once testing starts';
-        } else if (t.phase === 'explore') {
-            mode.className = 'mode-chip mode-chip--explore';
-            mode.textContent = 'Explore';
-            why.textContent = 'Looking for places it has never visited';
-        } else if (t.phase === 'complete') {
-            mode.className = 'mode-chip mode-chip--complete';
-            mode.textContent = 'Complete';
-            why.textContent = 'Explored enough here; heading for the flag';
-        } else {
-            mode.className = 'mode-chip';
-            mode.textContent = 'Play';
-            why.textContent = legacy ? 'The 6M brain plays to finish the level' : 'Playing the level';
-        }
-        $('t-action').textContent = t ? t.action : '—';
-        $('t-run').textContent = t ? `Run ${t.run} · step ${num(t.run_step)}` : '—';
+        $('t-action').textContent = t ? t.action : '-';
+        $('t-steps').textContent = t ? num(t.run_step) : '-';
         const prog = t && typeof t.progress === 'number' ? t.progress : null;
         $('t-progress-bar').style.width = prog === null ? '0' : `${Math.round(prog * 100)}%`;
-        $('t-progress').textContent = prog === null ? '—' : `${Math.round(prog * 100)}% of the way to the castle (best this run)`;
-
-        const cov = t && t.coverage;
-        const o2 = state.facts && state.facts.objective2;
-        const covEl = $('t-coverage');
-        const covBar = $('t-coverage-bar');
-        covEl.replaceChildren();
-        if (cov) {
-            const p = cov.covered / cov.total;
-            covBar.style.width = `${(p * 100).toFixed(2)}%`;
-            covEl.append(`${(p * 100).toFixed(2)}% of the reachable level`,
-                         el('span', 'status-row__why', `${num(cov.new_since_start)} new pixels since the dashboard started · map from training`));
-        } else if (!t && o2 && state.status.brain_approved && typeof o2.coverage_percent === 'number') {
-            covBar.style.width = `${o2.coverage_percent}%`;
-            covEl.append(`${o2.coverage_percent.toFixed(2)}% of the reachable level`,
-                         el('span', 'status-row__why', 'From training; updates live while testing'));
-        } else if (t && !cov) {
-            covBar.style.width = '0';
-            covEl.append('Not tracked for this brain');
-        } else {
-            covBar.style.width = '0';
-            covEl.append('—');
-        }
-        const d = detectorCount();
-        $('t-detectors').textContent = d ? `${d} active · checked every frame` : 'Active on every frame';
+        $('t-progress').textContent = prog === null ? '-' : `${Math.round(prog * 100)}% of the way to the castle`;
         const n = state.sessionIncidents.length;
         const seen = state.sessionIncidents.reduce((a, i) => a + (i.seen_this_session || 1), 0);
         $('t-bugs').textContent = n ? `${n} found${seen > n ? ` · ${seen} sightings` : ''}` : 'None yet';
@@ -822,51 +598,15 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTelemetry();
     }
 
-    // ─── BRAIN CARD ───
-    function renderBrain() {
-        const s = state.status;
-        const b = (state.facts && state.facts.brain) || {};
-        const name = $('brain-name');
-        const detail = $('brain-detail');
-        const checks = $('brain-checks');
-        checks.replaceChildren();
-        if (!s.brain_path) {
-            name.textContent = state.connected ? 'No trained brain found' : '—';
-            detail.textContent = state.connected ? 'An untrained policy would play: install the final brain (README, step 4).' : '';
-            return;
-        }
-        const steps = b.num_timesteps;
-        name.textContent = s.brain_approved ? 'Final QA brain (Objective 2)'
-            : s.reward_mode === 'legacy_completion' ? 'First brain (Objective 1)' : 'QA brain';
-        detail.textContent = [steps ? `${num(steps)} training steps` : null,
-                              b.parameters ? `${num(b.parameters)} parameters` : null,
-                              s.brain_path].filter(Boolean).join(' · ');
-        checks.append(s.brain_approved
-            ? checkItem('ok', 'Verified', 'Its SHA-256 matches the approved Objective-2 record')
-            : checkItem('warn', 'Not the approved final brain', 'The 16M brain is not installed or does not match its record'));
-        checks.append(checkItem('ok', s.reward_mode === 'qa_exploration' ? 'Mode: QA exploration' : 'Mode: finish the level',
-            s.reward_mode === 'qa_exploration' ? 'Explore first, then finish' : 'The Objective-1 reward'));
-        if (s.game_variant === 'mario_clean') {
-            checks.append(s.game_is_clean_baseline
-                ? checkItem('ok', 'Clean game verified', 'Its files match the pinned baseline')
-                : checkItem('warn', 'Clean game differs from its pin', 'Its files do not match the pinned baseline'));
-        } else if (s.game_variant === 'mario_bugged') {
-            const n = state.facts && state.facts.objective3 ? state.facts.objective3.benchmark_bugs.length : null;
-            checks.append(checkItem('bug', 'Bugged copy loaded', `${n ? `${n} declared` : 'Declared'} benchmark bugs`));
-        }
-    }
-
     // ─── RENDER EVERYTHING THAT DEPENDS ON THE STATE ───
     function render() {
         const p = phase();
         renderPill(p);
         renderControls(p);
-        renderNow(p);
         renderStepper(p);
         renderMonitor(p);
         renderResult(p);
         renderTelemetry();
-        renderBrain();
         $('synthetic-badge').hidden = !((state.status.synthetic_probes || []).length);
     }
 
@@ -934,7 +674,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    let factsTimer = null;
     async function refreshFacts() {
         try {
             const res = await fetch('/api/project', { cache: 'no-store' });
@@ -943,18 +682,12 @@ document.addEventListener('DOMContentLoaded', () => {
             renderFacts();
             render();
             renderTracker();
-            // The test count is collected in the background; ask again until known.
-            clearTimeout(factsTimer);
-            const tests = state.facts.engineering && state.facts.engineering.tests;
-            if (tests && (tests.status === 'counting' || tests.status === 'idle')) {
-                factsTimer = setTimeout(refreshFacts, 4000);
-            }
         } catch (err) {
             console.warn('could not load the project facts', err);
         }
     }
 
-    // ─── OVERVIEW + HOW IT WORKS: the project's facts ───
+    // A number card (Bug History's summary).
     function stat(label, value, sub, opts = {}) {
         const d = el('div', `stat${opts.pending ? ' stat--pending' : ''}`);
         d.append(el('p', 'stat__label', label), el('p', `stat__value${opts.ok ? ' stat__value--ok' : ''}`, value));
@@ -962,6 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return d;
     }
 
+    // ─── OVERVIEW + HOW IT WORKS: the project's facts ───
     function renderFacts() {
         const f = state.facts;
         if (!f) return;
@@ -969,7 +703,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const o2 = f.objective2;
         const o3 = f.objective3 || { detectors: [], benchmark_bugs: [], evidence: {} };
         const ev = o3.evidence || {};
-        const eng = f.engineering || {};
         const brain = f.brain || {};
         const nDet = o3.detectors.length;
         const nBugs = o3.benchmark_bugs.length;
@@ -977,44 +710,17 @@ document.addEventListener('DOMContentLoaded', () => {
         setFact('detector-count', nDet ? String(nDet) : 'the');
         setFact('action-count', brain.actions ? String(brain.actions) : 'its');
         setFact('bug-count', nBugs ? String(nBugs) : 'planted');
-        setFact('o1-steps', o1 && o1.timesteps ? num(o1.timesteps) : '—');
+        setFact('o1-steps', o1 && o1.timesteps ? num(o1.timesteps) : '-');
         setFact('o1-completion', o1 ? `Finishes the level in ${pct(o1.completion_rate)} of ${o1.episodes} test runs` : 'Result file not found');
         const covPct = o2 && typeof o2.coverage_percent === 'number' ? `${o2.coverage_percent.toFixed(2)}%` : null;
-        setFact('o2-coverage', covPct || '—');
+        setFact('o2-coverage', covPct || '-');
         setFact('o2-completion', o2
             ? `${num(o2.timesteps)} training steps · finishes ${pct(o2.completion_rate)} (was ${pct(o2.baseline_completion_rate)}) · ${o2.verdict}`
             : 'The final brain is not installed');
         const caught = (ev.benchmark_bugs_with_evidence || []).length;
-        setFact('o3-caught', nBugs ? `${caught} of ${nBugs}` : '—');
-        const cleanInc = ev.incidents_per_game ? ev.incidents_per_game.mario_clean : null;
-        setFact('o3-clean', typeof cleanInc === 'number'
-            ? `${nDet} detectors · ${cleanInc} incident${cleanInc === 1 ? '' : 's'} on the clean game · ${ev.clean_runs_no_bugs} clean "No Bugs Found" run reports`
-            : `${nDet} detectors`);
-        setFact('o1-flow', o1 ? `${num(o1.timesteps)} steps · finishes ${pct(o1.completion_rate)}` : '—');
-        setFact('o2-flow', o2 ? `${num(o2.timesteps)} steps · ${covPct || '—'} of the reachable level · finishes ${pct(o2.completion_rate)} · ${o2.verdict}` : 'Not installed');
-
-        const tiles = [];
-        if (o2) tiles.push(stat('Training steps', num(o2.timesteps), o1 ? `Final QA brain, built on a ${num(o1.timesteps)}-step first brain` : 'Final QA brain'));
-        if (brain.parameters) tiles.push(stat('Brain size', num(brain.parameters), `Learned parameters · ${brain.actions} actions`));
-        if (covPct) tiles.push(stat('Reachable level explored', covPct, `${num(o2.covered)} of ${num(o2.reachable)} pixels`));
-        if (o2) tiles.push(stat('Level completion', pct(o2.completion_rate), `${o2.completed} of ${o2.episodes} runs · was ${pct(o2.baseline_completion_rate)} · ${o2.verdict}`));
-        if (nDet) {
-            const eng5 = o3.detectors.filter((d) => d.group === 'engine').length;
-            tiles.push(stat('Bug detectors', String(nDet), `${eng5} engine rules + ${nDet - eng5} collision and jump rules`));
-        }
-        if (nBugs) tiles.push(stat('Benchmark bugs', `${caught} of ${nBugs}`, 'Planted bugs with saved, replayed evidence'));
-        if (typeof cleanInc === 'number') {
-            tiles.push(stat('Incidents on the clean game', String(cleanInc), ev.clean_runs_no_bugs
-                ? `Each would be a false alarm · ${ev.clean_runs_no_bugs} clean runs saved with "No Bugs Found"`
-                : 'Each would be a false alarm · no clean-game run saved yet',
-            { ok: cleanInc === 0 && ev.clean_runs_no_bugs > 0 }));
-        }
-        const tests = eng.tests || {};
-        if (tests.status === 'done') tiles.push(stat('Automated tests', num(tests.count), 'Collected by pytest from the tests folder'));
-        else if (tests.status === 'counting' || tests.status === 'idle') tiles.push(stat('Automated tests', 'Counting…', 'pytest is collecting them in the background', { pending: true }));
-        if (eng.source_lines) tiles.push(stat('Project code', `${num(eng.source_lines)} lines`, `Python in ${eng.source_files} files, plus ${num(eng.test_lines)} lines of tests (game code not counted)`));
-        if (eng.commits) tiles.push(stat('Commits', num(eng.commits), 'In the git history'));
-        $('stat-grid').replaceChildren(...tiles);
+        setFact('o3-caught', nBugs ? `${caught} of ${nBugs}` : '-');
+        setFact('o1-flow', o1 ? `${num(o1.timesteps)} steps · finishes ${pct(o1.completion_rate)}` : '-');
+        setFact('o2-flow', o2 ? `${num(o2.timesteps)} steps · ${covPct || '-'} of the reachable level · finishes ${pct(o2.completion_rate)} · ${o2.verdict}` : 'Not installed');
 
         const cat = $('bug-catalogue');
         cat.replaceChildren(...o3.benchmark_bugs.map((b) => {
@@ -1118,7 +824,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     actions.style.marginTop = '0';
                     tr.append(cell(el('span', 'data__nowrap', localTime(r.created_utc))),
                               cell(el('span', 'data__title', r.headline), el('span', 'data__sub', r.run_id)),
-                              cell(GAME_NAMES[r.game_variant] || String(r.game_variant || '—')),
+                              cell(GAME_NAMES[r.game_variant] || String(r.game_variant || '-')),
                               cell(num(r.agent_steps)), cell(actions));
                     return tr;
                 })));
@@ -1168,7 +874,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             detail = await res.json();
         } catch (err) {
-            note(`— could not open ${id}: ${err.message} —`);
+            note(`Could not open ${id}: ${err.message}`);
             return;
         }
         const inc = detail.summary;
@@ -1252,7 +958,6 @@ document.addEventListener('DOMContentLoaded', () => {
         state.pauseReason = null;
         state.bugFound = null;       // the server clears bug_found on resume, and says so
         state.runResult = null;      // ...and run_result: Start plays the next run
-        state.evidenceChoice = 'auto';
         socket.emit('start_testing');
         const ph = $('log-placeholder');
         if (ph) ph.remove();
@@ -1280,7 +985,6 @@ document.addEventListener('DOMContentLoaded', () => {
         state.telemetry = null;
         state.sessionIncidents = [];
         state.sessionRuns = [];
-        state.evidenceChoice = 'auto';
         clearLog();
         clearFrame();
         render();
@@ -1305,7 +1009,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('game_switched', (data) => {
         state.switching = false;
         if (!(data && data.ok)) {
-            note(`— could not switch the game: ${(data && data.error) || 'unknown error'} —`);
+            note(`Could not switch the game: ${(data && data.error) || 'unknown error'}`);
         }
         refreshStatus();         // the server's selection wins, whichever it is
         refreshFacts();
@@ -1340,25 +1044,24 @@ document.addEventListener('DOMContentLoaded', () => {
         state.telemetry = t;
         state.steps = t.session_steps || state.steps;
         renderTelemetry();
-        if (state.testing) renderNow(phase());
     });
 
     // A pause the SERVER initiated - most often the user closing the game
     // window with its X. The session is kept, so START TESTING reopens the
     // window and carries on from the same moment.
     const PAUSE_NOTES = {
-        window_closed: '— game window closed: testing paused. Press Resume testing to reopen it and continue —',
-        session_ended: '— the agent session ended —',
-        error: '— testing paused after an error (see the server console) —',
-        bug_found: '— BUG FOUND: testing stopped. The evidence is saved; press Resume testing to continue —',
-        capture_failed: '— an anomaly was detected but its evidence could not be saved (see the server console) —',
-        level_complete: '— LEVEL COMPLETE: testing stopped. Start next run plays again; Reset clears the page —',
-        mario_died: '— MARIO DIED: testing stopped. Start next run plays again; Reset clears the page —',
-        run_ended: '— the run ended: testing stopped. Start next run plays again; Reset clears the page —',
+        window_closed: 'Game window closed, so testing paused. Press Resume testing to reopen it and carry on.',
+        session_ended: 'The agent session ended.',
+        error: 'Testing paused after an error. See the server console.',
+        bug_found: 'BUG FOUND: testing stopped. The evidence is saved. Press Resume testing to carry on.',
+        capture_failed: 'A rule broke, but its evidence could not be saved. See the server console.',
+        level_complete: 'LEVEL COMPLETE: testing stopped. Start next run plays again, Reset clears the page.',
+        mario_died: 'MARIO DIED: testing stopped. Start next run plays again, Reset clears the page.',
+        run_ended: 'The run ended and testing stopped. Start next run plays again, Reset clears the page.',
     };
     socket.on('testing_paused', (data) => {
         const reason = (data && data.reason) || '';
-        note(PAUSE_NOTES[reason] || '— testing paused —');
+        note(PAUSE_NOTES[reason] || 'Testing paused.');
         state.testing = false;
         state.pauseReason = reason;
         render();
@@ -1368,7 +1071,6 @@ document.addEventListener('DOMContentLoaded', () => {
         state.bugFound = (data && data.incidents) || [];
         state.testing = false;
         state.pauseReason = 'bug_found';
-        state.evidenceChoice = 'auto';
         render();
         refreshIncidents();
         refreshFacts();
@@ -1379,7 +1081,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!result) return;
         state.runResult = result;
         state.testing = false;
-        state.evidenceChoice = 'auto';
         rememberRun(result.report);
         render();
         renderTracker();
@@ -1400,11 +1101,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!$('view-history').hidden) refreshHistory();
     });
     socket.on('incident_occurrence', (inc) => {
-        note(`— seen again: ${inc.title} (${inc.incident_id}), now ${inc.occurrences}× —`);
+        note(`Seen again: ${inc.title} (${inc.incident_id}), now ${inc.occurrences} times`);
         refreshIncidents();
     });
     socket.on('incident_capture_failed', (data) => {
-        note(`— anomaly detected, but its evidence could not be saved: ${(data && data.error) || 'unknown error'} —`);
+        note(`A rule broke, but its evidence could not be saved: ${(data && data.error) || 'unknown error'}`);
     });
 
     // ─── CONNECTION LIFECYCLE ───
@@ -1413,7 +1114,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // definitively NOT running - the page has to agree. Resume then continues
     // the same session.
     socket.on('disconnect', () => {
-        if (state.testing) note('— connection lost, testing stopped —');
+        if (state.testing) note('Connection lost, so testing stopped.');
         state.connected = false;
         state.testing = false;
         render();
@@ -1426,7 +1127,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (reconnect) {
             // A dropped connection came back: nothing was reset, so the same
             // session resumes on START TESTING.
-            note('— reconnected, press Resume testing to continue —');
+            note('Reconnected. Press Resume testing to carry on.');
             clearFrame();
             refreshStatus();
             refreshIncidents();

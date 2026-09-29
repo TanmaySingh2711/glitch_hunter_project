@@ -110,7 +110,8 @@ decision, not a refactor.
   checkpoint's timestep. Nothing is ever reset or repaired silently.
 * **The 6M master is never written in QA mode.** QA reads it once to seed
   itself; it is also the baseline every tool and slow test loads
-  (`config.BASELINE_MODEL`), and git is its backup.
+  (`config.BASELINE_MODEL`). It is git-ignored since 2026-09-29; commit
+  `b27e9d2` still holds it.
 * **Time alone never ends a QA episode.** Only the castle door, a death, or
   the safety reset - which needs positive stagnation evidence (a drought,
   consecutive non-transit zero-yield windows, and no progress across them),
@@ -169,16 +170,16 @@ decision, not a refactor.
 
 | Path | Written by | In git | Notes |
 |---|---|---|---|
-| `mario_brain_checkpoint.zip` | legacy training | yes | the 6M brain; SHA-256 `690d5702…a188b3` |
-| `glitch_hunter_main_brain.zip` + `_coverage.npz` | Objective 2 (renamed at clean-up) | no | **THE MAIN BRAIN**: the approved 16M QA brain and its coverage, read-only; a backup copy sits in `checkpoints_qa/final_objective2_16000000/` |
+| `mario_brain_checkpoint.zip` | legacy training | no (was until 2026-09-29) | the 6M brain; SHA-256 `690d5702…a188b3` |
+| `glitch_hunter_main_brain.zip` + `_coverage.npz` | Objective 2 (renamed at clean-up) | yes | **THE MAIN BRAIN**: the approved 16M QA brain and its coverage, read-only; a backup copy sits in `checkpoints_qa/final_objective2_16000000/` |
 | `checkpoints/` | legacy training (only if re-run) | no | legacy milestones; none are kept |
-| `exploration_data/reachable_mask.npz` | `tools/build_reachability.py` | no | the testable mask + noncoverage class map |
+| `exploration_data/reachable_mask.npz` | `tools/build_reachability.py` | yes | the testable mask + noncoverage class map |
 | `exploration_data/jump_arcs.npz` | `tools/collect_jump_arcs.py` | no | 228 real engine jump arcs - an input to the mask (the real-arc envelope) |
 | `exploration_data/observed_reach.npz` | `tools/build_reachability.py --tighten` | no | real play the arc envelope denies, kept testable so a denominator change loses no pixel |
 | `exploration_data/coverage_bootstrap_6000000_mask_v4.npz` | `tools/bootstrap_coverage.py`, re-stamped by `tools/migrate_coverage.py` | no | the QA campaign's starting map (`config.BOOTSTRAP_COVERAGE`) |
 | `exploration_data/anchor_states.npz` | `tools/build_anchor_set.py` | no | the states `AnchorConsolidationCallback` holds KL against |
 | `checkpoints_qa/`, `glitch_hunter_qa*.{zip,npz}` | QA training | no | matched model/coverage pairs |
-| `checkpoints_qa/final_objective2_16000000/` | by hand at closure | no | **frozen**: the closure record, the evidence, and a read-only backup of the main brain. See `docs/OBJECTIVE2.md` |
+| `checkpoints_qa/final_objective2_16000000/` | by hand at closure | only `FINAL_OBJECTIVE2.json` | **frozen**: the closure record, the evidence, and a read-only backup of the main brain. See `docs/OBJECTIVE2.md` |
 | `checkpoints_qa/coverage_audit_trail.jsonl` | QA training | no | append-only coverage growth, one line per 10k steps |
 | `checkpoints_qa/reward_telemetry.jsonl` | QA training | no | append-only reward books: one line per episode (channels per phase) + 10k-step summaries |
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |

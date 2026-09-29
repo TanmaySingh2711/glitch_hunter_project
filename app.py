@@ -70,6 +70,9 @@ from reporting.store import StoreError
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# The page's HTML is re-read whenever templates/index.html changes, so an
+# edit to the page shows on a browser refresh, with no server restart.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # ─── async_mode='threading' (was 'eventlet') ───
 # eventlet is unmaintained and Flask-SocketIO's own maintainer now
@@ -84,9 +87,21 @@ socketio = SocketIO(app, async_mode='threading')
 
 # Cache-busting: appended as ?v=... on static asset URLs (see index.html)
 # so a browser that already cached an old style.css/main.js is forced to
-# fetch the current one after every restart, instead of silently showing a
-# stale page until the user thinks to hard-refresh.
-ASSET_VERSION = str(int(time.time()))
+# fetch the current one, instead of silently showing a stale page until the
+# user thinks to hard-refresh. The version is the newest modification time
+# of the page's own files, read on every page load: an edited style.css or
+# main.js shows on the next refresh, with no server restart.
+STATIC_ASSETS = ("css/style.css", "js/main.js", "vendor/socket.io.min.js")
+
+
+def asset_version() -> str:
+    newest = 0.0
+    for name in STATIC_ASSETS:
+        try:
+            newest = max(newest, os.path.getmtime(os.path.join(app.static_folder or "", name)))
+        except OSError:
+            continue
+    return str(int(newest * 1000)) if newest else str(int(time.time()))
 
 LOOPBACK = '127.0.0.1'
 DEFAULT_PORT = 5000
@@ -107,7 +122,7 @@ service = GameWindowService(backend, emit=socketio.emit)
 
 @app.route('/')
 def index() -> str:
-    return render_template('index.html', asset_version=ASSET_VERSION)
+    return render_template('index.html', asset_version=asset_version())
 
 
 @app.route('/healthz')

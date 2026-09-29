@@ -1213,10 +1213,11 @@ OBSERVED_REACH_PATH = f"{EXPLORATION_DATA_DIR}/observed_reach.npz"
 CHECKPOINT_DIR_QA = "checkpoints_qa"
 CHECKPOINT_NAME_QA = "glitch_hunter_qa"
 # The Objective-1 (6M completion) brain: the retention baseline every tool and
-# slow test reads. It is the git-tracked master itself - git is its backup
-# (`git checkout -- mario_brain_checkpoint.zip` restores it), so the three
-# byte-identical copies it used to have in backup_6M/ and checkpoints/ were
-# removed on 2026-09-24.
+# slow test reads. One copy: the three byte-identical copies it used to have
+# in backup_6M/ and checkpoints/ were removed on 2026-09-24. Since 2026-09-29
+# it is git-ignored (a clone ships the final 16M brain instead); commit
+# b27e9d2 still holds it
+# (`git restore --source=b27e9d2 mario_brain_checkpoint.zip` restores it).
 BASELINE_MODEL = "mario_brain_checkpoint.zip"
 # The bootstrap map, re-stamped to the flag-trigger-corrected mask by
 # tools/migrate_coverage.py (visited bitmap byte-identical, 1,872,441 covered

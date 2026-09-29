@@ -11,6 +11,12 @@ pre-commit install          # optional: lint + type-check on every commit
 
 (`uv sync --active` installs the same versions from `pyproject.toml`'s `dev` group.)
 
+Working on the dashboard page: edits to `templates/index.html`,
+`static/css/style.css` and `static/js/main.js` show on a browser refresh while
+the dashboard keeps running (`app.py` re-reads the template and versions the
+CSS and JavaScript by their file times). A change to Python code still needs a
+restart of the dashboard.
+
 ## Before every commit
 
 ```bash
@@ -60,8 +66,8 @@ and Windows.
   (`test_a_very_long_drought_in_coherent_transit_cannot_reset`), not the
   function.
 * Mark anything that takes more than a few seconds `@pytest.mark.slow`.
-* A test that needs a git-ignored artifact (`exploration_data/`,
-  `checkpoints_qa/`, `glitch_hunter_main_brain.zip`) must `pytest.skip` with the reason when it is
+* A test that needs a git-ignored artifact (most of `exploration_data/` and
+  `checkpoints_qa/`, `mario_brain_checkpoint.zip`) must `pytest.skip` with the reason when it is
   absent, so CI and fresh clones stay green.
 
 ## Commits
@@ -96,9 +102,9 @@ python tools/verify_artifacts.py --record
 
 ## Releasing the final brain
 
-The final 16M brain and its three companion files are never committed; they
-ship as one GitHub Release asset that `tools/final_brain.py install`
-downloads and verifies. Only if the approved brain itself ever changes (a new
+The final 16M brain and its three companion files are committed, and they
+also ship as one GitHub Release asset that `tools/final_brain.py install`
+downloads and verifies (for a checkout that lacks them). Only if the approved brain itself ever changes (a new
 closure record and new hashes in `artifacts.json`), rebuild and publish the
 bundle:
 

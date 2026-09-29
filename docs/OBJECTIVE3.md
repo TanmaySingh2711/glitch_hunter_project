@@ -46,9 +46,10 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 * **Dashboard:** every detection pauses testing; *Resume testing* continues; the Bug
   Tracker shows this session's bugs (Reset, or refreshing the page, empties it;
   nothing is deleted), and Bug History lists every incident and run report on disk.
-  Pick "Clean game" or "Bugged game" on the Live Testing tab. A five-step bar
-  and a *Bug found* card show each automatic stage as it completes (incident,
-  evidence, replay, reports), from the incident's own manifest.
+  Pick "Clean game" or "Bugged game" on the Live Testing tab. The five-step
+  list in Live status shows each automatic stage as it completes (bug
+  detected, evidence and replay, report ready), from the incident's own
+  manifest; a *Bug found* card shows the bug and its files.
 * **Clean-run report:** on the clean game, testing also stops when a run ends.
   A run that reaches the castle gets a run report in `run_reports/RUN-…/`
   (`reporting/run_report.py`): `run.json`, `final.png`, `finish.gif`,

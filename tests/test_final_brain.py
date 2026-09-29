@@ -1,8 +1,7 @@
 """tools/final_brain.py: the final 16M brain reaches a fresh clone intact.
 
-The four files are git-ignored; only their hashes are tracked. These tests use
-stand-in files and a stand-in artifacts.json in a scratch project root, so
-they run anywhere (CI has none of the real files)."""
+These tests use stand-in files and a stand-in artifacts.json in a scratch
+project root, so they never depend on the real files."""
 import importlib.util
 import io
 import json

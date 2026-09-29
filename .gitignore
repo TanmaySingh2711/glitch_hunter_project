@@ -39,21 +39,14 @@ coverage.xml
 # binaries that change on every run and are already managed by
 # train_agent.py, not by git.
 #
-# Note on order: git cannot re-include a file whose PARENT DIRECTORY is
-# excluded, so the negation below only works because the master checkpoint
-# lives at the repo root, not inside checkpoints/.
+# The 6M brain (mario_brain_checkpoint.zip, Objective 1) is NOT tracked any
+# more (2026-09-29): a clone ships the final 16M brain instead (THE MAIN
+# BRAIN, below). The 6M file stays in git history and in artifacts.json; get
+# it back with `git checkout b27e9d2 -- mario_brain_checkpoint.zip`.
 # ═══════════════════════════════════════════════════════════════════════
 checkpoints/
 logs/
 mario_brain_*checkpoint*.zip
-
-# EXCEPTION: the master checkpoint IS tracked, so a fresh clone gets a
-# working trained agent instead of an untrained random policy. At 20MB
-# that is a reasonable one-off cost - but do NOT re-commit it after every
-# retrain: git stores a near-complete new copy each time, which is exactly
-# how this repo got bloated before. Commit an updated brain deliberately,
-# when there is a real improvement worth sharing.
-!mario_brain_checkpoint.zip
 
 # ═══════════════════════════════════════════════════════════════════════
 # EXPLORATION / QA ARTIFACTS
@@ -62,9 +55,17 @@ mario_brain_*checkpoint*.zip
 #                   final_objective2_16000000/ - the Objective-2 closure
 #                   record, evidence and a backup of the main brain
 #                   (their SHA-256s ARE tracked, in artifacts.json)
+# EXCEPTION: the two files the dashboard needs to run the final 16M brain
+# ARE tracked - the approval record it checks the brain against, and the
+# reachable-space mask its coverage map is measured on. git cannot
+# re-include a file whose parent directory is excluded, hence `dir/*`.
 # ═══════════════════════════════════════════════════════════════════════
-exploration_data/
-checkpoints_qa/
+exploration_data/*
+!exploration_data/reachable_mask.npz
+checkpoints_qa/*
+!checkpoints_qa/final_objective2_16000000/
+checkpoints_qa/final_objective2_16000000/*
+!checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json
 
 # Tool outputs - regenerable records, one per run:
 #   coverage_audits/     tools/remaining_coverage_map.py (pictures + region lists)
@@ -92,17 +93,16 @@ run_reports/
 dist/
 
 # The QA-phase master lives at the repo root, next to (never on top of)
-# mario_brain_checkpoint.zip. Unlike that file it is NOT tracked: the
-# completion brain is tracked so a fresh clone can watch the agent play, and
-# the QA brain would add a new 20MB blob to history on every push.
+# mario_brain_checkpoint.zip. It is NOT tracked: training overwrites it, and
+# each push would add a new 20MB blob to history.
 glitch_hunter_qa.zip
 glitch_hunter_qa_coverage.npz
 
 # THE MAIN BRAIN: the approved 16,000,000-step Objective-2 brain and its
-# coverage, renamed from the QA milestone on 2026-09-24. Not tracked for the
-# same 20MB reason; its SHA-256s are in artifacts.json.
-glitch_hunter_main_brain.zip
-glitch_hunter_main_brain_coverage.npz
+# coverage map (glitch_hunter_main_brain.zip, glitch_hunter_main_brain_coverage.npz)
+# ARE tracked since 2026-09-29, so a fresh clone plays the final brain with no
+# download. It is frozen: do NOT re-commit a retrained brain over it. Its
+# SHA-256s are in artifacts.json.
 
 # ─── EDITORS & OS ───
 # CI runs on Windows and Linux and CONTRIBUTING.md invites contributors, so
@@ -123,7 +123,9 @@ Desktop.ini
 #   static/vendor/              - the vendored socket.io client. It is a
 #                                 dependency we deliberately ship so the
 #                                 dashboard works with no internet.
-#   mario_brain_checkpoint.zip  - see the exception above.
+#   glitch_hunter_main_brain.zip, glitch_hunter_main_brain_coverage.npz,
+#   checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json,
+#   exploration_data/reachable_mask.npz - the final 16M brain; see above.
 #   artifacts.json              - the SHA-256 of every protected artifact,
 #                                 including ones that are themselves ignored.
 # ═══════════════════════════════════════════════════════════════════════

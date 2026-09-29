@@ -92,7 +92,8 @@ A real QA launch still needs `--safety-cap-timesteps N` or `--unrestricted`.
   95.31%); uncovered space is not proof of "no bugs there".
 * 56.6% is one 500-episode measurement; 25% of episodes still end in death.
 * 21,473 px flagged "anomalous" were never triaged one by one.
-* Artifacts are git-ignored; git tracks only their hashes (`artifacts.json`).
+* Only the final brain's four files are in git; the other artifacts are
+  git-ignored and git tracks only their hashes (`artifacts.json`).
 
 ## Complete project flow
 

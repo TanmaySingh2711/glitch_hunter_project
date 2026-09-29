@@ -121,7 +121,7 @@ tightened along the way.
 
 This brain, `glitch_hunter_main_brain.zip`, was frozen with its coverage
 state and hashes, and Objective 2 was closed. **It is the final brain of the
-project**, distributed as a GitHub Release asset (see
+project**, and it comes with the repository (see
 [Installation, Step 4](#step-4--install-the-final-16m-qa-brain)).
 
 ---
@@ -279,16 +279,18 @@ glitch_hunter_project/
 ├── docs/                     # Objective 1-3 summaries, architecture, performance
 ├── assets/                   # README images
 │
-├── mario_brain_checkpoint.zip   # the 6M brain (Objective 1): the fallback, shipped in git
+├── glitch_hunter_main_brain.zip # THE final 16M QA brain (Objective 2), + _coverage.npz
 ├── artifacts.json               # SHA-256 of every protected artifact, incl. the final brain's files
 ├── pyproject.toml, uv.lock      # dependencies (uv)
 └── requirements.txt             # dependencies (pip)
 ```
 
-Not in git: the final 16M brain's four files (installed in Step 4 of
-Installation, into the project root, `checkpoints_qa/` and
-`exploration_data/`), and `incidents/` and `run_reports/`, which the
-dashboard creates for bug evidence and clean-run reports.
+In git from `checkpoints_qa/` and `exploration_data/`: only the two files the
+final brain needs (`final_objective2_16000000/FINAL_OBJECTIVE2.json` and
+`reachable_mask.npz`). Not in git: the 6M brain (`mario_brain_checkpoint.zip`,
+Objective 1; earlier commits still hold it), training outputs, and
+`incidents/` and `run_reports/`, which the dashboard creates for bug evidence
+and clean-run reports.
 
 ---
 
@@ -370,33 +372,40 @@ sudo apt-get install -y libgl1
 
 ### Step 4 — Install the final 16M QA brain
 
-The project's final brain (Objective 2, 16,000,000 steps) is published as a
-**GitHub Release asset** rather than stored in git: four files, about 23 MB
-zipped. One command downloads it, checks every file against the SHA-256
-hashes tracked in `artifacts.json`, and puts each file where the dashboard
-expects it:
+Nothing to do after a clone: the project's final brain (Objective 2,
+16,000,000 steps) is **in the repository**. Its four files are
+`glitch_hunter_main_brain.zip`, `glitch_hunter_main_brain_coverage.npz`,
+`checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json` and
+`exploration_data/reachable_mask.npz`. To check that they are the approved
+bytes, run:
+
+```bash
+python tools/verify_artifacts.py
+```
+
+If they are ever missing, the same four files are also published as a
+**GitHub Release asset** (release `v1.0.0`, about 23 MB zipped). One command
+downloads it, checks every file against the SHA-256 hashes tracked in
+`artifacts.json`, and puts each file where the dashboard expects it:
 
 ```bash
 python tools/final_brain.py install
 ```
 
 If the download is blocked, get `glitch_hunter_final_brain_16M.zip` from the
-repository's **Releases** page (release `v1.0.0`) and install from the file:
+repository's **Releases** page and install from the file:
 
 ```bash
 python tools/final_brain.py install --zip path/to/glitch_hunter_final_brain_16M.zip
 ```
 
-It installs `glitch_hunter_main_brain.zip`,
-`glitch_hunter_main_brain_coverage.npz`,
-`checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json` and
-`exploration_data/reachable_mask.npz`, read-only. It refuses a bundle whose
-hashes do not match, and it never overwrites a different file.
+It refuses a bundle whose hashes do not match, skips files already in place,
+and never overwrites a different file.
 
 | Brain | Where it comes from | When the dashboard uses it |
 |---|---|---|
-| **Final 16M QA brain** (`glitch_hunter_main_brain.zip`) | this step | whenever it is installed and its hash matches the closure record |
-| 6M brain (`mario_brain_checkpoint.zip`) | inside the repository | fallback only, when the final brain is not installed |
+| **Final 16M QA brain** (`glitch_hunter_main_brain.zip`) | inside the repository | whenever its hash matches the closure record |
+| 6M brain (`mario_brain_checkpoint.zip`) | not in the repository (Objective 1; earlier commits hold it) | fallback only, when the final brain is missing |
 
 Skipping this step still gives a working dashboard, including bug detection
 and reports, but it plays the Objective-1 brain, not the final project.
@@ -450,15 +459,18 @@ disk; **Live Testing** is where the test runs:
    the dashboard and loads that game.
 2. Click **Start testing**. The game streams to the centre of the page, and
    the game window waits minimised in the taskbar (click it there to watch
-   it, centred). The five-step bar above the video, *What is happening now*
-   below it, and the **Live status** panel (the AI's mode, its current
-   action, level progress, coverage, detectors, bugs this session) say what
-   the AI is doing. The raw **Agent log** is one click away under the video.
+   it, centred). Before testing starts the screen says *NO SIGNAL*. The
+   **Live status** panel says what the AI is doing: a five-step progress
+   list, then its current action, the steps taken, level progress and the
+   bugs found this session. The raw **Log terminal** is one click away under
+   the video, and the round **i** button next to *Run the test* lists the
+   agent's 10 actions.
 3. **When a bug is detected, testing stops.** The status turns red
    (*Bug found*), the video switches to the saved evidence (the trigger
-   frame, then the GIF of the moments before it), and a **Bug found** card
-   shows each stage as it completes: incident created, evidence captured,
-   replay check, reports. The bug is added to the **Bug Tracker**.
+   frame, then the GIF of the moments before it), a **Bug found** card shows
+   the bug and its files, and the five-step list in Live status ticks off
+   each stage as it completes: bug detected, evidence and replay, report
+   ready. The bug is added to the **Bug Tracker**.
 4. Open the evidence from the card, the Bug Tracker or Bug History: **PDF
    report**, **Markdown**, **Trigger frame**, **GIF**, **Download all
    (.zip)**, or **Full details** (everything in one window). Reports still
@@ -467,7 +479,7 @@ disk; **Live Testing** is where the test runs:
 
 On the clean game the Bug Tracker should stay at *No bugs detected yet*: that
 is the expected, healthy result. **When a clean-game run ends, testing
-stops.** If Mario reached the castle, a green *Level complete · no bugs found*
+stops.** If Mario reached the castle, a green *Level complete · No bugs found*
 card appears with the run report (PDF, Markdown, final frame, GIF, or all as
 a `.zip`), which is also listed in the Bug Tracker; if he died, the card says
 so. Press **Start next run** to play again, or **Reset** first to clear the
@@ -535,6 +547,10 @@ python tools/validate_incident_pipeline.py    # 37-check end-to-end test of the 
 python train_agent.py --dry-run-resume        # shows what a training run would load; trains nothing
 ```
 
+Edits to the dashboard page (`templates/`, `static/`) show on a browser
+refresh while the dashboard keeps running; a change to Python code needs a
+restart.
+
 Training is **not** needed to use the project, and it takes many hours. A real
 QA training launch is refused unless it is given an explicit cap
 (`--safety-cap-timesteps N`) or `--unrestricted`. See [tools/README.md](tools/README.md) for every tool.
@@ -570,32 +586,32 @@ hash), so a report can never be attributed to the wrong game. Details:
 
 | Feature | What you can do |
 |---|---|
-| **Overview** | The three objectives and their measured results, and the project at a glance: training steps, brain size, coverage, completion, detectors, benchmark bugs with saved evidence, clean-game incidents, automated tests, code size, commits. Every number is read from the project's own files (`dashboard_facts.py`, `/api/project`); what cannot be read is left out |
+| **Overview** | The three objectives and their measured results: training steps, coverage, completion, and the benchmark bugs with saved evidence. Every number is read from the project's own files (`dashboard_facts.py`, `/api/project`); what cannot be read is left out |
 | **How It Works** | The methodology flowchart (Objective 1 → 2 → 3, and where each ends), one live testing step, why there are two games (with the six declared bugs), and what each status colour means |
-| **Live game view** | Watch the agent play, streamed to the browser; the game window waits minimised in the taskbar. Stopped on a bug or a finished run, the video can show the saved trigger frame or GIF instead |
+| **Live game view** | Watch the agent play, streamed to the browser; the game window waits minimised in the taskbar. Stopped on a bug or a finished run, the video shows the saved GIF (the still frame until the GIF is written) |
 | **Choose the game** | Switch between *Clean game* and *Bugged game* |
 | **Start testing / Pause** | Start or pause; the button then says *Resume testing* (or *Start next run* after a clean run) and always continues from the same moment |
 | **Reset** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays). Refreshing or reopening the page does the same |
-| **Transparency** | A five-step progress bar (brain ready → exploring → bug detected → evidence and replay → report ready), *What is happening now* in plain words, and the **Live status** panel: the AI's mode (*Explore* or *Complete*), current action, run and step, level progress, reachable level explored (live, from the brain's own coverage map), active detectors, bugs this session. The status label in the top bar is always visible |
-| **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level complete · no bugs found* with its run report (PDF, Markdown, final frame, GIF, and the whole report as a `.zip`), and says plainly that this is not proof the game has no bugs |
-| **Pause on every bug** | A *Bug found* card with the bug, each automatic stage (incident created, evidence captured, replay check, reports), place, severity, confidence and times seen |
+| **Transparency** | The **Live status** panel: a five-step progress list (brain ready → exploring → bug detected → evidence and replay → report ready), then the current action, steps taken, level progress and bugs this session. The status label in the top bar is always visible |
+| **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level complete · No bugs found* with its run report (PDF, Markdown, final frame, GIF, and the whole report as a `.zip`); the report says plainly that this is not proof the game has no bugs |
+| **Pause on every bug** | A *Bug found* card with the bug, its place, severity, confidence, times seen and files; the five-step list in Live status shows each automatic stage |
 | **Bug Tracker** | Every bug found in this session, newest first; a repeat raises its *Seen* count instead of adding a duplicate. Click one for its full details |
 | **Bug History** | Every incident and clean-run report saved on disk (`/api/incidents?all=1`, `/api/runs`), with their files |
 | **Evidence links** | PDF report, Markdown report, trigger frame, GIF, the whole evidence bundle as a `.zip`, and the raw record |
-| **Agent log** | Every action the agent takes and its reward; detected bugs appear in red |
+| **Log terminal** | Every action the agent takes and its reward; detected bugs appear in red |
 | **Game window** | Starts minimised in the taskbar; click it to watch it, centred. Closing it with its X pauses testing; *Resume testing* brings it back |
-| **Agent actions** | The list of the agent's 10 actions (the link under *AI brain in use*) |
+| **Agent actions** | The list of the agent's 10 actions (the round **i** button next to *Run the test*) |
 | **Offline** | Works with no internet connection |
 
 ---
 
 ## 16. Screenshots / GIFs
 
-**The Live Testing tab while testing the clean game.** The progress bar, *What is happening now* and the Live status panel say what the AI is doing; the Bug Tracker stays empty, as it should:
+**The Live Testing tab while testing the clean game.** The Live status panel says what the AI is doing; the Bug Tracker stays empty, as it should:
 
 <p align="center"><img src="assets/dashboard.png" alt="Dashboard testing the clean game" width="900"></p>
 
-**Testing stopped on a detected bug** (stair clipping on the bugged game): the video shows the saved GIF, and the *Bug found* card shows every automatic stage done (incident, evidence, replay reproduced, reports) with the evidence links:
+**Testing stopped on a detected bug** (stair clipping on the bugged game): the video shows the saved GIF, and the *Bug found* card shows the bug with its evidence links:
 
 <p align="center"><img src="assets/bug-found.png" alt="Testing stopped on a detected stair-clipping bug" width="900"></p>
 
@@ -631,8 +647,9 @@ seconds). Visuals not yet included: a page of a generated PDF report.
 This project's own code is released under the **MIT License**. See [LICENSE](LICENSE).
 
 It covers the Python modules, dashboard, tests, tools, documentation and the
-trained weights: the 6M brain (`mario_brain_checkpoint.zip`) and the final 16M
-brain (the `v1.0.0` release asset). It does **not** cover:
+trained weights: the final 16M brain (`glitch_hunter_main_brain.zip`, also the
+`v1.0.0` release asset) and the 6M brain (`mario_brain_checkpoint.zip`, in
+earlier commits). It does **not** cover:
 
 | Component | Terms |
 |---|---|

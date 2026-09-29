@@ -4,9 +4,9 @@
 # Headless on purpose. SDL's dummy drivers give the game a real pygame
 # display surface with no monitor and no sound card, which is all the
 # environment needs; the few window-manager tests skip themselves on a driver
-# that cannot hide a window. Nothing here needs the trained checkpoint's
-# companions (the main brain, checkpoints_qa/, exploration_data/ are not in git):
-# the tests that do skip with the reason when those files are absent.
+# that cannot hide a window. The final 16M brain and its three files are in
+# git; the rest of checkpoints_qa/ and exploration_data/ and the 6M brain are
+# not, and the tests that need them skip with the reason when they are absent.
 #
 # CPU torch rather than `uv sync`: pyproject.toml pins torch to PyTorch's
 # CUDA 12.6 index for training machines, and pulling ~2.5 GB of CUDA wheels

@@ -35,7 +35,7 @@ kept narrow.
   (`reporting/run_report.RunReports.path`); `tests/test_run_report.py`
   checks the refusals. `/api/runs` and `/api/project` only read: the saved
   reports' summaries, and the project's own records (`dashboard_facts.py`).
-* **The Overview's test count runs the project's own tests' collection.**
+* **The project-facts test count (`/api/project`) runs the project's own tests' collection.**
   Once per start, `app.py` runs `python -m pytest --collect-only` on the
   `tests/` folder in a low-priority child process; collection imports the
   test modules but runs no test. Nothing from outside the project is run.
@@ -66,8 +66,9 @@ that then exits. Until then the original values are kept in
   checkpoint runs whatever it contains. Only load checkpoints you (or this
   repository) produced; `tools/verify_artifacts.py` confirms the protected
   ones are still the bytes that were recorded in `artifacts.json`.
-* **The final 16M brain is verified twice before it is used.** It is not in
-  git; `tools/final_brain.py install` downloads it over HTTPS from this
+* **The final 16M brain is verified twice before it is used.** It is in git,
+  and `tools/verify_artifacts.py` checks it against `artifacts.json`. If it
+  is missing, `tools/final_brain.py install` downloads it over HTTPS from this
   repository's GitHub Release, checks all four files against the SHA-256
   values tracked in `artifacts.json`, and writes nothing unless every one
   matches. It accepts only the four expected file names (no other path can

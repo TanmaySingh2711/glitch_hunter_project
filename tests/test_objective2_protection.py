@@ -74,6 +74,10 @@ def test_the_frozen_objective2_pair_still_matches_its_closure_record():
         record = json.load(fh)
     assert sha256_of(os.path.join(ROOT, config.FINAL_BRAIN_PATH)) == record["brain"]["sha256"]
     assert sha256_of(os.path.join(ROOT, config.FINAL_COVERAGE_PATH)) == record["coverage"]["sha256"]
+    # Git does not keep the read-only flag, so a clone's copies are writable;
+    # only the machine that froze the pair (it alone has the backup) is held to it.
+    if not os.path.exists(os.path.join(ROOT, config.FINAL_BRAIN_BACKUP)):
+        return
     for path in (config.FINAL_BRAIN_PATH, config.FINAL_COVERAGE_PATH, config.FINAL_OBJECTIVE2_RECORD):
         assert not os.access(os.path.join(ROOT, path), os.W_OK), f"{path} is writable"
 

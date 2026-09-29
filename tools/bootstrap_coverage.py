@@ -89,8 +89,9 @@ def main() -> None:
     if not os.path.exists(args.model):
         raise SystemExit(
             f"{args.model} not found.\n"
-            f"The bootstrap reads the immutable 6M baseline. Restore it from "
-            f"git (git checkout -- mario_brain_checkpoint.zip) if it is missing.")
+            f"The bootstrap reads the immutable 6M baseline. Restore it from git "
+            f"history (git restore --source=b27e9d2 mario_brain_checkpoint.zip) "
+            f"if it is missing.")
 
     reachable = load_testable()
     if reachable is None:

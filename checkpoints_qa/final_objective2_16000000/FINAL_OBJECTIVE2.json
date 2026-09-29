@@ -1,0 +1,60 @@
+{
+ "status": "FINAL - the approved Objective-2 artifacts. Frozen: do not overwrite, retrain over, or delete.",
+ "approved_on": "2026-09-21",
+ "git_head_at_freeze": "6f64a2c6b29843cab4f144bcb96ac5957322d1a5",
+ "brain": {
+  "path": "glitch_hunter_main_brain.zip",
+  "frozen_copy": "checkpoints_qa/final_objective2_16000000/glitch_hunter_main_brain.zip",
+  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
+  "num_timesteps": 16000000
+ },
+ "coverage": {
+  "path": "glitch_hunter_main_brain_coverage.npz",
+  "frozen_copy": "checkpoints_qa/final_objective2_16000000/glitch_hunter_main_brain_coverage.npz",
+  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
+  "model_timesteps": 16000000,
+  "covered_testable": 3166235,
+  "testable_total": 3757990,
+  "percent_of_testable": 84.2534,
+  "total_covered_world_px": 3299456,
+  "testable_fingerprint": "21eab893d63a257826808fe5a048d574373fcbf31f388966efa6a6b0af935e87",
+  "config_hash": "2aa9260644b994bc901c383ec08587d73a9d4dab70d63e282ad535ddbce1184d",
+  "note": "84.25% of the testable mask. NOT 100%: the remaining 591,755 px were deliberately not pursued (see docs/OBJECTIVE2_WORKLOG.md)."
+ },
+ "retention": {
+  "result_file": "evaluation/results/glitch_hunter_qa_16000000_steps_d906d09e.json",
+  "result_sha256": "be13f1e04da2f5c54c0b7906d6c69ddb6bf62714414ebfdd9d045763b2ae57b5",
+  "protocol_baseline": "evaluation/completion_baseline_6M.json",
+  "episodes": 500,
+  "completed": 283,
+  "completion_rate": 0.566,
+  "completion_rate_ci95": [
+   0.5222,
+   0.6088
+  ],
+  "mean_progress": 0.75,
+  "baseline_completion_rate": 0.468,
+  "baseline_mean_progress": 0.71,
+  "greedy_completes": true,
+  "verdict": "HEALTHY"
+ },
+ "not_this_one": {
+  "what": "the root master written when the run stopped at the safety cap: 16,002,816 steps, one rollout past the approved brain, never evaluated",
+  "archived_at": null,
+  "model_sha256": "d60bebd1db399ca736d6f0e0b89a657c8e64cc2d48e5cedd4832716021ee09c1",
+  "coverage_sha256": "11c9e7997ef15557b98276d19c3df617dc6fd09df9f1e65515bbeb24fba148c3",
+  "root_pair_was_realigned_to_the_approved_pair": true,
+  "archive_deleted_on": "2026-09-21",
+  "archive_note": "the archived copy was deleted in the 2026-09-21 cleanup; the hashes above identify the unevaluated post-cap root pair"
+ },
+ "resume_or_start_from": "venv_gpu\\Scripts\\python.exe train_agent.py --dry-run-resume --resume-from glitch_hunter_main_brain.zip",
+ "renamed": {
+  "on": "2026-09-24",
+  "what": "The approved pair was renamed glitch_hunter_main_brain.zip / glitch_hunter_main_brain_coverage.npz and placed at the project root; the read-only backup here carries the same names. The bytes did not change - the SHA-256s above are the same. Removed as byte-identical duplicates: checkpoints_qa/glitch_hunter_qa_16000000_steps.{zip,_coverage.npz}, the root glitch_hunter_qa.{zip,_coverage.npz}, and this folder's glitch_hunter_qa_16000000_steps.* copies.",
+  "old_names": [
+   "checkpoints_qa/glitch_hunter_qa_16000000_steps.zip",
+   "checkpoints_qa/glitch_hunter_qa_16000000_steps_coverage.npz"
+  ]
+ },
+ "evidence_note": "evidence/console.log (the SB3 training tables of the final campaign) was moved here from logs/ on 2026-09-24"
+}

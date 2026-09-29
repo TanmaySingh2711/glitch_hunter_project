@@ -399,3 +399,22 @@ def test_the_project_facts_route_answers_from_the_backend(app_module, monkeypatc
     assert facts["brain"] == {"parameters": 5}
     assert facts["objective3"]["evidence"]["incidents"] == 0
     assert facts["engineering"]["commits"] == 1 and "tests" in facts["engineering"]
+
+
+def test_page_edits_show_on_a_refresh_without_a_restart(app_module, monkeypatch, tmp_path):
+    """HTML is re-read when it changes, and the CSS/JS version follows the
+    files' own modification times, so a browser refresh shows an edit."""
+    import os
+    assert app_module.app.config["TEMPLATES_AUTO_RELOAD"] is True
+    assert app_module.app.jinja_env.auto_reload is True
+    for name in app_module.STATIC_ASSETS:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("x")
+        os.utime(tmp_path / name, (1_000_000, 1_000_000))
+    monkeypatch.setattr(app_module.app, "static_folder", str(tmp_path))
+    assert app_module.asset_version() == "1000000000"
+    os.utime(tmp_path / "css/style.css", (2_000_000, 2_000_000))
+    after = app_module.asset_version()
+    assert after == "2000000000"
+    page = app_module.app.test_client().get('/').get_data(as_text=True)
+    assert f"style.css?v={after}" in page and f"main.js?v={after}" in page

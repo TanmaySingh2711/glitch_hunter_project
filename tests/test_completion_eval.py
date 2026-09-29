@@ -22,7 +22,8 @@ from exploration.lifecycle import EndReason
 
 ROOT = ce.ROOT
 PROTOCOL = ce.make_protocol(episodes=2, seed=900_000)
-# The 6M brain has one copy: the git-tracked master (git is its backup).
+# The 6M brain has one copy: the local master (git-ignored since 2026-09-29;
+# earlier commits still hold it).
 SIX_M_FILES = ("mario_brain_checkpoint.zip",)
 BASELINE_MODEL = os.path.join(ROOT, config.BASELINE_MODEL)
 needs_6m = pytest.mark.skipif(not os.path.exists(BASELINE_MODEL),
@@ -250,8 +251,11 @@ def test_the_shared_env_is_left_as_found(fresh):                       # [9]
 
 
 def test_every_six_m_master_file_is_unchanged():                       # [10]
+    # Not in git since 2026-09-29 (a clone ships the final 16M brain); where
+    # the 6M master is on disk it must still be the recorded bytes.
     found = _files_digest(SIX_M_FILES)
-    assert "mario_brain_checkpoint.zip" in found, "the tracked master is missing"
+    if "mario_brain_checkpoint.zip" not in found:
+        pytest.skip("mario_brain_checkpoint.zip is not in this checkout")
     assert set(found.values()) == {ce.SIX_M_SHA256}, found
 
 

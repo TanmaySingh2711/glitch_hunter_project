@@ -29,7 +29,7 @@ finish the level. Its 6M brain is the baseline for everything that follows.
 
 | | |
 |---|---|
-| Brain | `mario_brain_checkpoint.zip` (project root, tracked in git so a fresh clone can watch it play) |
+| Brain | `mario_brain_checkpoint.zip` (project root; git-ignored since 2026-09-29, so a clone gets the final 16M brain instead; commit `b27e9d2` holds it) |
 | SHA-256 | `690d57022c1fb444454b0b47f9d1e4ff1bc1444d7110c0bc3320b7fe53a188b3` |
 | Training steps | 6,000,000 (`train_agent.TOTAL_TIMESTEPS_LEGACY`) |
 | Completion (500-episode protocol) | **234 / 500 = 46.8%** (95% CI 42.5–51.2%) |
@@ -86,8 +86,8 @@ finish the level. Its 6M brain is the baseline for everything that follows.
 
 * 46.8% completion, not near 100%: most failures are Goomba deaths.
 * The greedy run does not finish the level; the numbers come from sampled play.
-* Only one copy on disk; git is its backup
-  (`git checkout -- mario_brain_checkpoint.zip`). The extra copies in
+* Only one copy on disk; git history is its backup
+  (`git restore --source=b27e9d2 mario_brain_checkpoint.zip`). The extra copies in
   `backup_6M/` and `checkpoints/` were removed on 2026-09-24.
 
 ## Complete project flow

@@ -99,8 +99,9 @@ part of the running project. Refer to each project for its exact terms.
 
 ---
 
-## The final 16M brain (GitHub Release asset)
+## The final 16M brain
 
-`glitch_hunter_final_brain_16M.zip`, installed by `tools/final_brain.py`, is
+Its four files (in the repository, and also as the GitHub Release asset
+`glitch_hunter_final_brain_16M.zip` that `tools/final_brain.py` installs) are
 this project's own work (trained weights, coverage map, reachability mask
 and closure record); it contains no third-party code or assets.

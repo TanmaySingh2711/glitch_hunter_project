@@ -26,7 +26,7 @@ def test_the_manifest_covers_the_tracked_artifacts():
 def test_every_copy_of_the_6m_brain_is_the_6m_brain():
     six_m = [k for k in MANIFEST if k.endswith(("mario_brain_checkpoint.zip",
                                                 "_6000000_steps.zip"))]
-    assert six_m == ["mario_brain_checkpoint.zip"]       # one copy; git is its backup
+    assert six_m == ["mario_brain_checkpoint.zip"]       # one copy; git history is its backup
     assert {MANIFEST[k]['sha256'] for k in six_m} == {SIX_M_SHA256}
 
 
