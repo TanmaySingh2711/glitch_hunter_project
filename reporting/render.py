@@ -22,6 +22,7 @@ from PIL import Image
 
 from exploration import config
 from reporting.evidence import decode_png, read_context_zip
+from reporting.fix_hint import fix_hint, fix_text
 
 STREAM_SIZE = (480, 360)          # the dashboard stream's frame size (dashboard_backend)
 _FRAME_MS = 1000.0 / 60.0
@@ -48,7 +49,8 @@ SYNTHETIC_NOTICE_MD = ("> **SYNTHETIC TEST EVENT - NOT A GAME BUG.** Produced by
                        "Nothing about the game should be concluded from it.")
 
 LIMITATIONS = (
-    "The detector reports what it observed; it does not know WHY. No root cause is claimed.",
+    ("The detector reports what it observed. \"Where to fix it\" is worked out from this record "
+     "and the game's source code: a lead to the most likely place, not a proven root cause."),
     ("The trigger frame is the exact engine frame the detector fired on. The game window, "
      "paused afterwards, can show a frame up to 3 engine frames later, because the agent's "
      "4-frame action completes before testing pauses."),
@@ -190,8 +192,32 @@ def interpretation_lines(record: Mapping[str, Any]) -> list[str]:
     lines = [f"Severity {c['severity']}: {c['severity_rationale']}"]
     lines += [f"Detector confidence {conf['level']} ({conf['basis']}): {r}" for r in conf["reasons"]]
     lines += [f"Confidence lowered: {d}" for d in conf.get("downgrades", [])]
-    lines.append("Root cause: unknown. The system recorded what happened, not why.")
+    lines.append("Root cause: not proven. \"Where to fix it\" gives the most likely place in the "
+                 "game's code, worked out from this record." if fix_hint(record) else
+                 "Root cause: unknown. The system recorded what happened, not why.")
     return lines
+
+
+FIX_HEADING = "Where to fix it (inferred, not proven)"
+
+
+def fix_lines(record: Mapping[str, Any]) -> tuple[list[str], list[Mapping[str, Any]]]:
+    """(the finding, the suggested change, the evidence, the basis; the places
+    in the game's code, most likely first) - empty for a synthetic event or
+    when no lead can be worked out."""
+    hint = fix_hint(record)
+    if not hint:
+        return [], []
+    lines = [str(hint["summary"]), f"Suggested change: {hint['suggestion']}"]
+    lines += [f"Evidence: {e}" for e in hint.get("evidence", [])]
+    return [*lines, str(hint["basis"])], list(hint.get("places", []))
+
+
+def place_title(place: Mapping[str, Any]) -> str:
+    fn = f", in {place['function']}()" if place.get("function") else ""
+    span = (f"lines {place['line']}-{place['end_line']}" if place.get("end_line", place["line"])
+            != place["line"] else f"line {place['line']}")
+    return f"{place['file']} {span}{fn}: {place['why']}"
 
 
 def nearest_geometry(record: Mapping[str, Any], n: int = 8) -> list[Mapping[str, Any]]:
@@ -280,6 +306,18 @@ def render_markdown(record: Mapping[str, Any], manifest: Mapping[str, Any], occu
     out += [*_md_table(["Fact", "Value"], fact_rows(record)), ""]
     out += ["## Interpretation (inferred, not measured)", ""]
     out += [*(f"- {line}" for line in interpretation_lines(record)), ""]
+    lines, places = fix_lines(record)
+    if lines:
+        out += [f"## {FIX_HEADING}", "", lines[0], ""]
+        out += [*(f"- {line}" for line in lines[1:-1]), ""]
+        if places:
+            out += ["In the game's code, most likely first:", ""]
+            for i, place in enumerate(places, start=1):
+                out += [f"{i}. {_md_escape(place_title(place))}", "", "   ```python",
+                        *(f"   {c}" for c in place.get("code", [])), "   ```", ""]
+                if fix_text(place):
+                    out += [f"   **Fix:** {_md_escape(fix_text(place) or '')}", ""]
+        out += [f"_{lines[-1]}_", ""]
     out += ["## Where", ""]
     loc = record["location"]
     if loc.get("screen"):
@@ -470,9 +508,37 @@ def render_pdf(record: Mapping[str, Any], manifest: Mapping[str, Any], occurrenc
     _heading(pdf, "Interpretation (inferred, not measured)")
     for line in interpretation_lines(record):
         pdf.multi_cell(0, 4.6, pdf_text(f"- {line}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    lines, places = fix_lines(record)
+    if lines:
+        _heading(pdf, FIX_HEADING)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.multi_cell(0, 4.8, pdf_text(lines[0]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 9)
+        for line in lines[1:-1]:
+            pdf.multi_cell(0, 4.6, pdf_text(f"- {line}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        for i, place in enumerate(places, start=1):
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.multi_cell(0, 4.4, pdf_text(f"{i}. {place_title(place)}"), new_x=XPos.LMARGIN,
+                           new_y=YPos.NEXT)
+            pdf.set_font("Courier", "", 7.5)
+            pdf.set_fill_color(*_ZEBRA)
+            pdf.multi_cell(0, 3.8, pdf_text("\n".join(place.get("code", []))), fill=True,
+                           new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_fill_color(255, 255, 255)
+            if fix_text(place):
+                pdf.set_font("Helvetica", "B", 8.5)
+                pdf.multi_cell(0, 4.4, pdf_text(f"Fix: {fix_text(place)}"), new_x=XPos.LMARGIN,
+                               new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.ln(1)
+        pdf.multi_cell(0, 4.2, pdf_text(lines[-1]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 9)
     strip = _filmstrip(context_zip, trigger_png)
     if strip:
-        _heading(pdf, "Before the trigger (left to right), then the trigger (red)")
+        tall = Image.open(io.BytesIO(strip)).size
+        _heading(pdf, "Before the trigger (left to right), then the trigger (red)",
+                 keep_with_next=pdf.epw * tall[1] / tall[0] + 12)
         pdf.image(io.BytesIO(strip), w=pdf.epw)
     rows = trace_rows(trajectory, 16)
     if rows:

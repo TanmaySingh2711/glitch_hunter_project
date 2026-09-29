@@ -23,6 +23,7 @@ from typing import Any, cast
 import cv2
 import gymnasium as gym
 import numpy as np
+import torch
 from stable_baselines3 import PPO
 
 from agent_logic import ACTION_NAMES, GlitchHunterWrapper
@@ -522,6 +523,32 @@ def _finish_run(env: gym.Env[Any, Any], info: dict[str, Any], recorder: SessionR
     return out
 
 
+def choose_action(model: PPO, obs: np.ndarray, rng: np.random.Generator,
+                  temperature: float = config.DASHBOARD_POLICY_TEMPERATURE) -> int:
+    """The brain's next action: drawn from its own policy, not its top pick.
+
+    The policy gives each of the 10 actions a probability. Always taking the
+    top one (greedy) replays the same route every run; drawing from the
+    probabilities - sharpened by `temperature` (< 1 favours the likelier
+    actions) - makes each run a different route the brain itself learned.
+    temperature 0 is the old greedy choice."""
+    with torch.no_grad():
+        tensor, _ = model.policy.obs_to_tensor(obs)
+        dist: Any = model.policy.get_distribution(tensor).distribution
+        logits = dist.logits[0].cpu().numpy().astype(np.float64)
+    if temperature <= 0:
+        return int(np.argmax(logits))
+    z = logits / temperature
+    p = np.exp(z - z.max())
+    return int(rng.choice(len(p), p=p / p.sum()))
+
+
+def route_temperature(run_number: int, fixed_runs: int) -> float:
+    """The first `fixed_runs` runs of a session keep the brain's top pick (the
+    fixed route); every later run draws a new one."""
+    return 0.0 if run_number <= fixed_runs else config.DASHBOARD_POLICY_TEMPERATURE
+
+
 def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     """An endless session: one dict per agent step - the JPEG frame, the
     action, the step number, the reward, the log line and what became of any
@@ -538,13 +565,20 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     run_started, furthest_x = schema.utc_now(), 0
     run_bugs: dict[str, dict[str, Any]] = {}
     run_number = 1                 # runs (episodes) played in this session
+    # A fresh random source per session: each run takes a new route, except
+    # the bugged game's first, which keeps the fixed route that meets all six
+    # benchmark bugs (config.DASHBOARD_FIXED_ROUTE_RUNS).
+    rng = np.random.default_rng()
+    fixed_runs = config.DASHBOARD_FIXED_ROUTE_RUNS.get(_config.game_variant, 0)
+    temperature = route_temperature(run_number, fixed_runs)
+    since_progress = 0             # agent steps since Mario last reached a new furthest x
+    model.policy.set_training_mode(False)
 
     step_count = 0
     fps_window_start = time.perf_counter()
     fps_window_frames = 0
     while True:
-        action, _states = model.predict(obs, deterministic=True)
-        action_val = int(np.asarray(action).item())
+        action_val = choose_action(model, obs, rng, temperature)
 
         obs_raw, reward, terminated, truncated, info = env.step(action_val)
         done = terminated or truncated
@@ -566,7 +600,12 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
                 run_bugs[str(o["incident_id"])] = o["summary"]
         rect = info.get('mario_rect')
         if rect:
+            since_progress = 0 if int(rect[0]) > furthest_x else since_progress + 1
             furthest_x = max(furthest_x, int(rect[0]))
+        if not done and temperature > 0 and since_progress >= config.DASHBOARD_STUCK_STEPS:
+            # A drawn route stuck in a trap: end the run now rather than when
+            # the engine's own safety reset comes, minutes later.
+            done, info = True, {**info, 'episode_end_reason': 'safety_reset'}
         run_end = (_finish_run(env, info, recorder, run_started, furthest_x,
                                list(run_bugs.values()))
                    if done and _config.game_variant == config.CLEAN_GAME_VARIANT else None)
@@ -600,6 +639,7 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
         if done:
             obs = _reset_obs(env)
             recorder.begin_episode(int(getattr(_base(env), "episode_index", 0)))
-            run_started, furthest_x = schema.utc_now(), 0
+            run_started, furthest_x, since_progress = schema.utc_now(), 0, 0
             run_bugs = {}
             run_number += 1
+            temperature = route_temperature(run_number, fixed_runs)

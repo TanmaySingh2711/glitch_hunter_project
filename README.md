@@ -150,6 +150,17 @@ the game state. The dashboard stops before the game moves on.
 a PDF report. It also **replays the episode** in a separate process to check
 that the bug happens again on the same frame.
 
+**Point to the fix.** Each report has a **Where to fix it** section: the lines
+in the game's own code that cause the bug, and the exact edit for each
+("Delete lines 554-555", "Change line 115 to: `step4 =
+collider.Collider(5874, 366, 40, 176)`"). It is worked out from what the
+incident recorded (the drawn level, the colliders in view, the detector's
+measurements) and the game's source code, never from the list of injected
+bugs, and is labelled as a lead, not a proven cause. It is tested the hard
+way: all eleven suggested edits for the six benchmark bugs are applied to a
+copy of the bugged game, and every bug's spot then plays exactly like the
+clean game (`tests/test_fix_hint.py`).
+
 **Review.** The dashboard shows each incident with its type, place, severity,
 confidence, reproduction result and download links. Repeat sightings of the
 same bug are counted on the same incident.
@@ -253,6 +264,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```text
 glitch_hunter_project/
+├── setup.bat, setup.sh       # one-click setup: installs everything, then starts the dashboard
 ├── app.py                    # Start here: the dashboard server (python app.py)
 ├── run_dashboard.bat         # Windows: double-click to start the dashboard
 ├── desktop.py                # run_dashboard.bat's helpers: full speed on battery, centred windows
@@ -267,7 +279,7 @@ glitch_hunter_project/
 ├── mario_clean/              # the original game - trusted, unmodified baseline
 ├── mario_bugged/             # copy with the 6 declared benchmark bugs (+ INJECTED_BUGS.json, VARIANT.md)
 │
-├── reporting/                # Objective 3: detectors, incident pipeline, store, reports, replay
+├── reporting/                # Objective 3: detectors, incident pipeline, store, reports, replay, where to fix
 ├── exploration/              # coverage, reachability mask, lifecycle, config.py (every tuned value)
 ├── evaluation/               # 500-episode completion protocol + frozen 6M baseline
 ├── rewards/                  # completion reward (Objective 1) and QA reward (Objective 2)
@@ -296,13 +308,41 @@ and clean-run reports.
 
 ## 12. Installation
 
+### Quick start (one click)
+
+**Windows**
+
+1. Get the project: `git clone https://github.com/TanmaySingh2711/glitch_hunter_project.git`
+   (no Git? On GitHub click **Code**, then **Download ZIP**, and unzip it).
+2. Open the project folder and double-click **`setup.bat`**.
+3. Wait. The first time takes a few minutes; then the dashboard opens in your browser by itself.
+
+Next time, just double-click **`run_dashboard.bat`**.
+
+**Linux / macOS**
+
+```bash
+git clone https://github.com/TanmaySingh2711/glitch_hunter_project.git
+cd glitch_hunter_project
+bash setup.sh
+```
+
+The dashboard starts at **http://localhost:5000**. Next time: `venv_gpu/bin/python app.py`.
+
+What the script does: finds Python 3.12 (on Windows it installs it with
+`winget` if it is missing), creates the `venv_gpu` environment inside the
+project folder, installs the libraries (the small CPU build of PyTorch; add
+`gpu` for the NVIDIA build, for training), checks the brain files and starts
+the dashboard. Running it again only adds what is missing. To do the same by
+hand, follow the steps below.
+
 ### Prerequisites
 
 | Requirement | Notes |
 |---|---|
 | **Git** | to clone the repository |
 | **Python 3.12** exactly | not 3.11, not 3.13 (`requires-python = "==3.12.*"`). Get it from [python.org](https://www.python.org/downloads/) |
-| **OS** | **Windows 10/11** is the primary, fully verified platform. Linux is tested in CI (headless). macOS is untested |
+| **OS** | **Windows 10/11** is the primary, fully verified platform. Linux and macOS: CI runs the one-click setup and starts the dashboard on each (headless); Linux also runs the full test suite and a browser test |
 | **GPU** | **not required** to run the dashboard; an NVIDIA GPU only speeds up training |
 | **Disk** | about 5 GB for the environment (PyTorch with CUDA is the largest part; the CPU-only build is much smaller) |
 
@@ -407,8 +447,9 @@ and never overwrites a different file.
 | **Final 16M QA brain** (`glitch_hunter_main_brain.zip`) | inside the repository | whenever its hash matches the closure record |
 | 6M brain (`mario_brain_checkpoint.zip`) | not in the repository (Objective 1; earlier commits hold it) | fallback only, when the final brain is missing |
 
-Skipping this step still gives a working dashboard, including bug detection
-and reports, but it plays the Objective-1 brain, not the final project.
+Without these four files the dashboard still runs, including bug detection
+and reports, but with an untrained brain (the 6M brain is no longer in the
+repository), so always keep them.
 
 ### Step 5 — Check the installation
 
@@ -468,7 +509,7 @@ disk; **Live Testing** is where the test runs:
 3. **When a bug is detected, testing stops.** The status turns red
    (*Bug found*), the video switches to the saved evidence (the trigger
    frame, then the GIF of the moments before it), a **Bug found** card shows
-   the bug and its files, and the five-step list in Live status ticks off
+   the bug, **where to fix it** in the game's code, and its files, and the five-step list in Live status ticks off
    each stage as it completes: bug detected, evidence and replay, report
    ready. The bug is added to the **Bug Tracker**.
 4. Open the evidence from the card, the Bug Tracker or Bug History: **PDF
@@ -478,14 +519,19 @@ disk; **Live Testing** is where the test runs:
 5. Click **Resume testing** to continue from the same moment.
 
 On the clean game the Bug Tracker should stay at *No bugs detected yet*: that
-is the expected, healthy result. **When a clean-game run ends, testing
-stops.** If Mario reached the castle, a green *Level complete · No bugs found*
+is the expected, healthy result. **Every clean-game run takes a new route:**
+the brain draws each move from what it learned instead of always its top
+pick. In 140 measured runs, 77% reached the castle, each by a different
+route. A run that gets stuck (in the pit between the two pyramids, or at pipe
+4) is ended after 200 steps without progress, about 13 seconds, and shows
+*The agent got stuck*. **When a clean-game run ends, testing stops.** If Mario reached the castle, a green *Level complete · No bugs found*
 card appears with the run report (PDF, Markdown, final frame, GIF, or all as
 a `.zip`), which is also listed in the Bug Tracker; if he died, the card says
 so. Press **Start next run** to play again, or **Reset** first to clear the
-page. On the bugged game with the 16M brain, the agent runs into all six
-benchmark bugs within its first episode; it plays on from run to run and
-stops only on bugs.
+page. On the bugged game the first run of a session follows the brain's one
+fixed route (its top pick every step), which runs into all six benchmark bugs
+in that run; every later run takes a new route. It plays on from run to run
+and stops only on bugs.
 
 ### Where the evidence is saved
 
@@ -495,7 +541,7 @@ Every incident gets its own folder, `incidents/INC-<date>-<time>-<id>/`:
 |---|---|
 | `trigger.png` | the exact frame the bug was detected (full resolution) |
 | `context.gif` | the moments leading up to it |
-| `report.md`, `report.pdf` | the bug reports |
+| `report.md`, `report.pdf` | the bug reports, including **Where to fix it**: the lines in the game's code that cause the bug and the exact edit for each |
 | `incident.json` | the full record: detector, measurements, location, game and brain identity |
 | `trajectory.json`, `context_frames.zip` | per-frame state and frames before the trigger |
 | `reproduction.json` | the replay result |
@@ -593,8 +639,9 @@ hash), so a report can never be attributed to the wrong game. Details:
 | **Start testing / Pause** | Start or pause; the button then says *Resume testing* (or *Start next run* after a clean run) and always continues from the same moment |
 | **Reset** | End the session, close the game window, clear the log, the Bug Tracker and any run result (saved evidence stays). Refreshing or reopening the page does the same |
 | **Transparency** | The **Live status** panel: a five-step progress list (brain ready → exploring → bug detected → evidence and replay → report ready), then the current action, steps taken, level progress and bugs this session. The status label in the top bar is always visible |
+| **A new route every run** | The brain draws its moves from what it learned, so each run plays the level differently; the bugged game's first run keeps the fixed route that meets all six bugs. A run stuck in a trap ends after about 13 seconds |
 | **Stop at the end of a clean run** | Testing stops when Mario reaches the castle or dies; a castle finish shows *Level complete · No bugs found* with its run report (PDF, Markdown, final frame, GIF, and the whole report as a `.zip`); the report says plainly that this is not proof the game has no bugs |
-| **Pause on every bug** | A *Bug found* card with the bug, its place, severity, confidence, times seen and files; the five-step list in Live status shows each automatic stage |
+| **Pause on every bug** | A *Bug found* card with the bug, its place, severity, confidence, times seen, **where to fix it** (file, line and the change to make) and files; the five-step list in Live status shows each automatic stage |
 | **Bug Tracker** | Every bug found in this session, newest first; a repeat raises its *Seen* count instead of adding a duplicate. Click one for its full details |
 | **Bug History** | Every incident and clean-run report saved on disk (`/api/incidents?all=1`, `/api/runs`), with their files |
 | **Evidence links** | PDF report, Markdown report, trigger frame, GIF, the whole evidence bundle as a `.zip`, and the raw record |

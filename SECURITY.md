@@ -59,6 +59,16 @@ back the next time the laptop is on battery, by a small background process
 that then exits. Until then the original values are kept in
 `.dashboard_power.json` in the project folder.
 
+## What setup.bat and setup.sh do
+
+They only work inside the project folder: they create `venv_gpu/` there and
+install the pinned libraries into it, from PyPI and PyTorch's own index, over
+HTTPS. The one change outside the folder: on Windows, if Python 3.12 is
+missing, `setup.bat` installs it for the current user with `winget`
+(Microsoft's package manager, package `Python.Python.3.12`). No administrator
+rights are needed. If the brain files are missing they are fetched with
+`tools/final_brain.py install` (below).
+
 ## Files it loads
 
 * **Checkpoints are code.** Stable-Baselines3 checkpoints are zip files whose
@@ -75,7 +85,7 @@ that then exits. Until then the original values are kept in
   be written) and never overwrites a different file. The dashboard then loads
   `glitch_hunter_main_brain.zip` only if its SHA-256 matches the closure
   record `FINAL_OBJECTIVE2.json`; otherwise it logs a warning and uses the
-  latest local QA checkpoint, or the 6M brain.
+  latest local QA checkpoint, or the 6M brain if it is present.
 * **Everything else is data.** Coverage files and masks are `.npz` archives
   read with `allow_pickle=False`, and every field is validated (format
   version, grid geometry, mask fingerprint, the bitmap's own counts) before

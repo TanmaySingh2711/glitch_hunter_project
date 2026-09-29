@@ -12,6 +12,9 @@
 *.js      text
 *.css     text
 *.html    text diff=html
+# Windows batch files need CRLF whatever git's settings are; shell scripts LF.
+*.bat     text eol=crlf
+*.sh      text eol=lf
 
 # Binary artifacts: never diffed, never line-ending converted. A converted
 # checkpoint or mask is a corrupted one.

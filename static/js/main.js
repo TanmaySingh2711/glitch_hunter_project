@@ -468,6 +468,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ─── RESULT CARD: Bug Found, or how a clean run ended ───
+    // "Where to fix it": the most likely place in the game's code, worked out
+    // from the incident (reporting/fix_hint.py). A lead, not a proven cause.
+    function fixHint(fix) {
+        const box = el('div', 'fix');
+        box.appendChild(el('p', 'fix__label', 'Where to fix it (likely)'));
+        if (fix.summary) box.appendChild(el('p', 'fix__text', fix.summary));
+        const edits = fix.fixes || [];
+        if (edits.length) {
+            // The concrete edits: where, then exactly what to change.
+            for (const f of edits) {
+                box.appendChild(el('p', 'fix__where', f.where));
+                box.appendChild(el('p', 'fix__do', f.fix));
+            }
+            return box;
+        }
+        if (fix.where) box.appendChild(el('p', 'fix__where', fix.where));
+        if (fix.suggestion) box.appendChild(el('p', 'fix__text', fix.suggestion));
+        return box;
+    }
+
     function renderResult(p) {
         const card = $('result-card');
         if (p === 'bug') {
@@ -497,6 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     facts.append(el('dt', null, k), el('dd', null, String(v)));
                 }
                 body.appendChild(facts);
+                if (inc.fix) body.appendChild(fixHint(inc.fix));
                 body.appendChild(incidentLinks(inc, true));
                 parts.push(body);
                 return parts;

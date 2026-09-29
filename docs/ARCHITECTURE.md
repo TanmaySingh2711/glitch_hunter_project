@@ -93,7 +93,13 @@ else follows from it:
 The dashboard ignores the switch and shows a brain under that brain's own
 reward (`dashboard_backend.select_checkpoint`): the main brain
 (`glitch_hunter_main_brain.zip`) when its SHA-256 matches the closure
-record, else a working QA brain, else the 6M brain.
+record, else a working QA brain, else the 6M brain. It draws each move from
+the brain's own policy (`choose_action`, temperature
+`config.DASHBOARD_POLICY_TEMPERATURE`), so every run takes a new route -
+except the bugged game's first run of a session
+(`config.DASHBOARD_FIXED_ROUTE_RUNS`), which keeps the brain's top pick, the
+fixed route that meets all six benchmark bugs. A drawn route that goes
+`config.DASHBOARD_STUCK_STEPS` steps without progress is ended as stuck.
 
 ## Invariants
 
@@ -201,6 +207,9 @@ decision, not a refactor.
 | the Overview page's facts | `dashboard_facts.py` (every number read from the project's own files) | `pytest tests/test_dashboard_facts.py` |
 | incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
 | the clean game's run report | `reporting/run_report.py`, `dashboard_backend._finish_run` | `pytest tests/test_run_report.py tests/test_dashboard_backend.py` |
+| a report's "Where to fix it" | `reporting/fix_hint.py` (read from the incident record and the game's source) | `pytest tests/test_fix_hint.py` (applies the suggested edits to a copy of the bugged game via `tests/fix_probe.py`) |
+| how the dashboard's brain picks moves (a new route every run) | `dashboard_backend.choose_action` / `route_temperature`, `config.DASHBOARD_POLICY_TEMPERATURE`, `DASHBOARD_FIXED_ROUTE_RUNS`, `DASHBOARD_STUCK_STEPS` | `pytest tests/test_dashboard_backend.py tests/test_dashboard_e2e.py` |
+| the one-click setup | `setup.bat`, `setup.sh` (checked on clean machines by CI's *One-click setup* job) | `setup.bat norun` / `bash setup.sh norun` |
 | `run_dashboard.bat`: speed on battery, centred windows | `desktop.py`, `game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |
 | the game itself (deliberate bugs) | `mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |

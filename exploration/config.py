@@ -1284,6 +1284,33 @@ INCIDENTS_DIR = "incidents"
 # "no bugs found" counterpart of an incident (reporting/run_report.py).
 RUN_REPORTS_DIR = "run_reports"
 
+# ─── A NEW ROUTE EVERY DASHBOARD RUN (clean game) ───
+# On the clean game the dashboard draws each action from the brain's own
+# policy (dashboard_backend.choose_action) instead of always taking its top
+# pick, which replayed one fixed route. The policy is sharpened by this
+# temperature (< 1 favours the likelier actions; 0 is the old greedy play).
+# Measured on 2026-09-29 in the dashboard's own env (clean game, runs
+# reaching the castle): T 0.25 15/20, 0.5 49/60, 0.6 27/40, 0.75 46/60,
+# 1.0 8/20; 0.5 over 140 runs: 108 (77%) - every one by a different route.
+# Most of the rest got stuck (the pit between the two pyramids, or pipe 4).
+#
+# The bugged game's FIRST run of a session keeps the fixed (greedy) route: it
+# meets all six benchmark bugs in that one run, every time. Drawn routes do
+# not (measured: 1 of 20 runs at 0.6 and 2 of 20 at 0.15 met all six; most
+# died near x 4576), so they start from the second run, where they test
+# ground the fixed route never covers.
+DASHBOARD_POLICY_TEMPERATURE = 0.5
+DASHBOARD_FIXED_ROUTE_RUNS = {CLEAN_GAME_VARIANT: 0, BUGGED_GAME_VARIANT: 1}
+# A drawn route can wander into a trap (the pit between the two pyramids,
+# pipe 4) and stay there until the engine's own safety reset, 5,000 steps
+# (about 3 minutes) later. The dashboard ends such a run as "stuck" once
+# Mario has gone this many steps without reaching a new furthest x. Measured
+# (71 drawn runs, 2026-09-29): runs that reached the castle never went more
+# than 38 steps without progress, and no run that kept moving more than 78;
+# the stuck runs sat 4,600+ steps. 200 is 2.5 times the longest healthy wait
+# and about 13 s at the dashboard's pace. It never applies to the fixed route.
+DASHBOARD_STUCK_STEPS = 200
+
 # ─── HOW MUCH CONTEXT BEFORE A TRIGGER ───
 # Enough to hold the whole manoeuvre that led to the trigger AND the approach
 # before it. The longest real manoeuvre in this engine is a full run-up

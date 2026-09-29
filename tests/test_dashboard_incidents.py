@@ -174,9 +174,9 @@ class _Env:
         return np.zeros((4, 84, 84), dtype=np.uint8), 0.0, self.t >= self.episode_len, False, {}
 
 
-class _Model:
-    def predict(self, obs, deterministic):
-        return np.array(3), None
+def _Model():
+    from incident_helpers import FakeBrain
+    return FakeBrain(action=3)
 
 
 @pytest.fixture

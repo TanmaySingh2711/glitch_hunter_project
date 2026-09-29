@@ -1,5 +1,8 @@
 # Continuous integration: the same three gates `python tools/check.py` runs
-# locally - lint, type check, tests - on every push and pull request.
+# locally - lint, type check, tests - on every push and pull request, plus
+# the one-click setup (setup.bat / setup.sh) on clean Windows, Linux and
+# macOS machines, ending with the dashboard up on the approved brain, and on
+# Linux a browser test of the dashboard itself.
 #
 # Headless on purpose. SDL's dummy drivers give the game a real pygame
 # display surface with no monitor and no sound card, which is all the
@@ -86,10 +89,74 @@ jobs:
       # `slow` = the multi-minute reachability rebuild and real-engine runs
       # thousands of steps long; they run locally before every merge
       # (tools/check.py --full) and are kept off the per-push path.
+      # The floor guards the per-push path: it measured 86.1% (Linux) and 88.0%
+      # (Windows) on 2026-09-29, so a change that drops coverage fails here.
       - name: Run tests
-        run: pytest -m "not slow" --cov --cov-report=term-missing:skip-covered --cov-report=xml
+        run: pytest -m "not slow" --cov --cov-report=term-missing:skip-covered --cov-report=xml --cov-fail-under=86
       - uses: actions/upload-artifact@v7
         if: always() && matrix.os == 'ubuntu-latest'
         with:
           name: coverage-xml
           path: coverage.xml
+
+  # What a new user does after cloning: the one-click setup script on a clean
+  # machine (its own venv_gpu, nothing preinstalled), then the dashboard,
+  # which must come up with the approved 16M brain loaded.
+  setup:
+    name: One-click setup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1
+      - name: setup.bat norun
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: setup.bat norun
+      - name: bash setup.sh norun
+        if: runner.os != 'Windows'
+        run: bash setup.sh norun
+      - name: The dashboard starts with the approved 16M brain
+        shell: bash
+        run: |
+          VPY=venv_gpu/bin/python
+          [ -x "$VPY" ] || VPY=venv_gpu/Scripts/python.exe
+          "$VPY" - <<'EOF'
+          import json, subprocess, sys, tempfile, time, urllib.request
+          scratch = tempfile.mkdtemp()
+          app = subprocess.Popen([sys.executable, "app.py", "--incidents-dir", f"{scratch}/inc",
+                                  "--run-reports-dir", f"{scratch}/runs"])
+          status = {}
+          try:
+              for _ in range(120):
+                  time.sleep(1)
+                  try:
+                      with urllib.request.urlopen("http://127.0.0.1:5000/api/status", timeout=5) as r:
+                          status = json.load(r)
+                  except OSError:
+                      continue
+                  if status.get("brain_path"):
+                      break
+              print(status)
+              assert status.get("brain_path", "").endswith("glitch_hunter_main_brain.zip"), status
+              assert status.get("brain_approved") is True, status
+          finally:
+              app.terminate()
+          EOF
+      # The page, its JavaScript and the server together, in a real browser,
+      # on the environment the setup script just built: a bug must stop
+      # testing and the Bug found card must say where and what to fix.
+      - name: Dashboard in a browser (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          venv_gpu/bin/python -m pip install --quiet "pytest==9.1.1" "playwright==1.63.0"
+          venv_gpu/bin/python -m playwright install --with-deps chromium
+          venv_gpu/bin/python -m pytest tests/test_dashboard_e2e.py -p no:cacheprovider -o addopts="" -v

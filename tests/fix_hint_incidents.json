@@ -1,0 +1,727 @@
+[
+ {
+  "incident_id": "INC-20260924-170932-a3f8cd",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "impossible_jump"
+  },
+  "detector": {
+   "metrics": {
+    "limit": 12.5,
+    "mario_rect": [
+     366,
+     475,
+     30,
+     40
+    ],
+    "rise_speed": 23.1,
+    "rule": "rise_speed",
+    "state": "jump"
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2953,
+    "x": 0,
+    "y": 538
+   }
+  ]
+ },
+ {
+  "incident_id": "INC-20260924-171028-f62ca0",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "above_world"
+  },
+  "detector": {
+   "metrics": {
+    "threshold_y": -200,
+    "y": -205
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2953,
+    "x": 0,
+    "y": 538
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 858,
+    "y": 365
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "resting",
+    "w": 43,
+    "x": 685,
+    "y": 365
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "resting",
+    "w": 43,
+    "x": 901,
+    "y": 365
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 878,
+    "y": 498
+   }
+  ]
+ },
+ {
+  "incident_id": "INC-20260924-171057-54e04a",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "clip_into_pipe"
+  },
+  "detector": {
+   "metrics": {
+    "depth_x": 30,
+    "depth_y": 10,
+    "entered_from": "top",
+    "mario_rect": [
+     2483,
+     336,
+     30,
+     40
+    ],
+    "solid": "pipe",
+    "solid_rect": [
+     2445,
+     366,
+     83,
+     170
+    ],
+    "tolerance_px": 6
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2953,
+    "x": 0,
+    "y": 538
+   },
+   {
+    "group": "pipe",
+    "h": 170,
+    "w": 21,
+    "x": 2445,
+    "y": 366
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 2268,
+    "y": 498
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 2330,
+    "y": 498
+   }
+  ]
+ },
+ {
+  "incident_id": "INC-20260924-171326-01fa5f",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "invisible_collision"
+  },
+  "detector": {
+   "metrics": {
+    "contact": "side",
+    "mario_rect": [
+     4382,
+     468,
+     30,
+     40
+    ],
+    "state": "jump",
+    "undrawn_contact_rect": [
+     4412,
+     468,
+     1,
+     50
+    ],
+    "x_vel_after": 0.0,
+    "x_vel_before": 10.500000000000014,
+    "y_vel_after": -9.879999999999999,
+    "y_vel_before": -10.19
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2735,
+    "x": 3819,
+    "y": 538
+   },
+   {
+    "group": "step",
+    "h": 86,
+    "w": 40,
+    "x": 4412,
+    "y": 452
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 4287,
+    "y": 365
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 4330,
+    "y": 365
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "resting",
+    "w": 43,
+    "x": 4544,
+    "y": 365
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "resting",
+    "w": 43,
+    "x": 4672,
+    "y": 365
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "resting",
+    "w": 43,
+    "x": 4672,
+    "y": 193
+   },
+   {
+    "group": "enemy",
+    "h": 60,
+    "name": "koopa",
+    "state": "walk",
+    "w": 40,
+    "x": 4485,
+    "y": 478
+   }
+  ]
+ },
+ {
+  "incident_id": "INC-20260924-171357-1452af",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "clip_into_block"
+  },
+  "detector": {
+   "metrics": {
+    "depth_x": 30,
+    "depth_y": 10,
+    "entered_from": "bottom",
+    "mario_rect": [
+     5068,
+     398,
+     30,
+     40
+    ],
+    "solid": "brick",
+    "solid_rect": [
+     5058,
+     365,
+     43,
+     43
+    ],
+    "tolerance_px": 6
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2735,
+    "x": 3819,
+    "y": 538
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5058,
+    "y": 365
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5187,
+    "y": 193
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5230,
+    "y": 193
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5273,
+    "y": 193
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "opened",
+    "w": 43,
+    "x": 4800,
+    "y": 365
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 5190,
+    "y": 498
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 5246,
+    "y": 498
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 5306,
+    "y": 498
+   }
+  ]
+ },
+ {
+  "incident_id": "INC-20260924-173045-9a8adc",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "clip_into_step"
+  },
+  "detector": {
+   "metrics": {
+    "depth_x": 17,
+    "depth_y": 13,
+    "entered_from": "left side",
+    "mario_rect": [
+     5861,
+     339,
+     30,
+     40
+    ],
+    "solid": "step",
+    "solid_rect": [
+     5874,
+     366,
+     40,
+     176
+    ],
+    "tolerance_px": 6
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2735,
+    "x": 3819,
+    "y": 538
+   },
+   {
+    "group": "step",
+    "h": 44,
+    "w": 40,
+    "x": 5745,
+    "y": 495
+   },
+   {
+    "group": "step",
+    "h": 44,
+    "w": 40,
+    "x": 5788,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 44,
+    "w": 40,
+    "x": 5831,
+    "y": 409
+   },
+   {
+    "group": "step",
+    "h": 90,
+    "w": 40,
+    "x": 5874,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 90,
+    "w": 40,
+    "x": 6001,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 40,
+    "w": 40,
+    "x": 6044,
+    "y": 408
+   },
+   {
+    "group": "step",
+    "h": 40,
+    "w": 40,
+    "x": 6087,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 40,
+    "w": 40,
+    "x": 6130,
+    "y": 495
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5574,
+    "y": 193
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5617,
+    "y": 193
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5531,
+    "y": 365
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 5574,
+    "y": 365
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "resting",
+    "w": 43,
+    "x": 5531,
+    "y": 193
+   }
+  ]
+ },
+ {
+  "incident_id": "INC-20260924-173048-574421",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "clip_into_step"
+  },
+  "detector": {
+   "metrics": {
+    "depth_x": 7,
+    "depth_y": 31,
+    "entered_from": "left side",
+    "mario_rect": [
+     5978,
+     357,
+     30,
+     40
+    ],
+    "solid": "step",
+    "solid_rect": [
+     6001,
+     366,
+     40,
+     176
+    ],
+    "tolerance_px": 6
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2735,
+    "x": 3819,
+    "y": 538
+   },
+   {
+    "group": "step",
+    "h": 44,
+    "w": 40,
+    "x": 5745,
+    "y": 495
+   },
+   {
+    "group": "step",
+    "h": 44,
+    "w": 40,
+    "x": 5788,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 44,
+    "w": 40,
+    "x": 5831,
+    "y": 409
+   },
+   {
+    "group": "step",
+    "h": 90,
+    "w": 40,
+    "x": 5874,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 90,
+    "w": 40,
+    "x": 6001,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 40,
+    "w": 40,
+    "x": 6044,
+    "y": 408
+   },
+   {
+    "group": "step",
+    "h": 40,
+    "w": 40,
+    "x": 6087,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 40,
+    "w": 40,
+    "x": 6130,
+    "y": 495
+   }
+  ]
+ },
+ {
+  "incident_id": "INC-20260924-173055-e80dda",
+  "synthetic": false,
+  "fingerprint": {
+   "kind": "hit_without_contact"
+  },
+  "detector": {
+   "metrics": {
+    "contact_tolerance_px": 2,
+    "death_cause": "goomba",
+    "event": "death",
+    "gap_px": 33,
+    "mario_rect": [
+     7087,
+     425,
+     30,
+     40
+    ],
+    "nearest_enemy_rect": [
+     7084,
+     498,
+     40,
+     40
+    ]
+   }
+  },
+  "provenance": {
+   "game": {
+    "variant": "mario_bugged"
+   }
+  },
+  "geometry": [
+   {
+    "group": "ground",
+    "h": 60,
+    "w": 2300,
+    "x": 6647,
+    "y": 538
+   },
+   {
+    "group": "pipe",
+    "h": 82,
+    "w": 83,
+    "x": 6989,
+    "y": 452
+   },
+   {
+    "group": "step",
+    "h": 40,
+    "w": 40,
+    "x": 6771,
+    "y": 495
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 7202,
+    "y": 365
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 7245,
+    "y": 365
+   },
+   {
+    "group": "brick",
+    "h": 43,
+    "name": "brick",
+    "state": "resting",
+    "w": 43,
+    "x": 7331,
+    "y": 365
+   },
+   {
+    "group": "coin_box",
+    "h": 43,
+    "state": "resting",
+    "w": 43,
+    "x": 7288,
+    "y": 365
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 7084,
+    "y": 498
+   },
+   {
+    "group": "enemy",
+    "h": 40,
+    "name": "goomba",
+    "state": "walk",
+    "w": 40,
+    "x": 7146,
+    "y": 498
+   }
+  ]
+ }
+]

@@ -25,7 +25,13 @@ python tools/check.py --full # before a merge or a release: + slow tests, 90% co
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same gates on every push, on Linux
-and Windows.
+and Windows, with an 86% coverage floor on the fast tests. It also runs the
+one-click setup (`setup.bat norun`, `bash setup.sh norun`) on clean Windows,
+Linux and macOS machines and checks that the dashboard then starts with the
+approved 16M brain; on Linux it then drives the dashboard in a real browser
+(`tests/test_dashboard_e2e.py`, which skips when Playwright is not
+installed). If you change a dependency pin, change it in `setup.bat` and
+`setup.sh` too.
 
 ## Code conventions
 

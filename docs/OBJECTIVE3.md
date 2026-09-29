@@ -41,6 +41,16 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 * **Evidence bundle** (`incidents/INC-…/`): `incident.json`, `trigger.png`,
   `trajectory.json`, context frames, `context.gif`, `report.md`, `report.pdf`,
   `reproduction.json`, `manifest.json` (hashes). Written atomically, read-only, never overwritten.
+* **Where to fix it** (`reporting/fix_hint.py`): every report, and the dashboard's
+  *Bug found* card, names the lines in the game's own code that cause the bug
+  and the exact edit for each (delete these lines / change this line to ...).
+  It is inferred from the incident's record (the drawn level, the colliders in
+  view, the detector's measurements) and the game's source, read with `ast`;
+  the list of injected bugs is never read. Labelled a lead, not a proven cause.
+  Proved on the six benchmark bugs (`tests/test_fix_hint.py`): every suspect
+  line is the injected code, and with all eleven suggested edits applied to a
+  copy of the bugged game, every bug's scenario plays exactly like the clean
+  game.
 * **Replay verdicts:** reproduced / reproduced_state_only / not_reproduced / not_possible.
 * **Duplicates:** same game, detector, kind and site → the same incident, count raised.
 * **Dashboard:** every detection pauses testing; *Resume testing* continues; the Bug
@@ -104,8 +114,14 @@ diff is pinned by hash; `mario_clean` stays byte-identical to its pin.
 
 * Clips shallower than 6 px are deliberately not reported.
 * The designed-solids file is for Level 1-1 only (`tools/build_level_design.py`).
-* The dashboard plays greedily: one fixed route per game; on the bugged game
-  the false Goomba hit ends every greedy episode.
+* Every dashboard run takes a new route (moves drawn from the brain's own
+  policy at temperature 0.5), except the bugged game's first run, which keeps
+  the fixed top-pick route that meets all six bugs (the false Goomba hit ends
+  it). On the clean game 77% of 140 measured runs reached the castle, each by
+  a different route; a run stuck in a trap (the pit between the two pyramids,
+  pipe 4) is ended after 200 steps without progress.
+* "Where to fix it" is a lead, not a proven cause: it reads Level 1-1's level
+  and player code by function name (`level1.py`, `mario.py`).
 * The sky-jump landing leaves more agents stuck at pipe 4 in sampled play.
 
 ## Complete project flow

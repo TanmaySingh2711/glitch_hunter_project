@@ -636,6 +636,12 @@ a { color: var(--accent-strong); }
 .facts dt { color: var(--text-muted); }
 .facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 
+.fix { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border-left: 3px solid var(--bug-strong); }
+.fix__label { font-size: 0.74rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--bug-strong); margin-bottom: 4px; }
+.fix__text { color: var(--text-muted); font-size: 0.84rem; margin-top: 4px; }
+.fix__where { font-family: var(--mono); font-size: 0.8rem; font-weight: 600; margin-top: 6px; overflow-wrap: anywhere; }
+.fix__do { font-family: var(--mono); font-size: 0.78rem; color: var(--text); margin-top: 2px; padding-left: 10px; overflow-wrap: anywhere; }
+
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .result .actions { justify-content: center; }
 .actions .btn { font-size: 0.82rem; padding: 6px 11px; }

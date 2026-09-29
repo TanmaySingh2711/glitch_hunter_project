@@ -242,7 +242,8 @@ def test_the_markdown_separates_facts_from_interpretation(pipe):
               encoding="utf-8") as fh:
         md = fh.read()
     for heading in ("## What was observed (measured)", "## Interpretation (inferred, not measured)",
-                    "## Reproduction", "## Limitations", "Root cause: unknown"):
+                    "## Where to fix it (inferred, not proven)", "## Reproduction",
+                    "## Limitations", "Root cause: not proven"):
         assert heading in md
     assert "SYNTHETIC" not in md
     assert out.incident_id in md and "x_vel" in md

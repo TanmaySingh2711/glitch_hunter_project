@@ -38,6 +38,7 @@ from reporting.evidence import (
     pixel_sha256,
     trajectory_doc,
 )
+from reporting.fix_hint import fix_hint, headline
 from reporting.reproduce import run_reproduction
 from reporting.store import IncidentStore, StoreError
 
@@ -125,6 +126,9 @@ class IncidentPipeline:
         # The dashboard's view: incidents seen (new or again) since the last
         # begin_session() - the Bug Tracker shows these; the store keeps all.
         self._session: dict[str, int] = {}
+        # "Where to fix it" per incident: worked out once, from the record and
+        # the game's source (reporting/fix_hint.py).
+        self._fix: dict[str, dict[str, Any] | None] = {}
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._busy = 0
         self._idle = threading.Condition(self._lock)
@@ -443,6 +447,8 @@ class IncidentPipeline:
             if versions:
                 latest[base] = max(versions, key=lambda n: (len(n), n))
         loc = record["location"].get("world_collider") or {}
+        if incident_id not in self._fix:
+            self._fix[incident_id] = headline(fix_hint(record))
         return {
             "incident_id": incident_id,
             "created_utc": record["created_utc"],
@@ -465,6 +471,7 @@ class IncidentPipeline:
             "latest": latest,
             "renders": {k: v.get("status") for k, v in manifest.get("renders", {}).items()},
             "finalized": bool(manifest.get("finalized")),
+            "fix": self._fix[incident_id],
         }
 
     def summaries(self) -> list[dict[str, Any]]:

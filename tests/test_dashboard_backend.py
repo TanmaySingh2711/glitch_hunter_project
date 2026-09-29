@@ -9,6 +9,7 @@ import pytest
 
 import dashboard_backend as db
 from agent_logic import ACTION_NAMES
+from exploration import config
 
 
 class _Base:
@@ -61,10 +62,9 @@ class _Env:
         return (np.full((4, 84, 84), self.t, dtype=np.uint8), 0.5, done, False, info)
 
 
-class _Model:
-    def predict(self, obs, deterministic):
-        assert deterministic, "the dashboard shows the greedy policy"
-        return np.array(3), None
+def _Model():
+    from incident_helpers import FakeBrain
+    return FakeBrain(action=3)
 
 
 @pytest.fixture
@@ -418,3 +418,90 @@ def test_page_edits_show_on_a_refresh_without_a_restart(app_module, monkeypatch,
     assert after == "2000000000"
     page = app_module.app.test_client().get('/').get_data(as_text=True)
     assert f"style.css?v={after}" in page and f"main.js?v={after}" in page
+
+
+# ── a new route every run: actions are drawn from the brain's own policy ──
+def _brain_with(probs):
+    import torch
+    from incident_helpers import FakeBrain
+    brain = FakeBrain()
+    brain.policy.logits = torch.log(torch.tensor([probs], dtype=torch.float64))
+    return brain
+
+
+def test_temperature_zero_is_the_old_greedy_choice():
+    brain = _brain_with([0.1, 0.2, 0.7])
+    rng = np.random.default_rng(0)
+    assert {db.choose_action(brain, np.zeros(1), rng, temperature=0) for _ in range(50)} == {2}
+
+
+def test_actions_follow_the_policy_sharpened_by_the_temperature():
+    brain = _brain_with([0.3, 0.7])
+    rng = np.random.default_rng(1)
+    at_one = sum(db.choose_action(brain, np.zeros(1), rng, temperature=1.0) for _ in range(4000)) / 4000
+    assert abs(at_one - 0.7) < 0.03                       # T = 1: the policy itself
+    sharp = sum(db.choose_action(brain, np.zeros(1), rng, temperature=0.5) for _ in range(4000)) / 4000
+    assert abs(sharp - 0.49 / 0.58) < 0.03                # T = 0.5: p^2, renormalised
+    assert 0 < config.DASHBOARD_POLICY_TEMPERATURE < 1
+
+
+def test_two_sessions_take_different_routes():
+    brain = _brain_with([0.5, 0.5])
+    routes = [tuple(db.choose_action(brain, np.zeros(1), np.random.default_rng(), 1.0) for _ in range(40))
+              for _ in range(2)]
+    assert routes[0] != routes[1]
+
+
+class _StuckEnv(_Env):
+    """Mario never gets past x 100."""
+
+    def step(self, action):
+        obs, reward, done, trunc, info = super().step(action)
+        info["mario_rect"] = (100, 400, 16, 16)
+        return obs, reward, done, trunc, info
+
+
+def _session(monkeypatch, tmp_path, variant, env):
+    monkeypatch.setattr(db, "_global_env", env)
+    monkeypatch.setattr(db, "_global_model", _brain_with([0.45, 0.55]))
+    monkeypatch.setattr(db, "_config", db.DashboardConfig(game_variant=variant,
+                                                          incidents_dir=str(tmp_path / "inc"),
+                                                          run_reports_dir=str(tmp_path / "runs")))
+    monkeypatch.setattr(db, "_pipeline", None)
+    return db.run_mario_agent()
+
+
+def test_every_clean_game_run_takes_a_new_route(monkeypatch, tmp_path):
+    assert config.DASHBOARD_FIXED_ROUTE_RUNS[config.CLEAN_GAME_VARIANT] == 0
+    session = _session(monkeypatch, tmp_path, config.CLEAN_GAME_VARIANT, _Env(episode_len=10_000))
+    assert {next(session)["action"] for _ in range(80)} == {0, 1}
+    session.close()
+
+
+def test_the_bugged_games_first_run_keeps_the_fixed_route_then_routes_vary(monkeypatch, tmp_path):
+    assert config.DASHBOARD_FIXED_ROUTE_RUNS[config.BUGGED_GAME_VARIANT] == 1
+    session = _session(monkeypatch, tmp_path, config.BUGGED_GAME_VARIANT, _Env(episode_len=60))
+    items = [next(session) for _ in range(160)]
+    session.close()
+    assert {i["action"] for i in items if i["telemetry"]["run"] == 1} == {1}        # the top pick
+    assert {i["action"] for i in items if i["telemetry"]["run"] > 1} == {0, 1}
+
+
+def test_a_drawn_route_stuck_in_a_trap_ends_early(monkeypatch, tmp_path):
+    env = _StuckEnv(episode_len=10_000)
+    session = _session(monkeypatch, tmp_path, config.CLEAN_GAME_VARIANT, env)
+    items = [next(session) for _ in range(config.DASHBOARD_STUCK_STEPS + 1)]
+    session.close()
+    ended = [i for i in items if "run_end" in i]
+    assert len(ended) == 1 and ended[0] is items[-1]
+    assert ended[0]["run_end"]["end_reason"] == "safety_reset" and ended[0]["run_end"]["report"] is None
+    assert config.DASHBOARD_STUCK_STEPS * 30 < config.QA_EPISODE_MAX_STEPS        # far sooner than the engine
+
+
+def test_the_fixed_route_is_never_cut_short(monkeypatch, tmp_path):
+    env = _StuckEnv(episode_len=10_000)
+    session = _session(monkeypatch, tmp_path, config.BUGGED_GAME_VARIANT, env)
+    for _ in range(config.DASHBOARD_STUCK_STEPS + 50):       # well past the limit
+        next(session)
+    session.close()
+    assert env.resets == 1

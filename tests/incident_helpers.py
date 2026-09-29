@@ -87,3 +87,29 @@ def context(det, frames=8, tree=FAKE_TREE, session_id="S-TEST"):
                           agent_action=3, recent_agent_actions=(3,) * min(agent_step, 8),
                           context_frames=ctx_frames, reward_mode="qa_exploration",
                           provenance=provenance(tree))
+
+
+class FakeBrain:
+    """Stands in for the loaded PPO model where the dashboard chooses actions
+    (dashboard_backend.choose_action): its policy puts all the weight on one
+    action, so every draw - at any temperature - is that action."""
+
+    class _Policy:
+        def __init__(self, action, n=10):
+            import torch
+            self.logits = torch.full((1, n), -1e9)
+            self.logits[0, action] = 0.0
+
+        def set_training_mode(self, _mode):
+            pass
+
+        def obs_to_tensor(self, obs):
+            import torch
+            return torch.as_tensor(np.asarray(obs))[None], True
+
+        def get_distribution(self, _tensor):
+            from types import SimpleNamespace
+            return SimpleNamespace(distribution=SimpleNamespace(logits=self.logits))
+
+    def __init__(self, action=3):
+        self.policy = self._Policy(action)
