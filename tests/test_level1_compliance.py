@@ -276,6 +276,17 @@ def test_a_healthy_completion_becomes_the_final_brain(snapshot, tmp_path):
         _verify(snapshot, tmp_path)
 
 
+def test_a_baseline_on_another_windows_drive_is_recorded_whole(snapshot, tmp_path, monkeypatch):
+    """No relative path exists across Windows drives (the CI runner's layout):
+    the record keeps the baseline's absolute path instead of failing."""
+    def no_relative_path(path, start=None):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+    monkeypatch.setattr(os.path, "relpath", no_relative_path)
+    rec = _verify(snapshot, tmp_path)
+    assert rec['verdict'] == lv.VERIFIED
+    assert os.path.isabs(rec['checks']['retention']['baseline'])
+
+
 @pytest.mark.parametrize(("retention", "verdict"), [('WARNING', lv.NEEDS_REVIEW),
                                                ('REGRESSED', lv.REJECTED)])
 def test_lost_completion_ability_is_not_a_final_brain(snapshot, tmp_path, retention, verdict):

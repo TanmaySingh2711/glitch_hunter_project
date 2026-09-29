@@ -54,6 +54,14 @@ def _resolve(path: str, root: str) -> str:
     return path if os.path.isabs(path) else os.path.join(root, path)
 
 
+def _relative(path: str, root: str) -> str:
+    try:
+        path = os.path.relpath(path, root)
+    except ValueError:                            # another Windows drive: no relative path
+        path = os.path.abspath(path)
+    return path.replace('\\', '/')
+
+
 def check_integrity(meta: dict[str, Any], root: str) -> tuple[list[str], dict[str, Any]]:
     """(failures, facts) for the snapshot a proof describes."""
     failures: list[str] = []
@@ -155,7 +163,7 @@ def verify(proof_path: str, baseline_path: str = ce.BASELINE_PATH, workers: int 
         ce.save(result, saved)
         record['checks']['retention'] = {
             'passed': comparison['verdict'] == 'HEALTHY', 'result': saved.replace('\\', '/'),
-            'baseline': os.path.relpath(baseline_path, root).replace('\\', '/'),
+            'baseline': _relative(baseline_path, root),
             **{k: comparison[k] for k in ('verdict', 'reasons', 'completion_rate',
                                           'baseline_completion_rate', 'completion_delta',
                                           'mean_progress', 'baseline_mean_progress',

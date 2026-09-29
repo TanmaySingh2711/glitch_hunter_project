@@ -443,7 +443,11 @@ def write_completion_snapshot(model: Any, coverage: SpatialCoverage, snapshot_di
     root = os.getcwd()
 
     def rel(p: str) -> str:
-        return os.path.relpath(os.path.abspath(p), root).replace('\\', '/')
+        try:
+            p = os.path.relpath(os.path.abspath(p), root)
+        except ValueError:                        # another Windows drive: no relative path
+            p = os.path.abspath(p)
+        return p.replace('\\', '/')
 
     meta = {
         'kind': SNAPSHOT_KIND,

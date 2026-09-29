@@ -227,6 +227,18 @@ def test_completion_between_checkpoints_writes_an_immediate_snapshot(mask, snap_
                                      {'global_timestep': 0, 'covered_testable_px': 0}, None)
 
 
+def _no_relative_path(path, start=None):
+    raise ValueError("path is on mount 'D:', start on mount 'C:'")
+
+
+def test_a_snapshot_on_another_windows_drive_is_still_written(mask, snap_dir, tmp_path, monkeypatch):
+    """GitHub's Windows runner keeps the checkout on one drive and pytest's
+    tmp_path on another, where no relative path exists; the snapshot is still
+    written and records the absolute path."""
+    monkeypatch.setattr(os.path, "relpath", _no_relative_path)
+    test_completion_between_checkpoints_writes_an_immediate_snapshot(mask, snap_dir, tmp_path)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # [4] 99.99% IS NOT 100%
 # ══════════════════════════════════════════════════════════════════════════
