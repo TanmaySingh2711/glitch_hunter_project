@@ -1,5 +1,6 @@
 # Continuous integration: the same three gates `python tools/check.py` runs
-# locally - lint, type check, tests - on every push and pull request, plus
+# locally - lint, type check, tests (on Linux, Windows and macOS) - on every
+# push and pull request, plus
 # the one-click setup (setup.bat / setup.sh) on clean Windows, Linux and
 # macOS machines, ending with the dashboard up on the approved brain, and on
 # Linux a browser test of the dashboard itself.
@@ -69,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -82,9 +83,16 @@ jobs:
       - name: System libraries (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1
+      # macOS builds of torch come from PyPI (as setup.sh does); Windows and
+      # Linux take the CPU build from PyTorch's own index.
       - name: Install dependencies (CPU torch)
+        shell: bash
         run: |
-          pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            pip install torch==2.14.0
+          else
+            pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+          fi
           pip install -r requirements.txt "pytest==9.1.1" "pytest-cov==7.1.0"
       # `slow` = the multi-minute reachability rebuild and real-engine runs
       # thousands of steps long; they run locally before every merge

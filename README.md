@@ -345,7 +345,7 @@ hand, follow the steps below.
 |---|---|
 | **Git** | to clone the repository |
 | **Python 3.12** exactly | not 3.11, not 3.13 (`requires-python = "==3.12.*"`). Get it from [python.org](https://www.python.org/downloads/) |
-| **OS** | **Windows 10/11** is the primary, fully verified platform. Linux and macOS: CI runs the one-click setup and starts the dashboard on each (headless); Linux also runs the full test suite and a browser test |
+| **OS** | **Windows 10/11** is the primary, fully verified platform. Linux and macOS: CI runs the one-click setup and starts the dashboard on each (headless) and runs the fast test suite; Linux also runs a browser test |
 | **GPU** | **not required** to run the dashboard; an NVIDIA GPU only speeds up training |
 | **Disk** | about 5 GB for the environment (PyTorch with CUDA is the largest part; the CPU-only build is much smaller) |
 

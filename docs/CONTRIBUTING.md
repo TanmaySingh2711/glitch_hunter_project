@@ -31,8 +31,8 @@ log, and the ruff, mypy, pytest and coverage caches. The project writes no
 first project import (see `common/__init__.py`), and a new entry point should
 do the same.
 
-CI (`.github/workflows/ci.yml`) runs the same gates on every push, on Linux
-and Windows, with an 86% coverage floor on the fast tests. It also runs the
+CI (`.github/workflows/ci.yml`) runs the same gates on every push, on Linux,
+Windows and macOS, with an 86% coverage floor on the fast tests. It also runs the
 one-click setup (`setup.bat norun`, `bash setup.sh norun`) on clean Windows,
 Linux and macOS machines and checks that the dashboard then starts with the
 approved 16M brain; on Linux it then drives the dashboard in a real browser
