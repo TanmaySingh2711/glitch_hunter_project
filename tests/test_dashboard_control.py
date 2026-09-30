@@ -10,8 +10,11 @@ display or window manager:
     the platform cannot hide or minimise a window.
 """
 import hashlib
+import itertools
+import statistics
 import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pygame as pg
@@ -31,6 +34,8 @@ class FakeBackend:
         self.close_requested = False
         self.sessions = 0
         self.step_delay = 0.0
+        self.wait = time.sleep           # how a step spends step_delay
+        self.step_starts = []            # ds._clock() as each step began
         self.run_end_at = None           # step on which each run ends (clean game)
         self.run_end = {'end_reason': 'level_complete',
                         'report': {'run_id': 'RUN-1', 'headline': 'No Bugs Found'}}
@@ -75,8 +80,9 @@ class FakeBackend:
             n = 0
             while True:
                 n += 1
+                self.step_starts.append(ds._clock())
                 if self.step_delay:
-                    time.sleep(self.step_delay)
+                    self.wait(self.step_delay)
                 item = {'frame': b'', 'log': f"session {sid} step {n}"}
                 if self.run_end_at and n % self.run_end_at == 0:
                     item['run_end'] = self.run_end
@@ -266,9 +272,59 @@ def test_reset_ends_the_session_and_the_next_start_is_fresh(svc):
     assert svc.fake.sessions == 2 and last_log(svc).startswith("session 2 step")
 
 
-def test_a_slow_step_keeps_the_pace_instead_of_halving_it(svc):
-    """A 30 ms step (a laptop on battery) still gets ~30 steps/s. The old
-    rule - wait as long again as the step took - gave it 16."""
+class VirtualClock:
+    """Time that moves only when the game thread sleeps or steps, so a pace
+    is exact arithmetic instead of whatever the machine's timer allows."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+@pytest.mark.parametrize("step_s", [0.010, 0.030, 0.050])
+def test_a_slow_step_keeps_the_pace_instead_of_halving_it(svc, monkeypatch, step_s):
+    """One step per STEP_PERIOD_S, or MIN_IDLE_S after a step that leaves no
+    time for it: a 30 ms step (a laptop on battery) gets 34 ms, ~29 steps/s.
+    The old rule - wait as long again as the step took - gave it 60 ms, 16.
+    Checked on a virtual clock: the rule, not the machine's timer."""
+    period_s = max(ds.STEP_PERIOD_S, step_s + ds.MIN_IDLE_S)
+    clock = VirtualClock()
+    monkeypatch.setattr(ds, "_clock", clock)
+    monkeypatch.setattr(ds, "time", SimpleNamespace(sleep=clock.sleep))
+    svc.fake.wait, svc.fake.step_delay = clock.sleep, step_s
+    svc.start_testing()
+    assert wait_for(lambda: len(svc.fake.step_starts) >= 40), "the game loop is not stepping"
+    svc.stop_testing()
+    starts = svc.fake.step_starts[5:40]
+    gaps = [b - a for a, b in itertools.pairwise(starts)]
+    assert max(gaps) == pytest.approx(period_s, abs=1e-6)
+    assert min(gaps) == pytest.approx(period_s, abs=1e-6)
+
+
+def _median_sleep(seconds, n=7):
+    samples = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        time.sleep(seconds)
+        samples.append(time.perf_counter() - t0)
+    return statistics.median(samples)
+
+
+def test_the_real_pace_holds_on_the_real_clock(svc):
+    """The same 30 ms step on the real timer, which catches a clock that
+    cannot see short waits (time.monotonic's 15.6 ms tick on Windows ran
+    the dashboard at a third of game speed). Skipped where the machine
+    itself cannot sleep on time: shared macOS CI runners overshoot a 30 ms
+    sleep by tens of ms, which no pacing rule can make up."""
+    late = max(_median_sleep(0.030) - 0.030, _median_sleep(ds.CLICK_POLL_S) - ds.CLICK_POLL_S)
+    if late > 0.003:
+        pytest.skip(f"this machine's sleeps overshoot by {late * 1000:.1f} ms; "
+                    "the rule itself is checked on a virtual clock above")
     svc.fake.step_delay = 0.030
     svc.start_testing()
     run_for(svc, 3)

@@ -551,7 +551,10 @@ def test_consolidation_never_makes_the_drift_worse(tmp_path):
     cb._opt = torch.optim.Adam(cb._params, lr=cb.lr)
     before = cb.measure()
     rec = cb.consolidate()
-    assert rec['kl_after'] <= rec['kl_before'] + 1e-9, (
+    # Restored weights are the starting weights exactly, but measure() visits
+    # the anchors in a fresh order, and a float32 mean summed in another
+    # order moves in the 7th digit (macOS CI: 1.4157220 -> 1.4157221).
+    assert rec['kl_after'] <= rec['kl_before'] * (1 + 1e-6), (
         f"consolidation left the policy worse: {rec['kl_before']:.4f} -> "
         f"{rec['kl_after']:.4f}")
     assert cb.measure() == pytest.approx(before, rel=1e-6), \
