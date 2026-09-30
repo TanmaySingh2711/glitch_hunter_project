@@ -6,7 +6,7 @@
 This file is the entry point: it decides WHICH run happens - the phase, the
 checkpoint to resume, the coverage that belongs to it, whether the launch is
 allowed at all - and wires the pieces in training/ together around one PPO
-model. Everything it prints also goes to logs/train.log once training starts.
+model. Everything it prints also goes to generated/logs/train.log once training starts.
 """
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+# No __pycache__ in the project, from the first project import on (common/__init__.py).
+sys.dont_write_bytecode = True
 
 import gymnasium as gym
 from stable_baselines3 import PPO
@@ -146,7 +149,7 @@ COVERAGE_FINAL_PATH = f"./{CHECKPOINT_NAME}_coverage.npz"
 RETENTION_RESULTS_DIR = os.path.join("evaluation", "results")
 # The run's own log, beside the TensorBoard curves. Opened only once every
 # launch gate has passed, so a refused launch writes nothing at all.
-TRAIN_LOG_PATH = os.path.join("logs", "train.log")
+TRAIN_LOG_PATH = os.path.join(xconfig.LOGS_DIR, "train.log")
 
 # ═══════════════════════════════════════════════════════════════════════
 # FRESH_START — set True to force a brand-new model from step 0, ignoring
@@ -247,11 +250,11 @@ REWARD_TELEMETRY_PATH = os.path.join(CHECKPOINT_DIR, "reward_telemetry.jsonl")
 # training works either way: you get the curves if you have it, and a plain
 # console run if you don't, instead of a crash on startup.
 #   To enable:  pip install tensorboard
-#   Then view:  tensorboard --logdir ./logs/
+#   Then view:  tensorboard --logdir generated/logs/
 # ═══════════════════════════════════════════════════════════════════════
 try:
     import tensorboard  # noqa: F401  (imported for its presence, not its API)
-    TENSORBOARD_LOG: str | None = "./logs/"
+    TENSORBOARD_LOG: str | None = f"./{xconfig.LOGS_DIR}/"
 except ImportError:
     TENSORBOARD_LOG = None
 

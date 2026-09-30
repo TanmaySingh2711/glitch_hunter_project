@@ -38,7 +38,7 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 
 `detector fires → Detection frozen (exact frame, trace, state, action log) → incident saved → testing pauses → GIF/MD/PDF rendered → replayed in a separate process → Bug Tracker updated`
 
-* **Evidence bundle** (`incidents/INC-…/`): `incident.json`, `trigger.png`,
+* **Evidence bundle** (`generated/incidents/INC-…/`): `incident.json`, `trigger.png`,
   `trajectory.json`, context frames, `context.gif`, `report.md`, `report.pdf`,
   `reproduction.json`, `manifest.json` (hashes). Written atomically, read-only, never overwritten.
 * **Where to fix it** (`reporting/fix_hint.py`): every report, and the dashboard's
@@ -61,13 +61,13 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
   detected, evidence and replay, report ready), from the incident's own
   manifest; a *Bug found* card shows the bug and its files.
 * **Clean-run report:** on the clean game, testing also stops when a run ends.
-  A run that reaches the castle gets a run report in `run_reports/RUN-…/`
+  A run that reaches the castle gets a run report in `generated/run_reports/RUN-…/`
   (`reporting/run_report.py`): `run.json`, `final.png`, `finish.gif`,
   `report.md`, `report.pdf` - "No Bugs Found" when no detector fired. It
   covers that run and those 12 detectors only; it does not prove the game
   bug-free.
 
-## The six benchmark bugs (`mario_bugged/INJECTED_BUGS.json`)
+## The six benchmark bugs (`games/mario_bugged/INJECTED_BUGS.json`)
 
 | # | Bug | Where | Caught by (generic rule) |
 |---|---|---|---|

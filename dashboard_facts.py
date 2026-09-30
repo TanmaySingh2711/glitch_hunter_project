@@ -95,9 +95,9 @@ def detectors() -> list[dict[str, str]]:
 
 
 def benchmark_bugs() -> list[dict[str, Any]]:
-    """The bugs declared in mario_bugged/INJECTED_BUGS.json, with the detector
+    """The bugs declared in games/mario_bugged/INJECTED_BUGS.json, with the detector
     kinds each one's declaration says catch it."""
-    manifest = _read_json(os.path.join(PROJECT_ROOT, config.BUGGED_GAME_VARIANT,
+    manifest = _read_json(os.path.join(PROJECT_ROOT, config.GAMES_DIR, config.BUGGED_GAME_VARIANT,
                                        BUG_MANIFEST_NAME))
     if manifest is None:
         return []

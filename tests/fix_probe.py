@@ -2,7 +2,7 @@
 
     python tests/fix_probe.py ROOT
 
-ROOT holds a copy of mario_bugged/ with the fixes "Where to fix it" suggests
+ROOT holds a copy of games/mario_bugged/ (at ROOT/games/mario_bugged) with the fixes "Where to fix it" suggests
 applied (tests/test_fix_hint.py makes it). The game is loaded from that copy
 instead of the project's, in this fresh process; everything else - the env,
 the detectors, the scenarios - is the project's own. Prints the same JSON as

@@ -16,7 +16,8 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+sys.dont_write_bytecode = True
+import common  # noqa: F401 - before any project module: no __pycache__ (common/__init__.py)
 
 _SESSION_ENV = []
 

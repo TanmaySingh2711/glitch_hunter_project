@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable, Generator
@@ -60,6 +61,10 @@ class DashboardConfig:
     incidents_dir: str = os.path.join(PROJECT_ROOT, config.INCIDENTS_DIR)
     run_reports_dir: str = os.path.join(PROJECT_ROOT, config.RUN_REPORTS_DIR)
     reproduce: bool = True
+    # Every run keeps the brain's top pick, so episodes repeat exactly. Only
+    # for tools that need the same route twice (validate_incident_pipeline's
+    # repeat sighting); the dashboard itself draws a new route every run.
+    fixed_route: bool = False
 
 
 _config = DashboardConfig()
@@ -569,7 +574,8 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     # the bugged game's first, which keeps the fixed route that meets all six
     # benchmark bugs (config.DASHBOARD_FIXED_ROUTE_RUNS).
     rng = np.random.default_rng()
-    fixed_runs = config.DASHBOARD_FIXED_ROUTE_RUNS.get(_config.game_variant, 0)
+    fixed_runs = (sys.maxsize if _config.fixed_route
+                  else config.DASHBOARD_FIXED_ROUTE_RUNS.get(_config.game_variant, 0))
     temperature = route_temperature(run_number, fixed_runs)
     since_progress = 0             # agent steps since Mario last reached a new furthest x
     model.policy.set_training_mode(False)

@@ -54,13 +54,13 @@ import game_window
 log = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(PROJECT_ROOT, ".dashboard_power.json")
+STATE_FILE = os.path.join(PROJECT_ROOT, "generated", ".dashboard_power.json")
 BEST_PERFORMANCE = "ded574b5-45a0-4f42-8737-46345c09c238"
 _OVERLAY_KEY = r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes"
 _OVERLAY_VALUE = {"ac": "ActiveOverlayAcPowerScheme", "dc": "ActiveOverlayDcPowerScheme"}
 GUARD_PERIOD_S = 3.0          # how soon a plug/unplug is noticed while running
 RESTORE_PERIOD_S = 15.0       # the background restorer's check interval
-PAGE_TITLE = "The Glitch Hunter"          # templates/index.html <title>
+PAGE_TITLE = "The Glitch Hunter"          # web/templates/index.html <title>
 # A browser window's title starts with the page's title. Matching only these
 # processes, and only a title that STARTS with PAGE_TITLE, keeps other windows
 # that merely mention it - an editor with this project open - from moving.
@@ -175,6 +175,7 @@ def _save_state(state: dict[str, Any]) -> None:
         except OSError:
             pass
         return
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     tmp = STATE_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2)

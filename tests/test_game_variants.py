@@ -86,14 +86,14 @@ def test_an_undeclared_edit_is_caught(tmp_path, monkeypatch):
     names it; declare it and the check accepts it."""
     import shutil
     for v in config.GAME_VARIANTS:
-        shutil.copytree(variants.game_dir(v), tmp_path / v,
+        shutil.copytree(variants.game_dir(v), tmp_path / config.GAMES_DIR / v,
                         ignore=shutil.ignore_patterns("__pycache__"))
     monkeypatch.setattr(variants, "PROJECT_ROOT", str(tmp_path))
-    target = tmp_path / config.BUGGED_GAME_VARIANT / "data" / "constants.py"
+    target = tmp_path / config.GAMES_DIR / config.BUGGED_GAME_VARIANT / "data" / "constants.py"
     target.write_text(target.read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8")
     assert variants.undeclared_differences(config.BUGGED_GAME_VARIANT) == ["data/constants.py"]
 
-    manifest = tmp_path / config.BUGGED_GAME_VARIANT / variants.BUG_MANIFEST_NAME
+    manifest = tmp_path / config.GAMES_DIR / config.BUGGED_GAME_VARIANT / variants.BUG_MANIFEST_NAME
     doc = json.loads(manifest.read_text(encoding="utf-8"))
     doc["bugs"].append({"id": "demo", "files": ["data/constants.py"]})
     manifest.write_text(json.dumps(doc), encoding="utf-8")
@@ -117,10 +117,10 @@ def test_an_unmarked_edit_inside_a_declared_file_is_caught(tmp_path, monkeypatch
     change in it is reported - and so is a marker naming an undeclared bug."""
     import shutil
     for v in config.GAME_VARIANTS:
-        shutil.copytree(variants.game_dir(v), tmp_path / v,
+        shutil.copytree(variants.game_dir(v), tmp_path / config.GAMES_DIR / v,
                         ignore=shutil.ignore_patterns("__pycache__"))
     monkeypatch.setattr(variants, "PROJECT_ROOT", str(tmp_path))
-    level = tmp_path / config.BUGGED_GAME_VARIANT / "data" / "states" / "level1.py"
+    level = tmp_path / config.GAMES_DIR / config.BUGGED_GAME_VARIANT / "data" / "states" / "level1.py"
     text = level.read_text(encoding="utf-8")
     edited = text.replace("pipe6 = collider.Collider(7675, 452, 83, 82)",
                           "pipe6 = collider.Collider(7675, 452, 60, 82)")
@@ -148,9 +148,9 @@ def test_the_tree_hash_ignores_line_endings_and_bytecode(tmp_path):
 
 
 def test_a_malformed_bug_manifest_is_an_error_not_no_bugs(tmp_path, monkeypatch):
-    (tmp_path / config.BUGGED_GAME_VARIANT).mkdir()
+    (tmp_path / config.GAMES_DIR / config.BUGGED_GAME_VARIANT).mkdir(parents=True)
     monkeypatch.setattr(variants, "PROJECT_ROOT", str(tmp_path))
-    (tmp_path / config.BUGGED_GAME_VARIANT / variants.BUG_MANIFEST_NAME).write_text(
+    (tmp_path / config.GAMES_DIR / config.BUGGED_GAME_VARIANT / variants.BUG_MANIFEST_NAME).write_text(
         '{"bugs": {"oops": 1}}', encoding="utf-8")
     with pytest.raises(ValueError):
         variants.injected_bugs(config.BUGGED_GAME_VARIANT)
@@ -167,7 +167,7 @@ def test_the_env_runs_the_clean_game_by_default(env):
     import data
     assert env.game_variant == config.CLEAN_GAME_VARIANT
     assert os.path.normcase(os.path.dirname(os.path.dirname(data.__file__))) == \
-        os.path.normcase(os.path.join(ROOT, config.CLEAN_GAME_VARIANT))
+        os.path.normcase(os.path.join(ROOT, config.GAMES_DIR, config.CLEAN_GAME_VARIANT))
 
 
 def test_a_process_refuses_to_mix_variants(env):

@@ -46,4 +46,4 @@ pillow==12.3.0
 # graphs if this isn't installed). Install it separately with:
 #   pip install tensorboard
 # then view the graphs with:
-#   tensorboard --logdir ./logs/
+#   tensorboard --logdir generated/logs/

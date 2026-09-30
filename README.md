@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/bug-found.png" alt="The Glitch Hunter dashboard stopped on a detected stair-clipping bug" width="900">
+  <img src="docs/assets/bug-found.png" alt="The Glitch Hunter dashboard stopped on a detected stair-clipping bug" width="900">
 </p>
 
 ---
@@ -170,8 +170,8 @@ same bug are counted on the same incident.
 ## 8. Injected Benchmark Bugs
 
 To prove the system works, six bugs were **deliberately injected into
-`mario_bugged/` only**. Each is declared in
-[`mario_bugged/INJECTED_BUGS.json`](mario_bugged/INJECTED_BUGS.json).
+`games/mario_bugged/` only**. Each is declared in
+[`games/mario_bugged/INJECTED_BUGS.json`](games/mario_bugged/INJECTED_BUGS.json).
 
 | # | Bug | What goes wrong | Detected as |
 |---|---|---|---|
@@ -185,7 +185,7 @@ To prove the system works, six bugs were **deliberately injected into
 The detectors are **generic**. None of them knows where a bug was injected;
 each checks its rule everywhere, against the level as it is **drawn**.
 
-| | Clean game (`mario_clean/`) | Bugged game (`mario_bugged/`) |
+| | Clean game (`games/mario_clean/`) | Bugged game (`games/mario_bugged/`) |
 |---|---|---|
 | Injected benchmark bugs | none, ever | the six above |
 | Validation result | **0 reports** across 101 brain episodes and dashboard runs | every bug detected, **reproduced**, reported |
@@ -212,12 +212,12 @@ flowchart TD
     end
     subgraph Game["Game and agent"]
         ENV["custom_mario_env.py<br/>Gymnasium env + detectors"]
-        VAR["mario_clean/ or mario_bugged/"]
+        VAR["games/mario_clean/ or games/mario_bugged/"]
         BRAIN["PPO brain (PyTorch)"]
     end
     subgraph Reporting["reporting/"]
         PIPE["pipeline: capture → render → replay"]
-        STORE["incidents/INC-…/<br/>evidence + reports"]
+        STORE["generated/incidents/INC-…/<br/>evidence + reports"]
     end
     UI <-->|Socket.IO frames, logs, bug events| API
     UI -->|download reports| API
@@ -230,7 +230,7 @@ flowchart TD
 
 | Layer | Role |
 |---|---|
-| **Dashboard** (`app.py`, `dashboard_service.py`, `dashboard_backend.py`, `dashboard_facts.py`, `templates/`, `static/`) | Serves the page, streams the game and what the AI is doing, pauses on bugs, serves evidence safely, shows the project's measured facts |
+| **Dashboard** (`app.py`, `dashboard_service.py`, `dashboard_backend.py`, `dashboard_facts.py`, `web/`) | Serves the page, streams the game and what the AI is doing, pauses on bugs, serves evidence safely, shows the project's measured facts |
 | **Environment + agent** (`custom_mario_env.py`, `agent_logic.py`, `rewards/`) | Runs the game one frame at a time, applies the brain's actions, runs the detectors |
 | **Exploration** (`exploration/`) | Coverage map, reachability mask, episode lifecycle, all tuned constants |
 | **Evaluation** (`evaluation/`) | The 500-episode completion-retention protocol |
@@ -276,8 +276,8 @@ glitch_hunter_project/
 ├── game_window.py            # game-window placement (Windows APIs)
 ├── train_agent.py            # training (Objectives 1-2; not needed to use the dashboard)
 │
-├── mario_clean/              # the original game - trusted, unmodified baseline
-├── mario_bugged/             # copy with the 6 declared benchmark bugs (+ INJECTED_BUGS.json, VARIANT.md)
+├── games/                    # mario_clean/ - the original game, trusted, unmodified baseline;
+│                             #   mario_bugged/ - a copy with the 6 declared benchmark bugs
 │
 ├── reporting/                # Objective 3: detectors, incident pipeline, store, reports, replay, where to fix
 ├── exploration/              # coverage, reachability mask, lifecycle, config.py (every tuned value)
@@ -286,10 +286,13 @@ glitch_hunter_project/
 ├── training/                 # training callbacks and checkpoint helpers
 ├── common/                   # logging, atomic file writes, tool start-up
 ├── tools/                    # command-line tools (see tools/README.md)
-├── templates/, static/       # the dashboard page (Socket.IO client bundled for offline use)
+├── web/                      # the dashboard page: templates/ and static/ (Socket.IO client bundled)
 ├── tests/                    # automated tests
-├── docs/                     # Objective 1-3 summaries, architecture, performance
-├── assets/                   # README images
+├── docs/                     # Objective 1-3 summaries, architecture, performance, contributing,
+│                             #   security, third-party notices, Tech Stack and Panel Q&A PDFs,
+│                             #   README images (assets/)
+├── generated/                # everything written while it runs (not in git): incidents/,
+│                             #   run_reports/, coverage_audits/, logs/, tool caches
 │
 ├── glitch_hunter_main_brain.zip # THE final 16M QA brain (Objective 2), + _coverage.npz
 ├── artifacts.json               # SHA-256 of every protected artifact, incl. the final brain's files
@@ -301,8 +304,8 @@ In git from `checkpoints_qa/` and `exploration_data/`: only the two files the
 final brain needs (`final_objective2_16000000/FINAL_OBJECTIVE2.json` and
 `reachable_mask.npz`). Not in git: the 6M brain (`mario_brain_checkpoint.zip`,
 Objective 1; earlier commits still hold it), training outputs, and
-`incidents/` and `run_reports/`, which the dashboard creates for bug evidence
-and clean-run reports.
+`generated/`: the bug evidence and clean-run reports the dashboard creates,
+the tools' outputs and caches.
 
 ---
 
@@ -535,7 +538,7 @@ and stops only on bugs.
 
 ### Where the evidence is saved
 
-Every incident gets its own folder, `incidents/INC-<date>-<time>-<id>/`:
+Every incident gets its own folder, `generated/incidents/INC-<date>-<time>-<id>/`:
 
 | File | Contents |
 |---|---|
@@ -548,7 +551,7 @@ Every incident gets its own folder, `incidents/INC-<date>-<time>-<id>/`:
 | `manifest.json` | SHA-256 of every file |
 
 A clean-game run that reaches the castle gets a run report in
-`run_reports/RUN-<date>-<time>-<id>/`: `run.json` (the record), `final.png`,
+`generated/run_reports/RUN-<date>-<time>-<id>/`: `run.json` (the record), `final.png`,
 `finish.gif`, `report.md` and `report.pdf`.
 
 Evidence is never deleted or overwritten. **Reset** only clears the
@@ -574,8 +577,8 @@ Get-NetTCPConnection -LocalPort 5000 -State Listen | ForEach-Object { Stop-Proce
 | Option | Purpose |
 |---|---|
 | `--game mario_clean` / `--game mario_bugged` | the game to start on (default: clean) |
-| `--incidents-dir PATH` | save evidence somewhere other than `incidents/` |
-| `--run-reports-dir PATH` | save clean-run reports somewhere other than `run_reports/` |
+| `--incidents-dir PATH` | save evidence somewhere other than `generated/incidents/` |
+| `--run-reports-dir PATH` | save clean-run reports somewhere other than `generated/run_reports/` |
 | `--desktop` | what `run_dashboard.bat` uses: full speed on battery too (see `desktop.py`) |
 | `--no-reproduce` | skip the replay step (faster; reports are still written) |
 | `--synthetic-probe X` | pipeline testing only: raise a clearly labelled *fake* bug at world x ≥ X |
@@ -593,7 +596,7 @@ python tools/validate_incident_pipeline.py    # 37-check end-to-end test of the 
 python train_agent.py --dry-run-resume        # shows what a training run would load; trains nothing
 ```
 
-Edits to the dashboard page (`templates/`, `static/`) show on a browser
+Edits to the dashboard page (`web/`) show on a browser
 refresh while the dashboard keeps running; a change to Python code needs a
 restart.
 
@@ -607,7 +610,7 @@ QA training launch is refused unless it is given an explicit cap
 
 The repository contains **two copies of the same game**:
 
-| | `mario_clean/` | `mario_bugged/` |
+| | `games/mario_clean/` | `games/mario_bugged/` |
 |---|---|---|
 | Purpose | the **trusted baseline**: every brain was trained and measured on it | the **test target** for bug detection |
 | Content | the original game, unmodified | the same game + the 6 declared benchmark bugs |
@@ -624,7 +627,7 @@ the game they were trained on.
 
 Every incident records which game produced it (variant name and game-tree
 hash), so a report can never be attributed to the wrong game. Details:
-[mario_bugged/VARIANT.md](mario_bugged/VARIANT.md).
+[games/mario_bugged/VARIANT.md](games/mario_bugged/VARIANT.md).
 
 ---
 
@@ -656,15 +659,15 @@ hash), so a report can never be attributed to the wrong game. Details:
 
 **The Live Testing tab while testing the clean game.** The Live status panel says what the AI is doing; the Bug Tracker stays empty, as it should:
 
-<p align="center"><img src="assets/dashboard.png" alt="Dashboard testing the clean game" width="900"></p>
+<p align="center"><img src="docs/assets/dashboard.png" alt="Dashboard testing the clean game" width="900"></p>
 
 **Testing stopped on a detected bug** (stair clipping on the bugged game): the video shows the saved GIF, and the *Bug found* card shows the bug with its evidence links:
 
-<p align="center"><img src="assets/bug-found.png" alt="Testing stopped on a detected stair-clipping bug" width="900"></p>
+<p align="center"><img src="docs/assets/bug-found.png" alt="Testing stopped on a detected stair-clipping bug" width="900"></p>
 
 **The context GIF the pipeline saved for that bug.** Mario lands and sinks into the stair column, and the last frame is the exact trigger frame:
 
-<p align="center"><img src="assets/bug-stair-clip.gif" alt="Context GIF of the stair-clipping incident" width="480"></p>
+<p align="center"><img src="docs/assets/bug-stair-clip.gif" alt="Context GIF of the stair-clipping incident" width="480"></p>
 
 These are real captures from this project (the GIF is trimmed to its final
 seconds). Visuals not yet included: a page of a generated PDF report.
@@ -680,12 +683,14 @@ seconds). Visuals not yet included: a page of a generated PDF report.
 | [docs/OBJECTIVE3.md](docs/OBJECTIVE3.md) | Objective 3: the reporting pipeline, detectors, benchmark bugs and validation |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, invariants, protected artifacts, where to change what |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Time and memory per worker, and how to measure them |
-| [mario_bugged/VARIANT.md](mario_bugged/VARIANT.md) | The six benchmark bugs and how changes to the bugged game are controlled |
-| [mario_bugged/INJECTED_BUGS.json](mario_bugged/INJECTED_BUGS.json) | The full declaration of every injected bug |
+| [games/mario_bugged/VARIANT.md](games/mario_bugged/VARIANT.md) | The six benchmark bugs and how changes to the bugged game are controlled |
+| [games/mario_bugged/INJECTED_BUGS.json](games/mario_bugged/INJECTED_BUGS.json) | The full declaration of every injected bug |
 | [tools/README.md](tools/README.md) | Every command-line tool and what it writes |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, the quality gate, rules for bugs and detectors, releasing the brain |
-| [SECURITY.md](SECURITY.md) | What the dashboard exposes, how it is kept safe, the dependency audit |
-| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Terms for the game code and assets, and the license of every Python library |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development setup, the quality gate, rules for bugs and detectors, releasing the brain |
+| [docs/SECURITY.md](docs/SECURITY.md) | What the dashboard exposes, how it is kept safe, the dependency audit |
+| [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) | Terms for the game code and assets, and the license of every Python library |
+| [docs/Glitch_Hunter_Tech_Stack.pdf](docs/Glitch_Hunter_Tech_Stack.pdf) | Every technology, folder and file in the project, and where each is used |
+| [docs/Glitch_Hunter_Panel_QA.pdf](docs/Glitch_Hunter_Panel_QA.pdf) | Questions a presentation panel may ask, with simple answers |
 
 ---
 
@@ -700,11 +705,11 @@ earlier commits). It does **not** cover:
 
 | Component | Terms |
 |---|---|
-| `mario_clean/`, `mario_bugged/` (the Mario clone) | Third-party code by Justin Meister, published **without an open-source license**. The author describes it as intended for **non-commercial educational purposes**. Do not use it commercially |
-| Game graphics, music and sounds | **Nintendo** intellectual property (*Super Mario Bros.*), not licensed by this project; they also appear in the screenshots in `assets/` and in incident reports. This project is not affiliated with or endorsed by Nintendo |
-| `static/vendor/socket.io.min.js` | Socket.IO client, under its own MIT license |
+| `games/mario_clean/`, `games/mario_bugged/` (the Mario clone) | Third-party code by Justin Meister, published **without an open-source license**. The author describes it as intended for **non-commercial educational purposes**. Do not use it commercially |
+| Game graphics, music and sounds | **Nintendo** intellectual property (*Super Mario Bros.*), not licensed by this project; they also appear in the screenshots in `docs/assets/` and in incident reports. This project is not affiliated with or endorsed by Nintendo |
+| `web/static/vendor/socket.io.min.js` | Socket.IO client, under its own MIT license |
 
-Full details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Full details: [THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
 
 ---
 

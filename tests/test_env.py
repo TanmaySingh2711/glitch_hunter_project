@@ -6,7 +6,7 @@ import numpy as np
 
 def test_action_space_is_ten(env):
     # Must stay in sync with ACTION_NAMES in agent_logic.py and the info
-    # modal in templates/index.html.
+    # modal in web/templates/index.html.
     assert env.action_space.n == 10
 
 

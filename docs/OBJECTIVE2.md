@@ -36,7 +36,7 @@ can reach while keeping its ability to finish the level. **Closed 2026-09-21.**
 | Coverage | 3,166,235 / 3,757,990 testable px = **84.25%** (not 100%) |
 | Completion (500 episodes) | **283/500 = 56.6%** (CI 52.2–60.9%) vs 46.8% at 6M → **HEALTHY** |
 | Mean progress | **0.750** vs 0.710; the greedy run finishes the level in 434 steps |
-| Backup + evidence | `checkpoints_qa/final_objective2_16000000/` (backup copy, `FINAL_OBJECTIVE2.json`, logs, telemetry) |
+| Record + evidence | `checkpoints_qa/final_objective2_16000000/` (`FINAL_OBJECTIVE2.json`, logs, telemetry) |
 
 ## How it works
 

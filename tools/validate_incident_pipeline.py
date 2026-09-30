@@ -15,7 +15,7 @@ labelled synthetic - and every stage of Objective 3 is asserted:
        site again in a later episode: counted, NOT a new incident, stops again
     -> the frozen Objective-2 files are byte-identical afterwards
 
-Writes only its own store (default incidents/_validation/<time>/, which the
+Writes only its own store (default generated/incidents/_validation/<time>/, which the
 dashboard's history ignores) and a validation_report.json beside it. This is
 PIPELINE validation: nothing here is, or claims to be, a discovered game bug.
 """
@@ -31,6 +31,7 @@ import zipfile
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.dont_write_bytecode = True  # no __pycache__ in the project (common/__init__.py)
 
 from common.cli import prepare_tool
 
@@ -80,7 +81,7 @@ def _protected() -> dict[str, str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default=None, help="incident store for this run "
-                    "(default: incidents/_validation/<utc time>/)")
+                    "(default: generated/incidents/_validation/<utc time>/)")
     ap.add_argument("--probes", type=int, nargs=2, default=list(DEFAULT_PROBES), metavar="X",
                     help="world x of the two synthetic probes")
     ap.add_argument("--timeout", type=float, default=240.0, help="seconds allowed per stage")
@@ -103,7 +104,10 @@ def main(argv: list[str] | None = None) -> int:
     protected_before = _protected()
     db.configure(db.DashboardConfig(game_variant=config.CLEAN_GAME_VARIANT,
                                     synthetic_probes=tuple(args.probes), incidents_dir=out,
-                                    run_reports_dir=os.path.join(out, "run_reports")))
+                                    run_reports_dir=os.path.join(out, "run_reports"),
+                                    # stage 5 meets the first probe's site again in a
+                                    # later episode: that needs the same route twice
+                                    fixed_route=True))
     app.backend.notify = lambda e, p: events.append((e, p))
     svc = GameWindowService(app.backend, emit=lambda e, p: events.append((e, p)),
                             log=lambda *_a: None)

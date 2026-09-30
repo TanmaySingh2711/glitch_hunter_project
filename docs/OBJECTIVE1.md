@@ -39,7 +39,7 @@ finish the level. Its 6M brain is the baseline for everything that follows.
 
 ## How it works
 
-* **Game:** a Python/Pygame Super Mario Bros clone (now `mario_clean/`),
+* **Game:** a Python/Pygame Super Mario Bros clone (now `games/mario_clean/`),
   driven one 60 fps frame per `step()` by `custom_mario_env.CustomMarioEnv`.
 * **Actions:** 10 discrete key combinations (walk, run, jump, crouch, left/right).
 * **Observation:** 4 stacked 84×84 grayscale frames; the agent acts every 4

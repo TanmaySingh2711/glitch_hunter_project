@@ -52,7 +52,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, cmd in gates(args.full):
         print(f"\n=== {name}: {' '.join(cmd)}", flush=True)
         t0 = time.perf_counter()
-        code = subprocess.call(cmd, cwd=ROOT)  # noqa: S603  (fixed argv, built above)
+        code = subprocess.call(cmd, cwd=ROOT,  # noqa: S603  (fixed argv, built above)
+                               env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         print(f"=== {name}: {'passed' if code == 0 else f'FAILED ({code})'} "
               f"in {time.perf_counter() - t0:.0f}s", flush=True)
         if code != 0:

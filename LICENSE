@@ -8,24 +8,24 @@ project's own work is covered by the MIT license below.
       every file in this repository EXCEPT the ones listed under NOT
       COVERED - the Python modules at the top level and in common/,
       evaluation/, exploration/, reporting/, rewards/, training/, tools/
-      and tests/; static/ (except static/vendor/) and templates/; docs/
+      and tests/; web/ (except web/static/vendor/); docs/
       and the other documentation and configuration files; and the
       trained model weights:
       mario_brain_checkpoint.zip          (the 6M brain, in this repository)
       glitch_hunter_final_brain_16M.zip   (the final 16M brain, published
                                            as a GitHub Release asset)
 
-  NOT COVERED — third-party, different terms, see THIRD_PARTY_NOTICES.md:
-      mario_clean/          (the Super Mario Bros clone and its assets)
-      mario_bugged/         (a copy of it, for deliberate QA test bugs)
-      static/vendor/        (the Socket.IO client - its own MIT license)
+  NOT COVERED — third-party, different terms, see docs/THIRD_PARTY_NOTICES.md:
+      games/mario_clean/          (the Super Mario Bros clone and its assets)
+      games/mario_bugged/         (a copy of it, for deliberate QA test bugs)
+      web/static/vendor/    (the Socket.IO client - its own MIT license)
       the game's graphics wherever they appear, including the screenshots
-      and recordings in assets/ and in every incident report
+      and recordings in docs/assets/ and in every incident report
 
-The mario_clean/ and mario_bugged/ directories are someone else's work
+The games/mario_clean/ and games/mario_bugged/ directories are someone else's work
 (two copies of one game) and its upstream project
 carries no open-source license at all. Do not assume the MIT terms below
-apply to it. THIRD_PARTY_NOTICES.md explains what is and isn't permitted.
+apply to it. docs/THIRD_PARTY_NOTICES.md explains what is and isn't permitted.
 ═══════════════════════════════════════════════════════════════════════
 
 

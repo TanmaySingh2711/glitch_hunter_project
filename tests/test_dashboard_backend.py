@@ -505,3 +505,29 @@ def test_the_fixed_route_is_never_cut_short(monkeypatch, tmp_path):
         next(session)
     session.close()
     assert env.resets == 1
+
+
+def test_the_dashboard_can_be_stopped_with_sigterm():
+    """SDL must not take over SIGTERM in the dashboard's process, or `kill`
+    cannot stop it on Linux and macOS (tests/test_dashboard_e2e.py checks the
+    real stop in CI)."""
+    import os
+
+    import app  # noqa: F401 - importing sets the hint before pygame starts
+    assert os.environ.get("SDL_NO_SIGNAL_HANDLERS") == "1"
+
+
+def test_a_fixed_route_config_keeps_the_top_pick_on_every_run(monkeypatch, tmp_path):
+    """For tools that need the same route twice (validate_incident_pipeline)."""
+    monkeypatch.setattr(db, "_global_env", _Env(episode_len=30))
+    monkeypatch.setattr(db, "_global_model", _brain_with([0.45, 0.55]))
+    monkeypatch.setattr(db, "_config", db.DashboardConfig(game_variant=config.CLEAN_GAME_VARIANT,
+                                                          incidents_dir=str(tmp_path / "inc"),
+                                                          run_reports_dir=str(tmp_path / "runs"),
+                                                          fixed_route=True))
+    monkeypatch.setattr(db, "_pipeline", None)
+    session = db.run_mario_agent()
+    items = [next(session) for _ in range(100)]
+    session.close()
+    assert max(i["telemetry"]["run"] for i in items) >= 3
+    assert {i["action"] for i in items} == {1}

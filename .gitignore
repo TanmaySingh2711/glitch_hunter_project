@@ -14,11 +14,20 @@ venv_gpu/
 .venv/
 
 # Not used today, and there are no secrets in this repository (see
-# SECURITY.md) - kept because committing one costs far more than this line.
+# docs/SECURITY.md) - kept because committing one costs far more than this line.
 .env
 
+# ─── EVERYTHING THE PROJECT WRITES AS IT RUNS ───
+# generated/ (exploration/config.py, GENERATED_DIR): incident evidence
+# bundles and clean-run reports (the dashboard), coverage-audit pictures and
+# calibration runs (the tools), the training log and TensorBoard curves, the
+# power-mode record run_dashboard.bat restores, and the ruff, mypy, pytest
+# and coverage caches. Runtime output, not source.
+generated/
+
 # ─── PYTHON / TOOL CACHES ───
-# All regenerated automatically; none of it is source.
+# The project writes no bytecode (common/__init__.py) and keeps the tools'
+# caches in generated/; these guard against a tool run from elsewhere.
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -45,7 +54,6 @@ coverage.xml
 # it back with `git checkout b27e9d2 -- mario_brain_checkpoint.zip`.
 # ═══════════════════════════════════════════════════════════════════════
 checkpoints/
-logs/
 mario_brain_*checkpoint*.zip
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -53,7 +61,7 @@ mario_brain_*checkpoint*.zip
 # exploration_data/ generated masks, jump arcs and bootstrap coverage
 # checkpoints_qa/   the QA-phase model zips + their paired coverage, and
 #                   final_objective2_16000000/ - the Objective-2 closure
-#                   record, evidence and a backup of the main brain
+#                   record and its evidence
 #                   (their SHA-256s ARE tracked, in artifacts.json)
 # EXCEPTION: the two files the dashboard needs to run the final 16M brain
 # ARE tracked - the approval record it checks the brain against, and the
@@ -67,26 +75,12 @@ checkpoints_qa/*
 checkpoints_qa/final_objective2_16000000/*
 !checkpoints_qa/final_objective2_16000000/FINAL_OBJECTIVE2.json
 
-# Tool outputs - regenerable records, one per run:
-#   coverage_audits/     tools/remaining_coverage_map.py (pictures + region lists)
-#   evaluation/results/  tools/evaluate_completion.py and verify_level1.py
-#   calibration_runs/    tools/calibrate_phase_reward.py (per-step pickles)
+# Completion-test results, one per evaluated brain (tools/evaluate_completion.py
+# and verify_level1.py); the 16M brain's is hash-protected and read when
+# choosing what to resume, so it stays beside the evaluation code.
 # evaluation/completion_baseline_6M.json sits OUTSIDE results/ on purpose: it
 # is the frozen baseline, tracked and hash-protected, not a run output.
-coverage_audits/
 evaluation/results/
-calibration_runs/
-
-# Incident evidence bundles (Objective 3; reporting/store.py): screenshots,
-# GIFs, reports and replays, one folder per incident. Runtime evidence, not
-# source - kept locally, read-only, and served by the dashboard.
-incidents/
-# The clean game's run reports ("no bugs found"; reporting/run_report.py).
-run_reports/
-# run_dashboard.bat's record of the power modes it must put back (desktop.py);
-# exists only until they are restored.
-.dashboard_power.json
-.dashboard_power.json.tmp
 
 # Release assets built by `python tools/final_brain.py bundle` (the final
 # 16M brain bundle is published as a GitHub Release asset, never committed).
@@ -120,7 +114,7 @@ Desktop.ini
 # NOT IGNORED, ON PURPOSE - listed here so nobody "helpfully" adds them:
 #   uv.lock                     - the lockfile; committing it is what makes
 #                                 `uv sync` reproducible for your friend.
-#   static/vendor/              - the vendored socket.io client. It is a
+#   web/static/vendor/          - the vendored socket.io client. It is a
 #                                 dependency we deliberately ship so the
 #                                 dashboard works with no internet.
 #   glitch_hunter_main_brain.zip, glitch_hunter_main_brain_coverage.npz,

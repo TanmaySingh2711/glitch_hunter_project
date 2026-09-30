@@ -56,7 +56,12 @@ def dashboard(tmp_path_factory):
         yield base
     finally:
         app.terminate()
-        app.wait(60)
+        try:
+            app.wait(30)
+        except subprocess.TimeoutExpired:
+            app.kill()
+            app.wait(30)
+            pytest.fail("the dashboard ignored a request to stop (SIGTERM)")
 
 
 def test_a_bug_stops_testing_and_the_card_says_where_and_what_to_fix(dashboard):

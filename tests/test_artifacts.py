@@ -30,17 +30,17 @@ def test_every_copy_of_the_6m_brain_is_the_6m_brain():
     assert {MANIFEST[k]['sha256'] for k in six_m} == {SIX_M_SHA256}
 
 
-def test_the_main_brain_and_its_backup_are_the_approved_brain():
+def test_the_main_brain_is_the_approved_brain():
     from exploration import config
     record_path = os.path.join(ROOT, config.FINAL_OBJECTIVE2_RECORD)
     if not os.path.exists(record_path):
         pytest.skip("the Objective-2 record is not in this checkout")
     with open(record_path, encoding="utf-8") as fh:
         record = json.load(fh)
-    for path in (config.FINAL_BRAIN_PATH, config.FINAL_BRAIN_BACKUP):
-        assert MANIFEST[path]["sha256"] == record["brain"]["sha256"], path
-    for path in (config.FINAL_COVERAGE_PATH, config.FINAL_COVERAGE_BACKUP):
-        assert MANIFEST[path]["sha256"] == record["coverage"]["sha256"], path
+    assert MANIFEST[config.FINAL_BRAIN_PATH]["sha256"] == record["brain"]["sha256"]
+    assert MANIFEST[config.FINAL_COVERAGE_PATH]["sha256"] == record["coverage"]["sha256"]
+    # One copy, in git (and the v1.0.0 release): the old backup is gone.
+    assert not any(k.startswith(f"{config.FINAL_OBJECTIVE2_DIR}/{config.MAIN_BRAIN_NAME}") for k in MANIFEST)
 
 
 @pytest.mark.parametrize("rel", sorted(MANIFEST))

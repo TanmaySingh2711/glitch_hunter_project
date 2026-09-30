@@ -37,6 +37,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.dont_write_bytecode = True  # no __pycache__ in the project (common/__init__.py)
 
 from common.cli import prepare_tool
 
@@ -576,7 +577,7 @@ def main() -> None:
     ap.add_argument("--arms", default="")
     ap.add_argument("--episodes", type=int, default=None,
                     help="override every arm's episode count")
-    ap.add_argument("--out", default="calibration_runs")
+    ap.add_argument("--out", default=config.CALIBRATION_RUNS_DIR)
     ap.add_argument("--model", default=config.BASELINE_MODEL)
     ap.add_argument("--bootstrap", default=config.BOOTSTRAP_COVERAGE)
     ap.add_argument("--seed", type=int, default=0)

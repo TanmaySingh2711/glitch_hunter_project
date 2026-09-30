@@ -18,7 +18,7 @@ kept narrow.
   browser.
 * **No debug server.** `debug=False` always - the Werkzeug debugger is a
   remote code execution console by design.
-* **Offline.** The Socket.IO client is vendored (`static/vendor/`); the page
+* **Offline.** The Socket.IO client is vendored (`web/static/vendor/`); the page
   loads nothing from the internet.
 * **Incident files are served from an allow-list, not from paths.** The
   report and evidence routes (`/incidents/<id>/<file>`, `/api/incidents/...`)
@@ -57,7 +57,7 @@ or closing its window). Windows only lets a normal user change the mode of
 the power source in use, so a battery mode changed while on battery is put
 back the next time the laptop is on battery, by a small background process
 that then exits. Until then the original values are kept in
-`.dashboard_power.json` in the project folder.
+`generated/.dashboard_power.json` in the project folder.
 
 ## What setup.bat and setup.sh do
 

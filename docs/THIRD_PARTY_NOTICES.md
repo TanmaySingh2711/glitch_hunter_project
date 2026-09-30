@@ -1,16 +1,16 @@
 # Third-Party Notices
 
-The `mario_clean/` and `mario_bugged/` directories are **not** original work of
+The `games/mario_clean/` and `games/mario_bugged/` directories are **not** original work of
 this project and are **not** covered by the MIT license in `LICENSE`.
 
 ---
 
-## mario_clean/ and mario_bugged/ — Super Mario Bros Level 1 (Python/Pygame)
+## games/mario_clean/ and games/mario_bugged/ — Super Mario Bros Level 1 (Python/Pygame)
 
-Two copies of the same upstream game. `mario_clean/` is the unmodified
-baseline; `mario_bugged/` exists so this project can add deliberate test bugs
+Two copies of the same upstream game. `games/mario_clean/` is the unmodified
+baseline; `games/mario_bugged/` exists so this project can add deliberate test bugs
 for its QA agent to find, and differs from it only where such a bug is
-declared in `mario_bugged/INJECTED_BUGS.json`. Neither changes the terms below.
+declared in `games/mario_bugged/INJECTED_BUGS.json`. Neither changes the terms below.
 
 **Original author:** Justin Meister
 (credited in the source files as `__author__ = 'justinarmstrong'`)
@@ -44,12 +44,12 @@ statement above is the only permission the author has expressed.
 
 The sprite sheets in `<variant>/resources/graphics/` and the audio in
 `<variant>/resources/music/` and `<variant>/resources/sound/` (in both
-`mario_clean/` and `mario_bugged/`) are assets
+`games/mario_clean/` and `games/mario_bugged/`) are assets
 from **Super Mario Bros.**, which is the intellectual property of
 **Nintendo Co., Ltd.**
 
 The same graphics appear in this project's screenshots and recordings: the
-images in `assets/` and the frames, GIFs and PDFs of every incident report.
+images in `docs/assets/` and the frames, GIFs and PDFs of every incident report.
 
 These assets are **not licensed** by this project, by the upstream author, or
 by anyone else here. They are included only because the original educational
@@ -59,7 +59,7 @@ This project is not affiliated with, endorsed by, or sponsored by Nintendo.
 
 ---
 
-## static/vendor/socket.io.min.js — Socket.IO client
+## web/static/vendor/socket.io.min.js — Socket.IO client
 
 **Version:** 4.7.2 · **Copyright:** (c) 2014-2023 Guillermo Rauch ·
 **License:** MIT

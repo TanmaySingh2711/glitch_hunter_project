@@ -30,7 +30,7 @@ flowchart TD
         EVAL["evaluation/<br/>completion retention · Level-1 verification"]
         REPT["reporting/<br/>incidents · evidence · reports · replay · run reports · game variants"]
     end
-    GAME["mario_clean/ (mario_bugged/)<br/>vendored engine"]
+    GAME["games/mario_clean/ (games/mario_bugged/)<br/>vendored engine"]
     COMMON["common/<br/>logging · atomic file I/O · tool start-up"]
 
     APP --> SVC --> BACK --> WRAP
@@ -160,7 +160,7 @@ decision, not a refactor.
   variants import as `data`; `claim_game_variant` refuses to mix them, and
   the dashboard's switch unloads one completely (`release_game_variant`)
   before loading the other.
-  `mario_clean/` must match `CLEAN_GAME_TREE_SHA256`; `mario_bugged/` may differ
+  `games/mario_clean/` must match `CLEAN_GAME_TREE_SHA256`; `games/mario_bugged/` may differ
   only where `INJECTED_BUGS.json` says - per file, per marked line block, and
   as the pinned whole diff (docs/OBJECTIVE3.md).
 * **Observing never changes the game.** Evidence (Objective 3) is off unless
@@ -177,7 +177,7 @@ decision, not a refactor.
 | Path | Written by | In git | Notes |
 |---|---|---|---|
 | `mario_brain_checkpoint.zip` | legacy training | no (was until 2026-09-29) | the 6M brain; SHA-256 `690d5702…a188b3` |
-| `glitch_hunter_main_brain.zip` + `_coverage.npz` | Objective 2 (renamed at clean-up) | yes | **THE MAIN BRAIN**: the approved 16M QA brain and its coverage, read-only; a backup copy sits in `checkpoints_qa/final_objective2_16000000/` |
+| `glitch_hunter_main_brain.zip` + `_coverage.npz` | Objective 2 (renamed at clean-up) | yes | **THE MAIN BRAIN**: the approved 16M QA brain and its coverage, read-only; also the v1.0.0 GitHub Release asset |
 | `checkpoints/` | legacy training (only if re-run) | no | legacy milestones; none are kept |
 | `exploration_data/reachable_mask.npz` | `tools/build_reachability.py` | yes | the testable mask + noncoverage class map |
 | `exploration_data/jump_arcs.npz` | `tools/collect_jump_arcs.py` | no | 228 real engine jump arcs - an input to the mask (the real-arc envelope) |
@@ -185,13 +185,13 @@ decision, not a refactor.
 | `exploration_data/coverage_bootstrap_6000000_mask_v4.npz` | `tools/bootstrap_coverage.py`, re-stamped by `tools/migrate_coverage.py` | no | the QA campaign's starting map (`config.BOOTSTRAP_COVERAGE`) |
 | `exploration_data/anchor_states.npz` | `tools/build_anchor_set.py` | no | the states `AnchorConsolidationCallback` holds KL against |
 | `checkpoints_qa/`, `glitch_hunter_qa*.{zip,npz}` | QA training | no | matched model/coverage pairs |
-| `checkpoints_qa/final_objective2_16000000/` | by hand at closure | only `FINAL_OBJECTIVE2.json` | **frozen**: the closure record, the evidence, and a read-only backup of the main brain. See `docs/OBJECTIVE2.md` |
+| `checkpoints_qa/final_objective2_16000000/` | by hand at closure | only `FINAL_OBJECTIVE2.json` | **frozen**: the closure record and the evidence (the backup copy of the main brain was removed on 2026-09-30: it is in git). See `docs/OBJECTIVE2.md` |
 | `checkpoints_qa/coverage_audit_trail.jsonl` | QA training | no | append-only coverage growth, one line per 10k steps |
 | `checkpoints_qa/reward_telemetry.jsonl` | QA training | no | append-only reward books: one line per episode (channels per phase) + 10k-step summaries |
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |
-| `logs/train.log` | QA / legacy training | no | the run's full log |
-| `evaluation/results/`, `coverage_audits/`, `calibration_runs/` | the tools (see `tools/README.md`) | no | one regenerable record per run |
-| `incidents/` | the dashboard (`reporting/`) | no | one read-only evidence bundle per incident, plus `occurrences.jsonl`; NOT regenerable - it is evidence |
+| `generated/logs/train.log` | QA / legacy training | no | the run's full log |
+| `evaluation/results/`, `generated/coverage_audits/`, `generated/calibration_runs/` | the tools (see `tools/README.md`) | no | one regenerable record per run |
+| `generated/incidents/` | the dashboard (`reporting/`) | no | one read-only evidence bundle per incident, plus `occurrences.jsonl`; NOT regenerable - it is evidence |
 
 `tools/verify_artifacts.py` re-hashes every artifact that is present against
 `artifacts.json` and reports any that drifted.
@@ -203,7 +203,7 @@ decision, not a refactor.
 | a reward weight or threshold | `exploration/config.py` (the balance asserts run at wrapper construction) | `pytest tests/test_phase_reward.py tests/test_reward_qa.py` |
 | the QA reward logic | `rewards/qa.py` | `pytest tests/test_reward_*.py tests/test_phase_reward.py` |
 | when a QA episode ends | `exploration/lifecycle.py` | `pytest tests/test_episode_lifecycle.py` |
-| what the dashboard shows | `dashboard_backend.py` (the live panel: `telemetry`, `coverage_now`), `static/`, `templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py tests/test_dashboard_backend.py` |
+| what the dashboard shows | `dashboard_backend.py` (the live panel: `telemetry`, `coverage_now`), `web/static/`, `web/templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py tests/test_dashboard_backend.py` |
 | the Overview page's facts | `dashboard_facts.py` (every number read from the project's own files) | `pytest tests/test_dashboard_facts.py` |
 | incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
 | the clean game's run report | `reporting/run_report.py`, `dashboard_backend._finish_run` | `pytest tests/test_run_report.py tests/test_dashboard_backend.py` |
@@ -211,6 +211,6 @@ decision, not a refactor.
 | how the dashboard's brain picks moves (a new route every run) | `dashboard_backend.choose_action` / `route_temperature`, `config.DASHBOARD_POLICY_TEMPERATURE`, `DASHBOARD_FIXED_ROUTE_RUNS`, `DASHBOARD_STUCK_STEPS` | `pytest tests/test_dashboard_backend.py tests/test_dashboard_e2e.py` |
 | the one-click setup | `setup.bat`, `setup.sh` (checked on clean machines by CI's *One-click setup* job) | `setup.bat norun` / `bash setup.sh norun` |
 | `run_dashboard.bat`: speed on battery, centred windows | `desktop.py`, `game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |
-| the game itself (deliberate bugs) | `mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
+| the game itself (deliberate bugs) | `games/mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |
 | anything | - | `python tools/check.py` |

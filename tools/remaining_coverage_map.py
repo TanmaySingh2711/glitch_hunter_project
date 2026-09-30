@@ -4,7 +4,7 @@ saved coverage file.
     python tools/remaining_coverage_map.py glitch_hunter_qa_coverage.npz
     python tools/remaining_coverage_map.py checkpoints_qa/glitch_hunter_qa_6400000_steps_coverage.npz --top 25
 
-Writes, into --out (default coverage_audits/):
+Writes, into --out (default generated/coverage_audits/):
     <name>_remaining_map.png       the level, one pixel per 4x4 block: red =
                                    still-unvisited testable pixels, grey =
                                    covered, black = outside the testable mask;
@@ -25,6 +25,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.dont_write_bytecode = True  # no __pycache__ in the project (common/__init__.py)
 
 from common.cli import prepare_tool
 
@@ -38,7 +39,7 @@ from exploration import level_completion as lc
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('coverage', help='a saved coverage .npz')
-    ap.add_argument('--out', default=os.path.join(ROOT, 'coverage_audits'))
+    ap.add_argument('--out', default=os.path.join(ROOT, config.COVERAGE_AUDITS_DIR))
     ap.add_argument('--top', type=int, default=25)
     ap.add_argument('--scale', type=int, default=4)
     args = ap.parse_args(argv)

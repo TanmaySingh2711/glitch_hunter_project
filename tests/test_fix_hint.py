@@ -47,7 +47,7 @@ def _changed_blocks(rel):
 def _bugs_at(place):
     """The bugs whose changed code this place quotes: the markers on its own
     lines, or - for a changed line with no marker of its own - its block's."""
-    rel = place["file"].split("/", 1)[1]
+    rel = place["file"].split(f"{config.BUGGED_GAME_VARIANT}/", 1)[1]
     with open(os.path.join(ROOT, *place["file"].split("/")), encoding="utf-8") as fh_:
         lines = fh_.read().splitlines()
     out = set()
@@ -137,7 +137,7 @@ def test_on_the_clean_game_every_quoted_line_is_real_code():
             path = os.path.join(ROOT, *p["file"].split("/"))
             with open(path, encoding="utf-8") as fh_:
                 lines = fh_.read().splitlines()
-            assert p["file"].startswith(f"{config.CLEAN_GAME_VARIANT}/")
+            assert p["file"].startswith(f"{config.GAMES_DIR}/{config.CLEAN_GAME_VARIANT}/")
             assert p["code"] and p["code"][0].strip() == lines[p["line"] - 1].strip()
             assert "INJECTED" not in " ".join(p["code"])
 
@@ -168,7 +168,7 @@ def test_the_report_carries_the_lead_and_labels_it_inferred():
     lines, places = render.fix_lines(record)
     assert lines[0].startswith("This stair step's collider is smaller than its drawing")
     assert lines[-1] == fh.BASIS and "not a proven root cause" in fh.BASIS
-    assert render.place_title(places[0]).startswith("mario_bugged/data/states/level1.py line ")
+    assert render.place_title(places[0]).startswith("games/mario_bugged/data/states/level1.py line ")
     assert render.fix_lines({"synthetic": True}) == ([], [])
 
 
@@ -198,7 +198,7 @@ def _patched_copy(tmp_path):
     """A copy of the bugged game with every suggested fix applied, bottom-up."""
     import shutil
     root = tmp_path / "patched"
-    shutil.copytree(game_dir(config.BUGGED_GAME_VARIANT), root / config.BUGGED_GAME_VARIANT,
+    shutil.copytree(game_dir(config.BUGGED_GAME_VARIANT), root / config.GAMES_DIR / config.BUGGED_GAME_VARIANT,
                     ignore=shutil.ignore_patterns("__pycache__"))
     for rel, fixes in _suggested_edits().items():
         path = root / rel
@@ -221,7 +221,8 @@ def _probe(script, *args):
 
 def test_every_suggested_fix_is_a_concrete_edit():
     edits = _suggested_edits()
-    assert set(edits) == {"mario_bugged/data/states/level1.py", "mario_bugged/data/components/mario.py"}
+    assert set(edits) == {"games/mario_bugged/data/states/level1.py",
+                          "games/mario_bugged/data/components/mario.py"}
     # 2 take-offs, 1 pipe, 2 stair columns, 2 for the wall (built, listed),
     # 3 for the brick (its flag, both collision checks), 1 goomba check.
     assert sum(len(v) for v in edits.values()) == 11

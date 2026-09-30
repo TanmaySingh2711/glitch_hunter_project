@@ -18,6 +18,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.dont_write_bytecode = True  # no __pycache__ in the project (common/__init__.py)
 
 from common.cli import prepare_tool
 

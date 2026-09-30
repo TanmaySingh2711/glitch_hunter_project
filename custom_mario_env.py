@@ -62,7 +62,7 @@ def claim_game_variant(variant: str) -> str:
     if variant not in config.GAME_VARIANTS:
         raise ValueError(f"unknown game variant {variant!r}; expected one of "
                          f"{', '.join(config.GAME_VARIANTS)}")
-    game_dir = os.path.join(PROJECT_ROOT, variant)
+    game_dir = os.path.join(PROJECT_ROOT, config.GAMES_DIR, variant)
     loaded = sys.modules.get('data')
     if loaded is not None and getattr(loaded, '__file__', None):
         if _package_root(loaded) != os.path.normcase(game_dir):
@@ -193,7 +193,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         # checkpoint cannot be loaded here - it has to be retrained.
         #
         # Keep this list in sync with ACTION_NAMES in agent_logic.py and the
-        # info modal in templates/index.html.
+        # info modal in web/templates/index.html.
         # ═══════════════════════════════════════════════════════════════════
         self.action_space = spaces.Discrete(10)
         self.observation_space = spaces.Box(low=0, high=255, shape=(240, 256, 3), dtype=np.uint8)

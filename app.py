@@ -45,6 +45,15 @@ if isinstance(sys.stdout, io.TextIOWrapper):
 # reserves a buffer per core at import - measured ~480 MB of private memory
 # for nothing (see train_agent.limit_worker_blas_threads).
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+# No __pycache__ in the project, from the very first project import on (the
+# rest of common/__init__.py's reason).
+os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+sys.dont_write_bytecode = True
+# SDL (under pygame) otherwise takes over SIGTERM, which Python leaves at its
+# default, and turns it into a quit event nobody reads here: on Linux and
+# macOS `kill` (or a test harness stopping the server) would not stop the
+# dashboard. Only this process; training keeps SDL's usual handling.
+os.environ.setdefault("SDL_NO_SIGNAL_HANDLERS", "1")
 
 import argparse
 import threading
@@ -56,6 +65,7 @@ from typing import Any
 from flask import Flask, Response, abort, render_template, request, send_file
 from flask_socketio import SocketIO
 
+import common  # noqa: F401 - first of the project: no __pycache__ (common/__init__.py)
 import dashboard_facts
 from common.logging_setup import configure_logging
 
@@ -69,8 +79,10 @@ from reporting.store import StoreError
 
 log = logging.getLogger(__name__)
 
-app = Flask(__name__)
-# The page's HTML is re-read whenever templates/index.html changes, so an
+# The page lives in web/: web/templates/index.html and web/static/ (still
+# served at /static/...).
+app = Flask(__name__, template_folder="web/templates", static_folder="web/static")
+# The page's HTML is re-read whenever web/templates/index.html changes, so an
 # edit to the page shows on a browser refresh, with no server restart.
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 

@@ -47,10 +47,10 @@ tensorboard = ["tensorboard>=2.18"]
 # PyPI's Windows torch wheels are CPU-only, so the explicit index below takes
 # torch from PyTorch's own CUDA 12.6 wheels (they also run, on the CPU, on a
 # machine without an NVIDIA GPU). 2.14.0 is the pin because it has no
-# published advisories (SECURITY.md) and satisfies stable-baselines3's
+# published advisories (docs/SECURITY.md) and satisfies stable-baselines3's
 # torch>=2.8, so SB3 installs normally - no override, no --no-deps.
 # It replaced 2.5.1+cu121, which the 6M brain was trained on; both brains
-# play identically on it (SECURITY.md, "Dependencies").
+# play identically on it (docs/SECURITY.md, "Dependencies").
 [tool.uv.sources]
 torch = { index = "pytorch-cu126" }
 
@@ -66,7 +66,8 @@ explicit = true
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = ["mario_clean", "mario_bugged", "venv_gpu",   # vendored / generated
+cache-dir = "generated/cache/ruff"
+exclude = ["games", "venv_gpu", "generated",   # vendored / generated
            "tools/objective2_evidence"]             # preserved anomaly reproductions, kept as recorded
 
 [tool.ruff.lint]
@@ -130,13 +131,19 @@ known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
 # root has to be on sys.path, and SDL told to run headless, before anything
 # that loads pygame is imported - hoisting them breaks every tool.
 "tools/*" = ["T20", "E402"]
+# app.py and train_agent.py set their process up (no bytecode caches; for
+# app.py also one BLAS thread and SDL's signal handling) before anything of
+# the project is imported.
+"app.py" = ["E402"]
+"train_agent.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.12"
+cache_dir = "generated/cache/mypy"
 files = ["agent_logic.py", "app.py", "custom_mario_env.py", "dashboard_backend.py",
          "dashboard_service.py", "desktop.py", "game_window.py", "train_agent.py",
          "common", "evaluation", "exploration", "reporting", "rewards", "training", "tools"]
-exclude = ["^mario_clean/", "^mario_bugged/", "^venv_gpu/",
+exclude = ["^games/", "^venv_gpu/",
            "^tools/objective2_evidence/"]   # preserved anomaly reproductions, kept as recorded
 strict = true
 warn_unreachable = true
@@ -161,7 +168,8 @@ disallow_untyped_decorators = false
 
 [tool.coverage.run]
 source = ["."]
-omit = ["mario_clean/*", "mario_bugged/*", "venv_gpu/*", "tests/*", "tools/*"]
+data_file = "generated/cache/.coverage"
+omit = ["games/*", "venv_gpu/*", "generated/*", "tests/*", "tools/*"]
 branch = true
 
 [tool.coverage.report]
@@ -179,6 +187,7 @@ exclude_also = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+cache_dir = "generated/cache/pytest"
 # --strict-markers: a typo'd @pytest.mark.slwo is an error, not a silently
 # fast "slow" test.
 addopts = "-q --strict-markers"
@@ -186,6 +195,9 @@ filterwarnings = [
     # pygame 2.6 imports pkg_resources at start-up; nothing here uses it, and
     # the warning would otherwise head every run.
     "ignore:pkg_resources is deprecated as an API:DeprecationWarning",
+    # cache_dir (above) is read only by pytest's cache plugin, which
+    # tools/check.py switches off (-p no:cacheprovider); unread there is fine.
+    "ignore:Unknown config option. cache_dir:pytest.PytestConfigWarning",
 ]
 markers = [
     # Anything needing the trained checkpoint or a full geometry rebuild.

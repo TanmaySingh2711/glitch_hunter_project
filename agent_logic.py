@@ -39,7 +39,7 @@ from rewards.shared import Info
 __all__ = ['ACTION_NAMES', 'QA_CHANNELS', 'REWARD_MODES', 'GlitchHunterWrapper']
 
 # Keep in sync with the action space in custom_mario_env.py and the info modal
-# in templates/index.html (tests/test_env.py checks the first two agree).
+# in web/templates/index.html (tests/test_env.py checks the first two agree).
 ACTION_NAMES = {
     0: "Stand Still",
     1: "Walk Right",

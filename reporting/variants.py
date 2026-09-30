@@ -54,7 +54,7 @@ def game_dir(variant: str) -> str:
     if variant not in config.GAME_VARIANTS:
         raise ValueError(f"unknown game variant {variant!r}; expected one of "
                          f"{', '.join(config.GAME_VARIANTS)}")
-    return os.path.join(PROJECT_ROOT, variant)
+    return os.path.join(PROJECT_ROOT, config.GAMES_DIR, variant)
 
 
 def _file_digest(path: str) -> str:

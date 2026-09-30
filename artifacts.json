@@ -73,16 +73,6 @@
   "recorded": "2026-09-24",
   "note": "The main brain's coverage state: 3,166,235 / 3,757,990 testable px = 84.2534% (NOT 100%)."
  },
- "checkpoints_qa/final_objective2_16000000/glitch_hunter_main_brain.zip": {
-  "sha256": "d906d09e11002915c6de39ea83afc3670f02ba48bd769e21c3f3a17b0cc67899",
-  "recorded": "2026-09-24",
-  "note": "Read-only BACKUP of the main brain (same bytes)."
- },
- "checkpoints_qa/final_objective2_16000000/glitch_hunter_main_brain_coverage.npz": {
-  "sha256": "aa384707881754508fbc5f5d4c9af385720cb39186a5b33054b5ba73daedaec4",
-  "recorded": "2026-09-24",
-  "note": "Read-only BACKUP of the main brain's coverage."
- },
  "checkpoints_qa/final_objective2_16000000/evidence/console.log": {
   "sha256": "2d606ab73f32f94b09d8a795e359bdda417a73ecf21b4ed1bcc873274f044a0e",
   "recorded": "2026-09-24",

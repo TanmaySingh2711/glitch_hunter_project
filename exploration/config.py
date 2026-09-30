@@ -1237,20 +1237,18 @@ BOOTSTRAP_EPISODES = 40
 # read-only at the project root. Named "<name>.zip" + "<name>_coverage.npz" so
 # they are a matched pair for train_agent's resume and coverage checks.
 #
-# FINAL_OBJECTIVE2_DIR keeps the closure record, the evidence behind it, and a
-# read-only BACKUP of the same pair under the same names: the brain is not in
-# git and cost ~10 h of training, so one copy is not enough. Nothing reads the
-# backup. Objective 3 never writes either; every incident names the brain by
-# SHA-256, checked against FINAL_OBJECTIVE2.json (docs/OBJECTIVE2.md,
-# "FINAL STATE").
+# FINAL_OBJECTIVE2_DIR keeps the closure record and the evidence behind it. The
+# pair itself is in git (and in the v1.0.0 GitHub Release), so the read-only
+# backup copy that used to sit here was removed on 2026-09-30. Objective 3
+# never writes either file; every incident names the brain by SHA-256, checked
+# against FINAL_OBJECTIVE2.json (docs/OBJECTIVE2.md, "FINAL STATE").
 # ═══════════════════════════════════════════════════════════════════════
 MAIN_BRAIN_NAME = "glitch_hunter_main_brain"
 FINAL_BRAIN_PATH = f"{MAIN_BRAIN_NAME}.zip"
 FINAL_COVERAGE_PATH = f"{MAIN_BRAIN_NAME}_coverage.npz"
 FINAL_OBJECTIVE2_DIR = f"{CHECKPOINT_DIR_QA}/final_objective2_16000000"
 FINAL_OBJECTIVE2_RECORD = f"{FINAL_OBJECTIVE2_DIR}/FINAL_OBJECTIVE2.json"
-FINAL_BRAIN_BACKUP = f"{FINAL_OBJECTIVE2_DIR}/{FINAL_BRAIN_PATH}"
-FINAL_COVERAGE_BACKUP = f"{FINAL_OBJECTIVE2_DIR}/{FINAL_COVERAGE_PATH}"
+FINAL_OBJECTIVE2_EVIDENCE = f"{FINAL_OBJECTIVE2_DIR}/evidence"
 
 # ═══════════════════════════════════════════════════════════════════════
 # GAME VARIANTS (Objective 3)
@@ -1270,6 +1268,9 @@ FINAL_COVERAGE_BACKUP = f"{FINAL_OBJECTIVE2_DIR}/{FINAL_COVERAGE_PATH}"
 # default); only an explicit choice - the dashboard's --game flag, or an
 # incident replay of a bugged-variant incident - selects mario_bugged.
 # ═══════════════════════════════════════════════════════════════════════
+# Both variants live side by side in GAMES_DIR (games/mario_clean/,
+# games/mario_bugged/); a variant is named by its folder.
+GAMES_DIR = "games"
 CLEAN_GAME_VARIANT = "mario_clean"
 BUGGED_GAME_VARIANT = "mario_bugged"
 GAME_VARIANTS = (CLEAN_GAME_VARIANT, BUGGED_GAME_VARIANT)
@@ -1277,12 +1278,25 @@ DEFAULT_GAME_VARIANT = CLEAN_GAME_VARIANT
 CLEAN_GAME_TREE_SHA256 = "b1f6b18467db398a41f7272c414d7f2a81ae4929b1c7a788dc572f19fe592630"
 
 # ═══════════════════════════════════════════════════════════════════════
+# EVERYTHING THE PROJECT WRITES AS IT RUNS - one folder, git-ignored
+# ═══════════════════════════════════════════════════════════════════════
+# The dashboard's evidence and run reports, the tools' audit pictures, the
+# training log and the linters' and tests' caches all go under GENERATED_DIR,
+# so the project folder itself holds only the project. (Python's own
+# bytecode caches are not written at all: common/__init__.py.)
+GENERATED_DIR = "generated"
+CACHE_DIR = f"{GENERATED_DIR}/cache"                 # ruff, mypy, pytest, coverage
+LOGS_DIR = f"{GENERATED_DIR}/logs"                   # train.log + TensorBoard curves
+COVERAGE_AUDITS_DIR = f"{GENERATED_DIR}/coverage_audits"
+CALIBRATION_RUNS_DIR = f"{GENERATED_DIR}/calibration_runs"
+
+# ═══════════════════════════════════════════════════════════════════════
 # INCIDENT EVIDENCE AND REPORTING (Objective 3; see docs/OBJECTIVE3.md)
 # ═══════════════════════════════════════════════════════════════════════
-INCIDENTS_DIR = "incidents"
+INCIDENTS_DIR = f"{GENERATED_DIR}/incidents"
 # Clean-game runs that reach the castle get a run report here - the
 # "no bugs found" counterpart of an incident (reporting/run_report.py).
-RUN_REPORTS_DIR = "run_reports"
+RUN_REPORTS_DIR = f"{GENERATED_DIR}/run_reports"
 
 # ─── A NEW ROUTE EVERY DASHBOARD RUN (clean game) ───
 # On the clean game the dashboard draws each action from the brain's own

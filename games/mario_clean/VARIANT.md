@@ -1,7 +1,7 @@
 # mario_clean — the CLEAN baseline game
 
 The canonical Super Mario Bros Level 1-1 clone (vendored third-party code; see
-THIRD_PARTY_NOTICES.md). Every trained brain, the coverage mask and the
+docs/THIRD_PARTY_NOTICES.md). Every trained brain, the coverage mask and the
 Objective-2 results were produced on exactly this game.
 
 **Never put an intentional bug here.** This variant is the trustworthy

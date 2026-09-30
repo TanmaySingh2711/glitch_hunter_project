@@ -11,8 +11,8 @@ pre-commit install          # optional: lint + type-check on every commit
 
 (`uv sync --active` installs the same versions from `pyproject.toml`'s `dev` group.)
 
-Working on the dashboard page: edits to `templates/index.html`,
-`static/css/style.css` and `static/js/main.js` show on a browser refresh while
+Working on the dashboard page: edits to `web/templates/index.html`,
+`web/static/css/style.css` and `web/static/js/main.js` show on a browser refresh while
 the dashboard keeps running (`app.py` re-reads the template and versions the
 CSS and JavaScript by their file times). A change to Python code still needs a
 restart of the dashboard.
@@ -23,6 +23,13 @@ restart of the dashboard.
 python tools/check.py        # ruff, mypy, fast tests, artifact hashes (~5 min)
 python tools/check.py --full # before a merge or a release: + slow tests, 90% coverage floor (~30 min)
 ```
+
+Everything the project writes as it runs lands in `generated/` (git-ignored):
+the dashboard's evidence and run reports, the tools' outputs, the training
+log, and the ruff, mypy, pytest and coverage caches. The project writes no
+`__pycache__` folders: entry points set `sys.dont_write_bytecode` before their
+first project import (see `common/__init__.py`), and a new entry point should
+do the same.
 
 CI (`.github/workflows/ci.yml`) runs the same gates on every push, on Linux
 and Windows, with an 86% coverage floor on the fast tests. It also runs the
@@ -48,12 +55,12 @@ installed). If you change a dependency pin, change it in `setup.bat` and
 * **Comments say why.** The code says what. A comment that restates the next
   line is noise; one that records the incident, measurement or constraint
   behind it is the most valuable line in the file.
-* **Never touch `mario_clean/`.** It is vendored third-party code (see
+* **Never touch `games/mario_clean/`.** It is vendored third-party code (see
   `THIRD_PARTY_NOTICES.md`) and the pinned baseline game; read what you need
-  from outside it. Deliberate QA bugs go only in `mario_bugged/`: mark every
+  from outside it. Deliberate QA bugs go only in `games/mario_bugged/`: mark every
   changed block of lines with `# INJECTED BUG <id>`, declare the bug in
   `INJECTED_BUGS.json`, and re-pin its `diff_sha256` - the tests reject
-  anything else (see `mario_bugged/VARIANT.md`). Add bugs only when the
+  anything else (see `games/mario_bugged/VARIANT.md`). Add bugs only when the
   project owner specifies them.
 * **Detectors are generic.** A rule in `reporting/collision_invariants.py`
   (or `custom_mario_env._detect_glitches`) must hold everywhere in the level
@@ -93,7 +100,7 @@ Prefix with the area touched (`lifecycle:`, `rewards:`, `dashboard:`,
 `reporting:`, `detectors:`, `variants:`, `training:`, `tools:`, `docs:`,
 `ci:`). Never commit generated artifacts - the `.gitignore` lists them and
 says why. `mario_brain_checkpoint.zip` (the 6M fallback brain) is the one
-deliberate exception; the README's images in `assets/` are source, not
+deliberate exception; the README's images in `docs/assets/` are source, not
 artifacts.
 
 ## Artifacts

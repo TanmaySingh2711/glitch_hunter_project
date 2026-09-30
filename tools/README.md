@@ -14,7 +14,7 @@ refuses (with the reason) rather than guessing when an input is missing.
 | `verify_artifacts.py` | Re-hashes the protected artifacts (the 6M brain, masks, baseline) against `artifacts.json`. | nothing (`--record` rewrites the manifest) |
 | `benchmark_step.py` | Milliseconds per agent step for the bare engine, the legacy wrapper and the QA wrapper; `--profile` shows where the time goes. | nothing |
 | `evaluate_completion.py` | Can a checkpoint still finish Level 1-1? Plays the frozen protocol and compares with the 6M baseline: HEALTHY / WARNING / REGRESSED. | `evaluation/results/` |
-| `remaining_coverage_map.py` | Where the uncovered testable pixels are, as a picture and a JSON region list. | `coverage_audits/` |
+| `remaining_coverage_map.py` | Where the uncovered testable pixels are, as a picture and a JSON region list. | `generated/coverage_audits/` |
 | `verify_level1.py` | After Level 1 is fully covered: integrity, policy health and completion retention of the snapshot. Decides whether it is the final Level-1 brain. | one read-only `*_verification.json` beside the snapshot; the retention result in `evaluation/results/` |
 
 ## Incidents (Objective 3)
@@ -23,7 +23,7 @@ refuses (with the reason) rather than guessing when an input is missing.
 |---|---|---|
 | `incidents.py` | The incident store from the command line: `list`, `show`, `verify` (re-hash every bundle against its manifest), `rerender` (new versioned reports, with a reason), `reproduce` (replay again), `recover` (finish what an interrupted run left). See docs/OBJECTIVE3.md. | nothing for list/show/verify; a NEW versioned file + manifest history for rerender/reproduce |
 | `build_level_design.py` | Writes `reporting/level1_design.json` - Level 1-1's static solids as designed - from mario_clean (the pinned baseline, never a variant under test). `--check` says whether the file is current. | `reporting/level1_design.json` |
-| `validate_incident_pipeline.py` | End-to-end proof on the real dashboard stack: the approved brain on the clean game, two SYNTHETIC probes, every stage asserted (stop, evidence, reports, replay, downloads, resume, duplicates, Objective-2 untouched). `--windowed` uses a real game window. ~30 s. | its own store, `incidents/_validation/<time>/` (ignored by the dashboard's history) |
+| `validate_incident_pipeline.py` | End-to-end proof on the real dashboard stack: the approved brain on the clean game, two SYNTHETIC probes, every stage asserted (stop, evidence, reports, replay, downloads, resume, duplicates, Objective-2 untouched). `--windowed` uses a real game window. ~30 s. | its own store, `generated/incidents/_validation/<time>/` (ignored by the dashboard's history) |
 
 ## QA campaign set-up (run once, in this order)
 
@@ -41,7 +41,7 @@ refuses (with the reason) rather than guessing when an input is missing.
 | Tool | What it measured | Writes |
 |---|---|---|
 | `objective2_evidence/*.py` | Objective 2's anomaly reproductions (jump physics, run-up, the well escape and its trace), referenced from docs/OBJECTIVE2.md; kept exactly as recorded (excluded from lint). | nothing |
-| `calibrate_phase_reward.py` | Phase 4B: every QA reward channel, per phase and per step, on real trajectories and scripted controllers; `--report` re-analyses a run without replaying it. The PHASE-GATED REWARD values in `exploration/config.py` come from it. | `calibration_runs/*.pkl` |
+| `calibrate_phase_reward.py` | Phase 4B: every QA reward channel, per phase and per step, on real trajectories and scripted controllers; `--report` re-analyses a run without replaying it. The PHASE-GATED REWARD values in `exploration/config.py` come from it. | `generated/calibration_runs/*.pkl` |
 
 ## Conventions
 
