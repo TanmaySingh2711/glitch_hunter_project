@@ -273,19 +273,6 @@
                 </section>
             </div>
 
-            <h2 class="section-title">One live testing step (30 times a second)</h2>
-            <ol class="cycle">
-                <li><b>See</b><span>The last 4 screen images</span></li>
-                <li><b>Decide</b><span>The brain picks one of <span data-fact="action-count">its</span> actions</span></li>
-                <li><b>Play</b><span>The game moves 4 frames</span></li>
-                <li><b>Check</b><span><span data-fact="detector-count">All</span> rules, every frame</span></li>
-                <li><b>Show</b><span>Frame and status sent to this page</span></li>
-            </ol>
-            <div class="cycle-branch">
-                <span class="cycle-branch__if">A rule is broken?</span>
-                <span class="cycle-branch__then">Stop at once, save the evidence, show <b>Bug Found</b>. Replay and reports follow in the background, without slowing the game.</span>
-            </div>
-
             <h2 class="section-title">Why there are two games</h2>
             <div class="two-col">
                 <div class="card">
@@ -299,7 +286,13 @@
                         The detectors are general rules and do not know where any bug is; this is how the project proves they find real bugs.</p>
                 </div>
             </div>
-            <div id="bug-catalogue" class="bug-catalogue"></div>
+            <!-- The planted bugs belong to the bugged game only, so they sit in
+                 their own titled box, not as loose cards under both games. -->
+            <section class="bug-box" aria-labelledby="bug-box-title">
+                <h3 class="bug-box__title" id="bug-box-title">The <span data-fact="bug-count">planted</span> bugs in the bugged game</h3>
+                <p class="bug-box__lead">The clean game has none of these.</p>
+                <div id="bug-catalogue" class="bug-catalogue"></div>
+            </section>
 
             <h2 class="section-title">Reading the dashboard</h2>
             <ul class="legend">
@@ -320,14 +313,20 @@
         <div class="page">
             <p class="eyebrow">Saved evidence</p>
             <h1 class="page__title">Bug History</h1>
-            <p class="page__lead">Every bug ever found and every clean-run report, as saved on disk. Evidence is never deleted or changed:
-                Reset only clears the Live Testing view.</p>
+            <p class="page__lead">Every saved bug and every clean-run report, as they are on disk. Reset only clears the Live Testing view;
+                a report stays here until you delete it.</p>
             <div id="history-summary" class="stat-grid stat-grid--compact"></div>
 
-            <h2 class="section-title">Bug incidents</h2>
+            <div class="section-head">
+                <h2 class="section-title">Bug incidents</h2>
+                <button id="clear-incidents" class="btn btn--danger btn--sm" type="button" hidden>Clear history</button>
+            </div>
             <div id="history-incidents" class="table-wrap"></div>
 
-            <h2 class="section-title">Clean-run reports</h2>
+            <div class="section-head">
+                <h2 class="section-title">Clean-run reports</h2>
+                <button id="clear-runs" class="btn btn--danger btn--sm" type="button" hidden>Clear history</button>
+            </div>
             <div id="history-runs" class="table-wrap"></div>
         </div>
     </section>
@@ -343,6 +342,21 @@
         <button class="dialog__close" type="button" data-close aria-label="Close">&times;</button>
     </div>
     <div id="incident-dialog-body" class="dialog__body"></div>
+</dialog>
+
+<!-- Asked before anything is deleted from Bug History; also says why a delete was refused. -->
+<dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-dialog-title">
+    <div class="dialog__head">
+        <h2 id="confirm-dialog-title" class="dialog__title"></h2>
+        <button class="dialog__close" type="button" data-close aria-label="Close">&times;</button>
+    </div>
+    <div class="dialog__body">
+        <p id="confirm-dialog-text" class="dialog__text"></p>
+        <div class="dialog__actions">
+            <button id="confirm-dialog-cancel" class="btn btn--secondary" type="button" data-close>Cancel</button>
+            <button id="confirm-dialog-ok" class="btn btn--danger" type="button">Delete</button>
+        </div>
+    </div>
 </dialog>
 
 <!-- The agent's actions. Keep in sync with ACTION_NAMES in agent_logic.py and

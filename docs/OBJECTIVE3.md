@@ -56,6 +56,12 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 * **Dashboard:** every detection pauses testing; *Resume testing* continues; the Bug
   Tracker shows this session's bugs (Reset, or refreshing the page, empties it;
   nothing is deleted), and Bug History lists every incident and run report on disk.
+  Only there can saved evidence be deleted: a Delete button on each row and a
+  Clear history button on each list, both asked first. A delete removes the
+  whole bundle and its later sightings, so the same bug found again is saved
+  as a new incident. Three things are kept: the bug or run Live Testing is
+  stopped on, a report still being written, and anything asked for by another
+  website (`tests/test_history_delete.py`).
   Pick "Clean game" or "Bugged game" on the Live Testing tab. The five-step
   list in Live status shows each automatic stage as it completes (bug
   detected, evidence and replay, report ready), from the incident's own

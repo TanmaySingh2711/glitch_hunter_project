@@ -34,6 +34,7 @@ import numpy as np
 from fpdf.enums import XPos, YPos
 from PIL import Image
 
+from common.fileio import remove_tree, retire_dir
 from reporting import schema
 from reporting.evidence import TITLES, encode_png
 from reporting.render import STREAM_SIZE, _heading, _kv_table, _ReportPDF, pdf_text
@@ -254,6 +255,10 @@ def render_pdf(record: Mapping[str, Any], final_png: bytes | None,
 # ═══════════════════════════════════════════════════════════════════════
 # STORE
 # ═══════════════════════════════════════════════════════════════════════
+class RunReportBusy(Exception):
+    """A run report that cannot be deleted right now; the message says why."""
+
+
 class RunReports:
     """One folder per run under `root`. write() puts the raw files on disk
     before it returns; the GIF, Markdown and PDF follow on a short-lived
@@ -366,6 +371,23 @@ class RunReports:
             except (OSError, ValueError, KeyError, TypeError):
                 log.warning("run report %s is not readable; left out of the list", name)
         return out
+
+    def delete(self, run_id: str) -> None:
+        """Deletes one run report (Bug History's Delete and Clear history).
+        KeyError when there is no such report; RunReportBusy while its GIF
+        and reports are still being written, or one of its files is open."""
+        folder = self.folder(run_id)
+        if not os.path.isfile(os.path.join(folder, "run.json")):
+            raise KeyError(run_id)
+        with self._lock:
+            if "pending" in self._renders.get(run_id, {}).values():
+                raise RunReportBusy("Its report is still being written. Try again in a moment.")
+            try:
+                retired = retire_dir(folder)
+            except OSError as exc:
+                raise RunReportBusy("One of its files is open. Close it and try again.") from exc
+            self._renders.pop(run_id, None)
+        remove_tree(retired)
 
     def wait(self, timeout: float = 30.0) -> None:
         """Tests: until every render thread started so far has finished."""

@@ -755,6 +755,76 @@ document.addEventListener('DOMContentLoaded', () => {
         count.textContent = ev.incidents ? String(ev.incidents) : '';
     }
 
+    // ─── DELETING FROM BUG HISTORY ───
+    // Nothing is deleted without the confirm dialog. The server may keep an
+    // item (it is open on Live Testing, or its report is still being
+    // written); its reason is shown instead of failing silently.
+    const confirmDialog = $('confirm-dialog');
+    let confirmAction = null;
+
+    function askToDelete(title, text, action) {
+        $('confirm-dialog-title').textContent = title;
+        $('confirm-dialog-text').textContent = text;
+        $('confirm-dialog-ok').hidden = false;
+        $('confirm-dialog-cancel').textContent = 'Cancel';
+        confirmAction = action;
+        confirmDialog.showModal();
+    }
+
+    function tellNotDeleted(title, text) {
+        $('confirm-dialog-title').textContent = title;
+        $('confirm-dialog-text').textContent = text;
+        $('confirm-dialog-ok').hidden = true;
+        $('confirm-dialog-cancel').textContent = 'Close';
+        confirmAction = null;
+        if (!confirmDialog.open) confirmDialog.showModal();
+    }
+
+    async function deleteFromHistory(url, what) {
+        let body = null;
+        try {
+            const res = await fetch(url, { method: 'DELETE' });
+            body = await res.json();
+        } catch (err) {
+            console.warn('could not delete', err);
+        }
+        confirmDialog.close();
+        if (!body) {
+            tellNotDeleted('Not deleted', 'The dashboard server did not answer. Check that it is still running.');
+        } else if (body.kept && body.kept.length) {
+            const why = body.kept[0].why;
+            tellNotDeleted(body.deleted.length ? `${body.kept.length} ${what} kept` : 'Not deleted',
+                           body.kept.length === 1 ? why : `${body.kept.length} were kept. The first one: ${why}`);
+        }
+        state.sessionRuns = state.sessionRuns.filter((r) => !(body && body.deleted || []).includes(r.run_id));
+        refreshIncidents();
+        refreshFacts();
+        refreshHistory();
+    }
+
+    $('confirm-dialog-ok').addEventListener('click', () => {
+        const action = confirmAction;
+        confirmAction = null;
+        if (action) action();
+    });
+
+    function deleteButton(label, onClick) {
+        const b = el('button', 'btn btn--danger btn--sm', 'Delete');
+        b.type = 'button';
+        b.setAttribute('aria-label', label);
+        b.addEventListener('click', onClick);
+        return b;
+    }
+
+    $('clear-incidents').addEventListener('click', () => askToDelete(
+        'Clear all bug incidents?',
+        'Every saved bug incident is deleted from disk: its report, GIF and evidence. This cannot be undone.',
+        () => deleteFromHistory('/api/incidents', 'incidents')));
+    $('clear-runs').addEventListener('click', () => askToDelete(
+        'Clear all clean-run reports?',
+        'Every saved clean-run report is deleted from disk. This cannot be undone.',
+        () => deleteFromHistory('/api/runs', 'reports')));
+
     // ─── BUG HISTORY ───
     function table(headers, rows) {
         const t = el('table', 'data');
@@ -798,6 +868,8 @@ document.addEventListener('DOMContentLoaded', () => {
                  { ok: per('mario_clean') === 0 && cleanRuns.length > 0 }),
             stat('Clean-run reports', String(runs.length), `${cleanRuns.filter((r) => r.bugs === 0).length} say "No Bugs Found"`),
         );
+        $('clear-incidents').hidden = !incidents.length;
+        $('clear-runs').hidden = !runs.length;
         const incBox = $('history-incidents');
         if (!incidents.length) {
             const e = el('div', 'empty');
@@ -821,6 +893,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const gif = incidentFile(inc, 'context.gif');
                     if (gif) actions.append(link('GIF', fileUrl(inc.incident_id, gif)));
                     actions.append(link('.zip', `/incidents/${encodeURIComponent(inc.incident_id)}/bundle.zip`, { download: true }));
+                    actions.append(deleteButton(`Delete ${inc.incident_id}`, () => askToDelete(
+                        'Delete this bug incident?',
+                        `${inc.title} (${inc.incident_id}) is deleted from disk: its report, GIF and evidence. This cannot be undone.`,
+                        () => deleteFromHistory(`/api/incidents/${encodeURIComponent(inc.incident_id)}`, 'incidents'))));
                     actions.style.marginTop = '0';
                     tr.append(cell(el('span', 'data__nowrap', localTime(inc.created_utc))),
                               cell(title, sub, ...(inc.synthetic ? [el('span', 'tag tag--synthetic', 'synthetic test')] : [])),
@@ -838,10 +914,14 @@ document.addEventListener('DOMContentLoaded', () => {
                      document.createTextNode('A clean-game run that reaches the castle writes one.'));
             runBox.replaceChildren(e);
         } else {
-            runBox.replaceChildren(table(['When', 'Result', 'Game', 'Steps', 'Report'],
+            runBox.replaceChildren(table(['When', 'Result', 'Game', 'Steps', 'Evidence'],
                 runs.map((r) => {
                     const tr = el('tr');
                     const actions = runLinks(r);
+                    actions.append(deleteButton(`Delete ${r.run_id}`, () => askToDelete(
+                        'Delete this run report?',
+                        `${r.headline} (${r.run_id}) is deleted from disk. This cannot be undone.`,
+                        () => deleteFromHistory(`/api/runs/${encodeURIComponent(r.run_id)}`, 'reports'))));
                     actions.style.marginTop = '0';
                     tr.append(cell(el('span', 'data__nowrap', localTime(r.created_utc))),
                               cell(el('span', 'data__title', r.headline), el('span', 'data__sub', r.run_id)),
@@ -855,7 +935,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── DIALOGS ───
     const incidentDialog = $('incident-dialog');
     const infoModal = $('info-modal');
-    for (const dlg of [incidentDialog, infoModal]) {
+    for (const dlg of [incidentDialog, infoModal, confirmDialog]) {
         dlg.addEventListener('click', (e) => {
             if (e.target === dlg || e.target.closest('[data-close]')) dlg.close();
         });
@@ -1119,6 +1199,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     socket.on('incident_updated', () => {              // a report finished rendering
         refreshIncidents();
+        if (!$('view-history').hidden) refreshHistory();
+    });
+    // Deleted on the Bug History page (here or in another tab).
+    socket.on('incident_deleted', () => {
+        refreshIncidents();
+        refreshFacts();
+        if (!$('view-history').hidden) refreshHistory();
+    });
+    socket.on('run_report_deleted', (data) => {
+        state.sessionRuns = state.sessionRuns.filter((r) => r.run_id !== (data && data.run_id));
+        renderTracker();
+        refreshFacts();
         if (!$('view-history').hidden) refreshHistory();
     });
     socket.on('incident_occurrence', (inc) => {

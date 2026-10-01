@@ -111,6 +111,10 @@ class SessionRecorder:
 # ═══════════════════════════════════════════════════════════════════════
 # THE PIPELINE
 # ═══════════════════════════════════════════════════════════════════════
+class DeleteRefused(Exception):
+    """An incident that cannot be deleted right now; the message says why."""
+
+
 class IncidentPipeline:
     def __init__(self, store: IncidentStore, *, notify: Notify | None = None,
                  reproduce: bool = True, start_worker: bool = True, recover: bool = True,
@@ -131,6 +135,8 @@ class IncidentPipeline:
         self._fix: dict[str, dict[str, Any] | None] = {}
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._busy = 0
+        # Incidents whose reports are queued or being written right now.
+        self._pending: set[str] = set()
         self._idle = threading.Condition(self._lock)
         # Renderers are attributes so a test can make one fail on purpose.
         self.render_gif = render.render_gif
@@ -282,6 +288,7 @@ class IncidentPipeline:
     def _enqueue(self, incident_id: str) -> None:
         with self._lock:
             self._busy += 1
+            self._pending.add(incident_id)
         self._queue.put(incident_id)
 
     def _work(self) -> None:
@@ -296,6 +303,7 @@ class IncidentPipeline:
             finally:
                 with self._lock:
                     self._busy -= 1
+                    self._pending.discard(incident_id)
                     self._idle.notify_all()
 
     def process(self, incident_id: str) -> None:
@@ -505,6 +513,25 @@ class IncidentPipeline:
                 log.warning("incident %s is no longer readable; left out of the list",
                             incident_id)
         return out
+
+    # ── deleting (the user's Delete / Clear history) ──────────────────────
+    def delete(self, incident_id: str) -> None:
+        """Deletes one incident: its bundle, its sightings and everything
+        the pipeline remembers about it, so the same bug seen again is saved
+        as a new incident. StoreError for an unknown id; DeleteRefused while
+        its reports are still being written (the writer would be left
+        writing into a folder that is gone)."""
+        with self._lock:
+            self.store.bundle_dir(incident_id)
+            if incident_id in self._pending:
+                raise DeleteRefused("Its reports are still being written. Try again in a moment.")
+            self.store.delete(incident_id)
+            self._records.pop(incident_id, None)
+            self._known = [k for k in self._known if k[0] != incident_id]
+            self._counts.pop(incident_id, None)
+            self._session.pop(incident_id, None)
+            self._fix.pop(incident_id, None)
+        self._emit("incident_deleted", {"incident_id": incident_id})
 
     def occurrences(self, incident_id: str) -> list[dict[str, Any]]:
         return [o for o in self.store.occurrences() if o.get("incident_id") == incident_id]

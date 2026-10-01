@@ -15,6 +15,8 @@ import contextlib
 import hashlib
 import json
 import os
+import secrets
+import shutil
 import stat
 from collections.abc import Iterator
 from typing import IO, Any
@@ -97,3 +99,50 @@ def make_read_only(path: str | os.PathLike[str]) -> None:
     (completion snapshots, verification records) so an accidental second
     write fails loudly instead of replacing the evidence."""
     os.chmod(path, stat.S_IREAD | stat.S_IRGRP | stat.S_IROTH)
+
+
+# A folder the user deleted is first renamed to this prefix, then emptied.
+RETIRED_PREFIX = "_deleted-"
+
+
+def retire_dir(path: str | os.PathLike[str]) -> str:
+    """Renames a folder out of the way in one step and returns the new path.
+
+    A delete that removed files one by one would leave half a folder behind
+    if it were interrupted, and a listing could show it. One rename takes the
+    whole folder out of every listing at once; the files go afterwards
+    (remove_tree). Raises OSError when something still has a file in it open
+    (Windows), and then nothing has changed."""
+    parent, name = os.path.split(os.path.normpath(os.fspath(path)))
+    retired = os.path.join(parent, f"{RETIRED_PREFIX}{name}-{secrets.token_hex(3)}")
+    os.replace(path, retired)
+    return retired
+
+
+def remove_tree(path: str | os.PathLike[str]) -> bool:
+    """Deletes a folder and everything in it, read-only files included.
+    Returns False when something could not be removed (it is left in place
+    under its retired name, and the next sweep tries again)."""
+    def _writable_then_retry(func: Any, target: str, _exc: BaseException) -> None:
+        os.chmod(target, stat.S_IREAD | stat.S_IWRITE)
+        func(target)
+
+    try:
+        shutil.rmtree(path, onexc=_writable_then_retry)
+    except OSError:
+        return False
+    return True
+
+
+def sweep_retired(root: str | os.PathLike[str]) -> list[str]:
+    """Removes folders an earlier delete could not finish emptying."""
+    done: list[str] = []
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return done
+    for name in names:
+        path = os.path.join(root, name)
+        if name.startswith(RETIRED_PREFIX) and os.path.isdir(path) and remove_tree(path):
+            done.append(name)
+    return done

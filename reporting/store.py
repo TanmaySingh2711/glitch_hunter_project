@@ -23,6 +23,9 @@ RULES
 * A written artifact is never replaced. Evidence and reports are made
   read-only as soon as they are written; a re-render gets a new name
   (report.v2.pdf), recorded in the manifest's history.
+* A bundle leaves the store only when the user deletes it (Bug History's
+  Delete and Clear history): delete() removes the whole bundle and its
+  sightings, never part of one. Nothing else deletes evidence.
 * incident.json is written LAST of the raw evidence. A bundle directory
   without it was interrupted mid-capture; recover() moves it to _incomplete/
   (kept, never deleted) so it can never be mistaken for a real incident.
@@ -41,7 +44,7 @@ import time
 from collections.abc import Iterator, Mapping
 from typing import Any
 
-from common.fileio import make_read_only, sha256_of
+from common.fileio import make_read_only, remove_tree, retire_dir, sha256_of, sweep_retired
 from reporting import schema
 
 MANIFEST = "manifest.json"
@@ -224,6 +227,32 @@ class IncidentStore:
                 if isinstance(item, dict):
                     yield item
 
+    # ── deleting (only ever at the user's request) ────────────────────────
+    def delete(self, incident_id: str) -> None:
+        """Removes one whole bundle and its later sightings.
+
+        The folder is renamed out of the store first, so the incident is gone
+        from every listing in one step and can never be seen half-deleted;
+        its files are removed after that. StoreError when there is no such
+        incident, or when one of its files is open elsewhere (nothing has
+        changed then, so the user can simply try again)."""
+        bundle = self.bundle_dir(incident_id)
+        with self._lock:
+            try:
+                retired = retire_dir(bundle)
+            except OSError as exc:
+                raise StoreError(f"{incident_id} is in use: {exc}") from exc
+            self._drop_occurrences(incident_id)
+        remove_tree(retired)
+
+    def _drop_occurrences(self, incident_id: str) -> None:
+        path = os.path.join(self.root, OCCURRENCES)
+        if not os.path.exists(path):
+            return
+        kept = [o for o in self.occurrences() if o.get("incident_id") != incident_id]
+        lines = "".join(json.dumps(o, sort_keys=True, ensure_ascii=False) + "\n" for o in kept)
+        _write_atomically(path, lines.encode("utf-8"))
+
     # ── recovery ──────────────────────────────────────────────────────────
     def recover(self) -> dict[str, list[str]]:
         """Makes the store consistent after a crash, destroying nothing.
@@ -232,12 +261,15 @@ class IncidentStore:
           capture finished: moved to _incomplete/ (kept for inspection)
         * a leftover *.tmp inside a bundle is an interrupted atomic write
           whose target was never created or is complete: removed
+        * what is left of a bundle the user deleted while one of its files
+          was open: removed
         Returns what it did.
         """
         done: dict[str, list[str]] = {"moved_incomplete": [], "removed_temp": []}
         if not os.path.isdir(self.root):
             return done
         with self._lock:
+            sweep_retired(self.root)
             for name in sorted(os.listdir(self.root)):
                 path = os.path.join(self.root, name)
                 if not (schema.INCIDENT_ID_RE.fullmatch(name) and os.path.isdir(path)):

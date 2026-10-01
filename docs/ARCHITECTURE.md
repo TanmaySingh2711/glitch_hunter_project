@@ -170,7 +170,7 @@ decision, not a refactor.
   sprites), never against its own colliders.
 * **An incident is on disk before testing stops.** `IncidentPipeline.capture`
   writes the raw evidence on the game thread; reports are derived afterwards,
-  and their failure never loses the incident. Evidence is never overwritten.
+  and their failure never loses the incident. Evidence is never overwritten, and it is deleted only by the user (Bug History's Delete and Clear history).
 
 ## Persistent artifacts
 
@@ -191,7 +191,7 @@ decision, not a refactor.
 | `evaluation/completion_baseline_6M.json` | `tools/evaluate_completion.py --make-baseline` | yes | the frozen retention protocol and thresholds |
 | `generated/logs/train.log` | QA / legacy training | no | the run's full log |
 | `evaluation/results/`, `generated/coverage_audits/`, `generated/calibration_runs/` | the tools (see `tools/README.md`) | no | one regenerable record per run |
-| `generated/incidents/` | the dashboard (`reporting/`) | no | one read-only evidence bundle per incident, plus `occurrences.jsonl`; NOT regenerable - it is evidence |
+| `generated/incidents/` | the dashboard (`reporting/`) | no | one read-only evidence bundle per incident, plus `occurrences.jsonl`; NOT regenerable - it is evidence; a bundle leaves only when the user deletes it on the Bug History page |
 
 `tools/verify_artifacts.py` re-hashes every artifact that is present against
 `artifacts.json` and reports any that drifted.
@@ -207,6 +207,7 @@ decision, not a refactor.
 | the Overview page's facts | `dashboard_facts.py` (every number read from the project's own files) | `pytest tests/test_dashboard_facts.py` |
 | incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
 | the clean game's run report | `reporting/run_report.py`, `dashboard_backend._finish_run` | `pytest tests/test_run_report.py tests/test_dashboard_backend.py` |
+| deleting saved evidence (Bug History's Delete and Clear history) | `app.py` (DELETING), `reporting/pipeline.IncidentPipeline.delete`, `reporting/store.IncidentStore.delete`, `reporting/run_report.RunReports.delete`, `common/fileio.retire_dir` | `pytest tests/test_history_delete.py` |
 | a report's "Where to fix it" | `reporting/fix_hint.py` (read from the incident record and the game's source) | `pytest tests/test_fix_hint.py` (applies the suggested edits to a copy of the bugged game via `tests/fix_probe.py`) |
 | how the dashboard's brain picks moves (a new route every run) | `dashboard_backend.choose_action` / `route_temperature`, `config.DASHBOARD_POLICY_TEMPERATURE`, `DASHBOARD_FIXED_ROUTE_RUNS`, `DASHBOARD_STUCK_STEPS` | `pytest tests/test_dashboard_backend.py tests/test_dashboard_e2e.py` |
 | the one-click setup | `setup.bat`, `setup.sh` (checked on clean machines by CI's *One-click setup* job) | `setup.bat norun` / `bash setup.sh norun` |

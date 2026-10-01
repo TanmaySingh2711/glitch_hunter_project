@@ -14,6 +14,8 @@ Incident evidence (Objective 3) is served read-only under /api/incidents and
 /incidents/<id>/<file>; see INCIDENT FILES below for how those requests are
 kept inside the incident store. A clean-game run that reaches the castle gets
 a run report ("no bugs found"), served the same way under /runs/<id>/<file>.
+The only requests that change what is saved are the Bug History page's Delete
+and Clear history (DELETE /api/incidents..., /api/runs...); see DELETING below.
 """
 from __future__ import annotations
 
@@ -61,6 +63,7 @@ import time
 import zipfile
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, render_template, request, send_file
 from flask_socketio import SocketIO
@@ -74,7 +77,9 @@ from common.logging_setup import configure_logging
 from dashboard_backend import DashboardBackend, DashboardConfig
 from dashboard_service import THREAD_NAME, GameWindowService
 from exploration import config
+from reporting.pipeline import DeleteRefused
 from reporting.run_report import FILES as RUN_FILES
+from reporting.run_report import RunReportBusy
 from reporting.store import StoreError
 
 log = logging.getLogger(__name__)
@@ -308,6 +313,126 @@ def run_file(run_id: str, name: str) -> Response:
                          download_name=f"{run_id}_{name}", max_age=0)
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+# ─── DELETING ───
+# Bug History's Delete (one incident or one run report) and Clear history
+# (all of them). Saved evidence changes in no other way. Three things are
+# left alone, each with its reason in the answer:
+#   * the bug or run Live Testing is stopped on - its card is on screen and
+#     its links would break (Resume or Reset first);
+#   * a report still being written - its writer would be left writing into a
+#     folder that is gone;
+#   * a file that is open elsewhere (Windows cannot remove it).
+# A DELETE from another website is refused: a browser sends the page's
+# Origin with it, and it must be this dashboard's own address.
+OPEN_ON_LIVE = "It is open on Live Testing. Press Resume or Reset there first."
+
+
+def _own_page_or_403() -> None:
+    origin = request.headers.get("Origin")
+    if origin and urlsplit(origin).netloc != request.host:
+        abort(403)
+
+
+def _open_incident_ids() -> set[str]:
+    return {str(b.get("incident_id")) for b in (service.bug_found or [])}
+
+
+def _open_run_id() -> str | None:
+    report = (service.run_result or {}).get("report") or {}
+    return report.get("run_id")
+
+
+def _delete_incident(pipeline: Any, incident_id: str) -> str | None:
+    """Deletes one incident; returns why not, or None when it is gone.
+    Raises StoreError for an id that is not an incident."""
+    pipeline.store.bundle_dir(incident_id)
+    if incident_id in _open_incident_ids():
+        return OPEN_ON_LIVE
+    try:
+        pipeline.delete(incident_id)
+    except DeleteRefused as exc:
+        return str(exc)
+    except StoreError:
+        return "One of its files is open. Close it and try again."
+    return None
+
+
+def _delete_run(reports: Any, run_id: str) -> str | None:
+    """The same for a run report. Raises KeyError for an unknown id."""
+    if run_id == _open_run_id():
+        return OPEN_ON_LIVE
+    try:
+        reports.delete(run_id)
+    except RunReportBusy as exc:
+        return str(exc)
+    return None
+
+
+@app.route('/api/incidents/<incident_id>', methods=['DELETE'])
+def api_delete_incident(incident_id: str) -> tuple[dict[str, Any], int]:
+    _own_page_or_403()
+    pipeline = _pipeline_or_404()
+    try:
+        why = _delete_incident(pipeline, incident_id)
+    except StoreError:
+        abort(404)
+    if why:
+        return {"deleted": [], "kept": [{"id": incident_id, "why": why}]}, 409
+    return {"deleted": [incident_id], "kept": []}, 200
+
+
+@app.route('/api/incidents', methods=['DELETE'])
+def api_clear_incidents() -> dict[str, Any]:
+    _own_page_or_403()
+    pipeline = _pipeline_or_404()
+    deleted, kept = [], []
+    for incident_id in pipeline.incident_ids():
+        try:
+            why = _delete_incident(pipeline, incident_id)
+        except StoreError:               # removed by hand meanwhile
+            continue
+        if why:
+            kept.append({"id": incident_id, "why": why})
+        else:
+            deleted.append(incident_id)
+    return {"deleted": deleted, "kept": kept}
+
+
+@app.route('/api/runs/<run_id>', methods=['DELETE'])
+def api_delete_run(run_id: str) -> tuple[dict[str, Any], int]:
+    _own_page_or_403()
+    reports = backend.run_reports
+    if reports is None:
+        abort(404)
+    try:
+        why = _delete_run(reports, run_id)
+    except KeyError:
+        abort(404)
+    if why:
+        return {"deleted": [], "kept": [{"id": run_id, "why": why}]}, 409
+    socketio.emit('run_report_deleted', {'run_id': run_id})
+    return {"deleted": [run_id], "kept": []}, 200
+
+
+@app.route('/api/runs', methods=['DELETE'])
+def api_clear_runs() -> dict[str, Any]:
+    _own_page_or_403()
+    reports = backend.run_reports
+    deleted, kept = [], []
+    for summary in (reports.summaries() if reports is not None else []):
+        run_id = summary["run_id"]
+        try:
+            why = _delete_run(reports, run_id)
+        except KeyError:
+            continue
+        if why:
+            kept.append({"id": run_id, "why": why})
+        else:
+            deleted.append(run_id)
+            socketio.emit('run_report_deleted', {'run_id': run_id})
+    return {"deleted": deleted, "kept": kept}
 
 
 @socketio.on('connect')

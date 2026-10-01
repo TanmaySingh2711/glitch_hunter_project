@@ -11,8 +11,8 @@ kept narrow.
   logs a warning when it does (`app.bind_address`, pinned by
   `tests/test_concurrency.py`).
 * **No authentication.** Anyone who can reach the port can start, stop and
-  reset the agent and watch the stream. That is acceptable on loopback and on
-  a network you trust, and only there.
+  reset the agent, watch the stream, and delete saved reports. That is
+  acceptable on loopback and on a network you trust, and only there.
 * **Same-origin Socket.IO.** Flask-SocketIO's default CORS policy is left in
   place, so a page on another origin cannot drive the dashboard from your
   browser.
@@ -33,8 +33,18 @@ kept narrow.
   `/runs/<id>/bundle.zip` accept only a well-formed id of an existing
   clean-run report and file names from a fixed list
   (`reporting/run_report.RunReports.path`); `tests/test_run_report.py`
-  checks the refusals. `/api/runs` and `/api/project` only read: the saved
+  checks the refusals. `GET /api/runs` and `/api/project` only read: the saved
   reports' summaries, and the project's own records (`dashboard_facts.py`).
+* **Only four requests change what is saved, and all are `DELETE`.**
+  `/api/incidents/<id>`, `/api/incidents`, `/api/runs/<id>` and `/api/runs`
+  are the Bug History page's Delete and Clear history. They take the same
+  well-formed id of an existing incident or run report as the reading routes
+  and never a path, so nothing outside the two evidence folders can be named.
+  A page on another website cannot send them: a browser attaches the page's
+  `Origin` to a `DELETE`, and the server refuses (403) one that is not its own
+  address; the browser's own cross-origin check stops it before that too. The
+  bug or run Live Testing is stopped on, and a report still being written,
+  are kept. `tests/test_history_delete.py` checks each refusal.
 * **The project-facts test count (`/api/project`) runs the project's own tests' collection.**
   Once per start, `app.py` runs `python -m pytest --collect-only` on the
   `tests/` folder in a low-priority child process; collection imports the

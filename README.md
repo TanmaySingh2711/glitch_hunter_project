@@ -102,6 +102,7 @@ Each one has its own write-up: [Objective 1](docs/OBJECTIVE1.md),
 | **Reports** | A Markdown and a PDF report for every bug |
 | **Where to fix it** | Each report names the file and lines in the game's code that likely cause the bug, and the edit to make. It is a lead, not a proven cause |
 | **Live dashboard** | Watch the game, see what the AI is doing, and open every report from the browser |
+| **Bug History** | Every saved bug and clean-run report in one place, with a Delete button for each and a Clear history button |
 | **Two games** | A clean game and a copy with six bugs added on purpose, to prove the detectors work |
 | **A new route every run** | The agent does not repeat the same path, so more of the level gets tested |
 | **Clean-run report** | When a clean-game run reaches the castle with no bug, it gets its own short report |
@@ -423,9 +424,14 @@ What to expect:
 - **Bugged game:** the first run follows one fixed route that meets all six
   planted bugs. Later runs take new routes.
 - A run that gets stuck is ended after about 13 seconds without progress.
-- **Reset** clears the page. Saved evidence is never deleted.
+- **Reset** clears the page. Saved evidence stays on disk.
 
-**Bug History** lists every bug and run report saved on disk.
+**Bug History** lists every bug and run report saved on disk. Each row has a
+**Delete** button, and each list has a **Clear history** button. The dashboard
+asks first, because the files are removed from disk and cannot be brought
+back. It will not delete the bug or run that Live Testing is stopped on right
+now (press **Resume** or **Reset** first), or a report that is still being
+written.
 
 You can also look at saved bugs from a terminal:
 
@@ -475,8 +481,8 @@ A clean-game run that reaches the castle is saved in
 ## API
 
 The dashboard page talks to a small local API. You do not need it to use the
-project, but it is there if you want to read the data yourself. All of these
-are `GET` and return JSON unless noted.
+project, but it is there if you want to read the data yourself. These are
+`GET` and return JSON unless noted.
 
 | Endpoint | Returns |
 |---|---|
@@ -489,6 +495,9 @@ are `GET` and return JSON unless noted.
 | `/incidents/<id>/bundle.zip` | All evidence for one bug as a ZIP |
 | `/runs/<id>/<file>`, `/runs/<id>/bundle.zip` | The same for a clean-run report |
 | `/healthz` | A simple health check |
+| `DELETE /api/incidents/<id>` | Deletes one saved bug |
+| `DELETE /api/incidents` | Deletes every saved bug (Clear history) |
+| `DELETE /api/runs/<id>`, `DELETE /api/runs` | The same for clean-run reports |
 
 Example:
 
@@ -498,6 +507,9 @@ curl http://localhost:5000/api/status
 
 The response includes fields such as `testing`, `steps`, `pause_reason`,
 `bug_found`, `run_result`, `brain_path` and `brain_approved`.
+
+A delete answers with `deleted` (the ids removed) and `kept` (the ids left
+alone, each with the reason).
 
 Start, pause, reset and switching the game go over Socket.IO events
 (`start_testing`, `stop_testing`, `reset_game`, `switch_game`), which is how
@@ -579,7 +591,7 @@ Each one is declared in
 to a copy of the bugged game. After that, every bug's spot behaved exactly
 like the clean game (`tests/test_fix_hint.py`).
 
-**Code checks.** 866 automated tests. The full check
+**Code checks.** 882 automated tests. The full check
 (`python tools/check.py --full`) requires at least 90% test coverage.
 
 ---
