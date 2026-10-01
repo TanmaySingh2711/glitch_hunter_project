@@ -6,7 +6,7 @@
 #
 # DO NOT run "pip install -r requirements.txt" by itself - it will not
 # give you the GPU build of PyTorch. Follow the 2 steps below in order.
-# See README.md "12. Installation" for the full copy-paste version of this.
+# See README.md "Installation" for the full copy-paste version of this.
 # ═══════════════════════════════════════════════════════════════════════
 
 # STEP 1 - install PyTorch first, separately (pick ONE line):
@@ -14,7 +14,7 @@
 #   No NVIDIA GPU:       pip install torch==2.14.0
 #   (torch alone: nothing here uses torchvision or torchaudio.)
 #   (Why first: on Windows PyPI only has the CPU build, so a plain install
-#   would never give you the GPU one. See README.md "12. Installation".)
+#   would never give you the GPU one. See README.md "Installation".)
 
 # STEP 2 - install everything else:
 #   pip install -r requirements.txt
