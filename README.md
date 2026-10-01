@@ -249,6 +249,7 @@ glitch_hunter_project/
 | **GPU** | Not needed to run the dashboard. An NVIDIA GPU only makes training faster |
 | **Disk space** | About 5 GB with the GPU build of PyTorch. The CPU build, which the setup script uses by default, is much smaller |
 | **Linux only** | OpenCV needs the system library `libgl1` |
+| **Windows only** | Keep the project in a short folder path, such as `C:\glitch_hunter_project`. `setup.bat` stops if the path is over 100 characters, because the install can fail on long paths |
 
 No account, API key or database is needed.
 
@@ -400,7 +401,7 @@ run inside it.
 
 ## Usage
 
-The page has four tabs: **Overview**, **How It Works**, **Live Testing** and
+The page has four tabs: **Overview**, **Live Testing**, **How It Works** and
 **Bug History**. Testing happens in **Live Testing**.
 
 1. Choose **Clean game** or **Bugged game**.
@@ -418,6 +419,7 @@ What to expect:
 - **Clean game:** the Bug Tracker should stay empty. That is the healthy
   result. A run ends when Mario reaches the castle or dies. A castle finish
   shows a green *Level complete · No bugs found* card with a run report.
+  Click **Start next run** to play again.
 - **Bugged game:** the first run follows one fixed route that meets all six
   planted bugs. Later runs take new routes.
 - A run that gets stuck is ended after about 13 seconds without progress.
