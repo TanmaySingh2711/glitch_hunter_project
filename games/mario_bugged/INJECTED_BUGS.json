@@ -1,8 +1,8 @@
 {
  "note": "Deliberate benchmark bugs in this variant, specified by the project owner on 2026-09-24. Every changed line in the game carries 'INJECTED BUG <id>'; diff_sha256 pins the exact clean->bugged diff that was validated (reporting/variants.py, tests/test_game_variants.py, tests/test_injected_bugs.py). Coordinates are level pixels: x grows right from the level start, y grows DOWN from the top of the screen (ground top y 538, screen height 600).",
  "manifest_version": 2,
- "specified_by": "project owner, 2026-09-24 (six benchmark bugs, locations left to the implementer)",
- "diff_sha256": "3efcd409b3b01742ca6cfc04c50b06ad5cccf2a1a7b3728b7257dd2cbe5b6929",
+ "specified_by": "project owner, 2026-09-24 (six benchmark bugs, locations left to the implementer); 2026-10-03: bugs placed where the dashboard's drawn routes pass, so a run meets several of them and still finishes (pipe clip, invisible wall, far stomp)",
+ "diff_sha256": "4d072d6762d468d578a6d4cb0555a7169e51ad8404ad52e147a2e3fec0f7144a",
  "bugs": [
   {
    "id": "stair-clip",
@@ -31,18 +31,18 @@
    "id": "pipe-clip",
    "number": 2,
    "name": "Pipe clipping",
-   "summary": "Only the left rim of pipe 4 is solid, so Mario sinks into the pipe from its top and walks into it from the right.",
+   "summary": "Pipe 4's collider starts 32 px below the pipe's drawn top, so Mario standing on the pipe sinks 32 px into it.",
    "subsystem": "level collision geometry (pipe collider)",
    "files": [
     "data/states/level1.py"
    ],
-   "location": "Pipe 4 (the fourth, tall pipe): drawn at x 2445-2528, y 366-536. Its collider now covers only x 2445-2466.",
-   "trigger": "Walking along the pipe's top past x 2466, landing on its top right of x 2466, or walking left into its right side.",
-   "expected_clean": "The whole 83 px pipe is solid: Mario walks across its top and is stopped by either side (at x 2445 from the left, 2528 from the right).",
-   "injected_behaviour": "Mario drops into the pipe from its top (up to 40 px deep - his full height - inside the drawn pipe) and, from the right, walks 62 px into it before the rim stops him. Other pipes are untouched.",
-   "implementation": "level1.py setup_pipes(): pipe4 collider width 21 instead of 83.",
+   "location": "Pipe 4 (the fourth, tall pipe): drawn at x 2445-2528, y 366-536. Its collider now starts at y 398 (x 2445-2528, y 398-536).",
+   "trigger": "Landing on or walking along the top of pipe 4.",
+   "expected_clean": "Mario stands on the pipe's drawn top (his feet at y 366) and is stopped by its sides at their drawn edges.",
+   "injected_behaviour": "Mario stands with his feet at y 398, 32 px inside the drawn pipe, and walks along inside its top. The sides still stop him (the collider keeps the full 83 px width), so he is never trapped. Other pipes are untouched.",
+   "implementation": "level1.py setup_pipes(): pipe4 collider starts at y 398 with height 138 instead of y 366, height 170.",
    "reproducibility": "Deterministic. tests/bug_probe.py 'pipe4_walk_top', 'pipe4_walk_in_from_right' (controls on pipe 3, identical on both games).",
-   "objective3_detection": "Detected by the generic solid-penetration invariant: kind 'clip_into_pipe'; reproduced.",
+   "objective3_detection": "Detected by the generic solid-penetration invariant: kind 'clip_into_pipe' (32 px deep); reproduced.",
    "zone": {
     "x": [
      2415,
@@ -77,41 +77,41 @@
    "id": "invisible-wall",
    "number": 4,
    "name": "Invisible wall",
-   "summary": "A stray two-tile collider on open, empty ground blocks Mario although nothing is drawn there.",
+   "summary": "A stray one-tile collider on open, empty ground blocks Mario although nothing is drawn there.",
    "subsystem": "level collision geometry (stray step collider)",
    "files": [
     "data/states/level1.py"
    ],
-   "location": "Open ground between the bricks at x 4287-4373 and the ? block at x 4544: x 4412-4452, y 452-538 (two tiles high). No block overhead, no bush or hill (the nearest ground decorations end at x 4323 and start at 4611); the drawn pixels there are identical to mario_clean's.",
-   "trigger": "Walking or jumping into x 4412 below y 452 from either side; landing on y 452 above it.",
-   "expected_clean": "Mario walks freely across x 4412-4452.",
-   "injected_behaviour": "Mario is stopped at x 4412 (right edge) by empty space, and can stand on thin air at y 452. Enemies (the Koopa near x 4400-4500) also turn around there, as at any step.",
-   "implementation": "level1.py setup_steps(): extra collider 'stray_step' added to step_group.",
+   "location": "Open ground on the stretch between the first two pits (ground x 3048-3683): x 3360-3400, y 495-538 (one tile high). Nothing is drawn there; the drawn pixels are identical to mario_clean's.",
+   "trigger": "Walking or running into x 3360 on the ground from either side; landing on y 495 above it.",
+   "expected_clean": "Mario walks freely across x 3360-3400.",
+   "injected_behaviour": "Mario is stopped at x 3360 (right edge) by empty space, and can stand on thin air at y 495. A hop clears it, so a run is held up, never trapped. Enemies walking there also turn around, as at any step.",
+   "implementation": "level1.py setup_steps(): extra collider 'stray_step' (x 3360, y 495, 40 x 43) added to step_group.",
    "reproducibility": "Deterministic. tests/bug_probe.py 'walk_across_wall_spot' (control: 'control_walk_across_open_spot', identical on both games).",
    "objective3_detection": "Detected by the generic collision-with-nothing invariant: kind 'invisible_collision' (side stop and standing on it); reproduced.",
    "zone": {
     "x": [
-     4370,
-     4500
+     3320,
+     3440
     ]
    }
   },
   {
-   "id": "false-goomba-hit",
+   "id": "far-stomp",
    "number": 5,
-   "name": "False Goomba hit / early death",
-   "summary": "One Goomba's hurt box is 36 px bigger than its sprite on every side, so it hurts Mario before they touch - including from above, before a stomp can land.",
+   "name": "Stomp from too far",
+   "summary": "One Goomba's stomp box reaches 36 px above its head, so Mario falling towards it stomps it before his feet touch it, and bounces off thin air.",
    "subsystem": "player/enemy collision",
    "files": [
     "data/states/level1.py"
    ],
    "location": "goomba14: the leading Goomba of the last pair, spawned when Mario reaches the checkpoint at x 6800 (it walks left from the right edge of the screen toward pipe 5 / the bricks near x 7100-7300).",
-   "trigger": "Mario within 36 px of that Goomba on any side while it is alive.",
-   "expected_clean": "A Goomba hurts Mario only when their colliders touch (gap 0); landing on it stomps it.",
-   "injected_behaviour": "Mario dies (small) or shrinks (big) with 32-36 px of clear space between them; he cannot stomp this Goomba (the hit registers before his feet reach it). Its partner goomba15 and every other enemy are unchanged.",
-   "implementation": "level1.py: goomba14.hurt_margin = 36 (setup_enemies); Level1.enemy_in_hurt_margin() used by check_mario_x_collisions() when no real enemy overlap exists.",
-   "reproducibility": "Deterministic. tests/bug_probe.py 'goomba14_walks_into_mario' (controls: 'control_goomba15_walks_into_mario', 'control_goomba12_walks_into_mario', identical on both games).",
-   "objective3_detection": "Detected by the generic hit-without-contact invariant: kind 'hit_without_contact' (gap ~33 px); reproduced.",
+   "trigger": "Mario falling (y velocity > 0) into the 36 px above that Goomba's head while it is alive.",
+   "expected_clean": "A Goomba is stomped only when Mario's feet touch its head (gap 0); Mario's feet are then set on its head and he bounces.",
+   "injected_behaviour": "The Goomba is squashed with up to 36 px of clear space between Mario's feet and its head, and Mario bounces from where he is. Mario is never hurt by it. Its partner goomba15 and every other enemy are unchanged.",
+   "implementation": "level1.py: goomba14.stomp_margin = 36 (setup_enemies); Level1.enemy_in_stomp_margin() used by check_mario_y_collisions() when Mario is falling and no real enemy overlap exists; adjust_mario_for_y_enemy_collisions() keeps Mario where he is on such a stomp.",
+   "reproducibility": "Deterministic. tests/bug_probe.py 'drop_onto_goomba14' (controls: 'control_drop_onto_goomba15', 'control_drop_onto_goomba12', identical on both games).",
+   "objective3_detection": "Detected by the generic stomp-without-contact invariant: kind 'stomp_without_contact'; reproduced.",
    "zone": {
     "x": [
      6760,

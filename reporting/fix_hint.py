@@ -550,6 +550,27 @@ def _hit(record: Mapping[str, Any], m: Mapping[str, Any], variant: str) -> dict[
             "basis": BASIS}
 
 
+def _stomp(record: Mapping[str, Any], m: Mapping[str, Any], variant: str) -> dict[str, Any] | None:
+    level = _source(variant, LEVEL_FILE)
+    if level is None:
+        return None
+    gap = m.get("gap_px")
+    enemy = _rect(m.get("enemy_rect"))
+    seen = _fmt(enemy) if enemy is not None else "its box was not recorded"
+    evidence = [f"An enemy ({seen}) was stomped while Mario's feet were still {gap} px above it."]
+    # The stomp path: the check that looks the enemy up AND hands it to the stomp.
+    places = _lookup_places(level, "enemy_group", "enemy", None,
+                            only=(r"adjust_mario_for_y_enemy_collisions",))
+    return {"diagnosis": "stomp_without_contact",
+            "summary": (f"An enemy was stomped {gap} px below Mario's feet, so the code that "
+                        f"decides he landed on an enemy uses something other than their real "
+                        f"boxes." if gap is not None else "An enemy was stomped without contact."),
+            "evidence": evidence, "places": places,
+            "suggestion": ("Decide a stomp only from the sprites' own rectangles (the lookup "
+                           "line); remove any extra reach added after it."),
+            "basis": BASIS}
+
+
 _JUMP_STATE = r"self\.state\s*=\s*c\.JUMP"
 
 
@@ -681,6 +702,8 @@ def fix_hint(record: Mapping[str, Any]) -> dict[str, Any] | None:
             return _invisible(record, metrics, variant)
         if kind == "hit_without_contact":
             return _hit(record, metrics, variant)
+        if kind == "stomp_without_contact":
+            return _stomp(record, metrics, variant)
         if kind in ("impossible_jump", "above_world"):
             return _jump(record, metrics, variant, kind)
         return _other(kind, metrics, variant)

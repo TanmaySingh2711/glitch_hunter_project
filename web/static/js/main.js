@@ -325,8 +325,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const s = state.status;
         const brainOk = !!s.brain_path;
         steps.push({
-            title: 'AI brain ready',
-            sub: s.brain_approved ? 'Objectives 1 + 2: final QA brain' : brainOk ? 'Fallback brain' : 'Loading…',
+            title: 'Agent ready',
+            sub: s.brain_approved ? 'The final trained agent' : brainOk ? 'Fallback agent' : 'Loading…',
             st: !state.connected && !state.everConnected ? 'pending' : s.brain_approved ? 'done' : brainOk ? 'warn' : 'pending',
         });
         const d = detectorCount();
@@ -390,33 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
         safety_reset: 'The agent got stuck',
     };
 
-    // ─── THE MONITOR: live frames, or the evidence while stopped ───
-    function evidenceSources() {
-        if (state.bugFound && state.bugFound.length) {
-            const inc = state.bugFound[0];
-            const gif = incidentFile(inc, 'context.gif');
-            return [
-                { key: 'live', label: 'Last live frame' },
-                { key: 'trigger', label: 'Trigger frame', url: incidentFile(inc, 'trigger.png') ? fileUrl(inc.incident_id, 'trigger.png') : null,
-                  alt: 'The exact frame the bug was detected on' },
-                { key: 'gif', label: 'GIF: moments before', url: gif ? fileUrl(inc.incident_id, gif) : null,
-                  pending: !gif, alt: 'The moments leading up to the bug' },
-            ];
-        }
-        const report = state.runResult && state.runResult.report;
-        if (report) {
-            const has = (n) => (report.available || []).includes(n);
-            return [
-                { key: 'live', label: 'Last live frame' },
-                { key: 'final', label: 'Final frame', url: has('final.png') ? runFileUrl(report.run_id, 'final.png') : null,
-                  alt: 'The last frame of the run' },
-                { key: 'gif', label: 'GIF: the finish', url: has('finish.gif') ? runFileUrl(report.run_id, 'finish.gif') : null,
-                  pending: !has('finish.gif'), alt: 'The last seconds of the run' },
-            ];
-        }
-        return [];
-    }
-
+    // ─── THE MONITOR: live frames; when testing stops it holds the last one ───
     function renderMonitor(p) {
         const monitor = $('monitor');
         monitor.className = `monitor${p === 'testing' ? ' monitor--live' : p === 'bug' ? ' monitor--bug' : p === 'clean' ? ' monitor--ok' : ''}`;
@@ -424,7 +398,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelector('.live__side').classList.toggle('live__side--stopped', ['bug', 'clean', 'ended'].includes(p));
         const badge = $('monitor-badge');
         const B = {
-            testing: ['live', null, 'LIVE · AI playing'],
+            testing: ['live', null, 'LIVE · Agent playing'],
             bug: ['bug', 'bug', 'BUG FOUND · Stopped at the detection frame'],
             clean: ['ok', 'check', 'LEVEL COMPLETE · No bugs found'],
             paused: ['', 'pause', 'PAUSED'],
@@ -435,28 +409,10 @@ document.addEventListener('DOMContentLoaded', () => {
             badge.className = `monitor__badge${B[0] ? ` monitor__badge--${B[0]}` : ''}`;
             badge.replaceChildren(B[1] ? icon(B[1]) : el('span', 'live-dot'), document.createTextNode(B[2]));
         }
+        // Stopped on a bug or at the end of a run, the game simply stays
+        // paused on its last frame; the GIF and the saved frames are one
+        // click away on the result card.
         $('monitor-empty').hidden = videoFeed.hasAttribute('src');
-
-        // Stopped on a bug or a finished run: the monitor shows the saved
-        // evidence itself - the GIF once it has been written, the still frame
-        // until then.
-        const sources = evidenceSources();
-        const view = $('evidence-view');
-        if (!sources.length) {
-            view.hidden = true;
-            view.removeAttribute('src');
-            return;
-        }
-        const chosen = sources.find((s) => s.key === 'gif' && s.url)
-            || sources.find((s) => s.key !== 'live' && s.url) || sources[0];
-        monitor.classList.toggle('monitor--evidence', chosen.key !== 'live');
-        if (chosen.key === 'live') {
-            view.hidden = true;
-        } else {
-            if (view.getAttribute('src') !== chosen.url) view.src = chosen.url;
-            view.alt = chosen.alt || '';
-            view.hidden = false;
-        }
     }
 
     function clearFrame() {
@@ -612,7 +568,7 @@ document.addEventListener('DOMContentLoaded', () => {
             li.append(ic, el('span', 'empty__title', started ? 'No bugs detected yet' : 'Nothing tested yet'),
                       document.createTextNode(started
                           ? `${d ? `${d} detectors are` : 'Every detector is'} checking every frame. A bug appears here the moment one fires.`
-                          : 'Press Start testing. Every bug the AI finds appears here, with its evidence and reports.'));
+                          : 'Press Start testing. Every bug the agent finds appears here, with its evidence and reports.'));
             items.push(li);
         }
         bugList.replaceChildren(...items);
@@ -742,6 +698,17 @@ document.addEventListener('DOMContentLoaded', () => {
         setFact('o3-caught', nBugs ? `${caught} of ${nBugs}` : '-');
         setFact('o1-flow', o1 ? `${num(o1.timesteps)} steps · finishes ${pct(o1.completion_rate)}` : '-');
         setFact('o2-flow', o2 ? `${num(o2.timesteps)} steps · ${covPct || '-'} of the reachable level · finishes ${pct(o2.completion_rate)} · ${o2.verdict}` : 'Not installed');
+
+        const box = $('overview-stats');
+        if (box) {
+            box.replaceChildren(
+                stat('Training steps', o2 && o2.timesteps ? num(o2.timesteps) : '-', o1 ? `in two stages: ${num(o1.timesteps)} to learn to finish, then exploring` : null, { pending: !o2 }),
+                stat('Level explored', covPct || '-', 'of every place Mario can reach', { pending: !covPct }),
+                stat('Finishes the level', o2 ? pct(o2.completion_rate) : '-', o2 ? `of ${num(o2.episodes)} test runs (was ${pct(o2.baseline_completion_rate)})` : null, { pending: !o2 }),
+                stat('Rules checked', nDet ? String(nDet) : '-', 'on every frame of the game', { pending: !nDet }),
+                stat('Planted bugs caught', nBugs ? `${caught} of ${nBugs}` : '-', 'with saved evidence', { ok: nBugs > 0 && caught === nBugs }),
+            );
+        }
 
         const cat = $('bug-catalogue');
         cat.replaceChildren(...o3.benchmark_bugs.map((b) => {
@@ -874,7 +841,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!incidents.length) {
             const e = el('div', 'empty');
             e.append(el('span', 'empty__title', 'No bug incidents saved yet'),
-                     document.createTextNode('Test the bugged game on the Live Testing page; every bug found is saved here.'));
+                     document.createTextNode('Every bug found is saved here.'));
             incBox.replaceChildren(e);
         } else {
             incBox.replaceChildren(table(['When', 'Bug', 'Game', 'Severity', 'Replay', 'Seen', 'Evidence'],
@@ -911,7 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!runs.length) {
             const e = el('div', 'empty');
             e.append(el('span', 'empty__title', 'No run reports saved yet'),
-                     document.createTextNode('A clean-game run that reaches the castle writes one.'));
+                     document.createTextNode('A clean-game run report is saved here.'));
             runBox.replaceChildren(e);
         } else {
             runBox.replaceChildren(table(['When', 'Result', 'Game', 'Steps', 'Evidence'],
@@ -942,30 +909,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     $('info-btn').addEventListener('click', () => infoModal.showModal());
 
-    function viewer(sources) {
-        const box = el('div', 'incident-detail__viewer');
-        const img = el('img');
-        const caption = el('p', 'incident-detail__caption');
-        const bar = el('div', 'evidence-switch');
-        const avail = sources.filter((s) => s.url);
-        const show = (s) => {
-            img.src = s.url;
-            img.alt = s.alt;
-            caption.textContent = s.caption;
-            bar.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.key === s.key)));
-        };
-        for (const s of sources) {
-            const b = el('button', 'btn btn--secondary btn--sm', s.url ? s.label : `${s.label} (not ready)`);
-            b.type = 'button';
-            b.dataset.key = s.key;
-            b.disabled = !s.url;
-            b.addEventListener('click', () => show(s));
-            bar.appendChild(b);
-        }
-        box.append(img, bar, caption);
-        if (avail.length) show(avail[0]);
-        else caption.textContent = 'No picture has been saved for this yet.';
-        return box;
+    // The still picture beside a report's details: the trigger frame of a
+    // bug, the final frame of a run. The GIF and the other files are links on
+    // the right.
+    function picture(url, alt) {
+        if (!url) return el('div', 'incident-detail__none', 'No picture has been saved for this yet.');
+        const img = el('img', 'incident-detail__picture');
+        img.src = url;
+        img.alt = alt;
+        return img;
     }
 
     async function openIncident(id) {
@@ -986,14 +938,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (inc.synthetic) kicker.append(el('span', 'tag tag--synthetic', 'synthetic test, not a game bug'));
         $('incident-dialog-title').textContent = inc.title;
 
-        const gif = incidentFile(inc, 'context.gif');
         const grid = el('div', 'incident-detail');
-        grid.append(viewer([
-            { key: 'gif', label: 'GIF', url: gif ? fileUrl(id, gif) : null, alt: 'The moments leading up to the bug',
-              caption: 'context.gif: the moments before the bug; its last frame is the trigger frame.' },
-            { key: 'trigger', label: 'Trigger frame', url: incidentFile(inc, 'trigger.png') ? fileUrl(id, 'trigger.png') : null,
-              alt: 'The exact frame the bug was detected on', caption: 'trigger.png: the exact frame, full resolution.' },
-        ]));
+        grid.append(picture(incidentFile(inc, 'trigger.png') ? fileUrl(id, 'trigger.png') : null,
+                            'The exact frame the bug was detected on'));
         const right = el('div');
         right.append(el('p', 'incident-detail__desc', inc.description));
         const cls = record.classification || {};
@@ -1032,21 +979,17 @@ document.addEventListener('DOMContentLoaded', () => {
         $('incident-dialog-title').textContent = `Run report: ${report.headline}`;
         const has = (n) => (report.available || []).includes(n);
         const grid = el('div', 'incident-detail');
-        grid.append(viewer([
-            { key: 'gif', label: 'GIF', url: has('finish.gif') ? runFileUrl(report.run_id, 'finish.gif') : null,
-              alt: 'The last seconds of the run', caption: 'finish.gif: the last seconds of the run.' },
-            { key: 'final', label: 'Final frame', url: has('final.png') ? runFileUrl(report.run_id, 'final.png') : null,
-              alt: 'The last frame of the run', caption: 'final.png: the last frame, full resolution.' },
-        ]));
+        grid.append(picture(has('final.png') ? runFileUrl(report.run_id, 'final.png') : null, 'The last frame of the run'));
         const right = el('div');
-        right.append(el('p', 'incident-detail__desc', `${report.outcome} after ${num(report.agent_steps)} agent steps.`));
         const facts = el('dl', 'facts');
         const VERDICTS = { no_bugs_found: 'No bugs found', bugs_found: 'Bugs found' };
+        const level = /^level complete/i.test(report.outcome || '') ? 'Complete' : (report.outcome || '-');
         facts.append(el('dt', null, 'Verdict'), el('dd', null, VERDICTS[report.verdict] || report.headline),
                      el('dt', null, 'When'), el('dd', null, localTime(report.created_utc)),
-                     el('dt', null, 'Bugs'), el('dd', null, String(report.bugs)));
+                     el('dt', null, 'Bugs'), el('dd', null, String(report.bugs)),
+                     el('dt', null, 'Steps'), el('dd', null, num(report.agent_steps)),
+                     el('dt', null, 'Level status'), el('dd', null, level));
         right.append(el('h3', null, 'The run'), facts,
-                     el('p', 'result__honest', '"No bugs found" covers this run and these detectors only; it is not proof that the game has no bugs.'),
                      el('h3', null, 'Reports and evidence'), runLinks(report));
         grid.append(right);
         $('incident-dialog-body').replaceChildren(grid);

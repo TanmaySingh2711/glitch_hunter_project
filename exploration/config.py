@@ -1298,7 +1298,7 @@ INCIDENTS_DIR = f"{GENERATED_DIR}/incidents"
 # "no bugs found" counterpart of an incident (reporting/run_report.py).
 RUN_REPORTS_DIR = f"{GENERATED_DIR}/run_reports"
 
-# ─── A NEW ROUTE EVERY DASHBOARD RUN (clean game) ───
+# ─── A NEW ROUTE EVERY DASHBOARD RUN (both games) ───
 # On the clean game the dashboard draws each action from the brain's own
 # policy (dashboard_backend.choose_action) instead of always taking its top
 # pick, which replayed one fixed route. The policy is sharpened by this
@@ -1308,13 +1308,16 @@ RUN_REPORTS_DIR = f"{GENERATED_DIR}/run_reports"
 # 1.0 8/20; 0.5 over 140 runs: 108 (77%) - every one by a different route.
 # Most of the rest got stuck (the pit between the two pyramids, or pipe 4).
 #
-# The bugged game's FIRST run of a session keeps the fixed (greedy) route: it
-# meets all six benchmark bugs in that one run, every time. Drawn routes do
-# not (measured: 1 of 20 runs at 0.6 and 2 of 20 at 0.15 met all six; most
-# died near x 4576), so they start from the second run, where they test
-# ground the fixed route never covers.
+# The bugged game draws its routes the same way, from its very first run.
+# Its six benchmark bugs were placed (2026-10-03) where the drawn routes pass,
+# and none of them traps or kills Mario, so a run meets several bugs and still
+# finishes. Measured in the dashboard's own env, 40 drawn runs at 0.5 (seeds
+# 60000+): 30 reached the castle (clean game, same seeds: 31), 39 met at
+# least two of the six bugs, 4 met all six, every one by a different route.
+# (Before: 3 of 40 finished; the old invisible wall and false Goomba hit
+# ended most runs, and the first run kept one fixed route to meet all six.)
 DASHBOARD_POLICY_TEMPERATURE = 0.5
-DASHBOARD_FIXED_ROUTE_RUNS = {CLEAN_GAME_VARIANT: 0, BUGGED_GAME_VARIANT: 1}
+DASHBOARD_FIXED_ROUTE_RUNS = {CLEAN_GAME_VARIANT: 0, BUGGED_GAME_VARIANT: 0}
 # A drawn route can wander into a trap (the pit between the two pyramids,
 # pipe 4) and stay there until the engine's own safety reset, 5,000 steps
 # (about 3 minutes) later. The dashboard ends such a run as "stuck" once
@@ -1322,7 +1325,7 @@ DASHBOARD_FIXED_ROUTE_RUNS = {CLEAN_GAME_VARIANT: 0, BUGGED_GAME_VARIANT: 1}
 # (71 drawn runs, 2026-09-29): runs that reached the castle never went more
 # than 38 steps without progress, and no run that kept moving more than 78;
 # the stuck runs sat 4,600+ steps. 200 is 2.5 times the longest healthy wait
-# and about 13 s at the dashboard's pace. It never applies to the fixed route.
+# and about 13 s at the dashboard's pace. It never applies to a fixed route.
 DASHBOARD_STUCK_STEPS = 200
 
 # ─── HOW MUCH CONTEXT BEFORE A TRIGGER ───

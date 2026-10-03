@@ -2,7 +2,7 @@
 approved brain).
 
 One dashboard episode per game (tests/bug_incident_run.py): the approved brain
-plays greedily, every built-in detector is live, and each detection becomes a
+draws its moves as on the dashboard, from a fixed seed; every built-in detector is live, and each detection becomes a
 full incident - evidence, GIF, Markdown and PDF reports, and a replay in a
 separate process. On mario_bugged every bug must come out as its own incident,
 replayed exactly; on mario_clean nothing at all may be reported.
@@ -22,9 +22,11 @@ pytestmark = [pytest.mark.slow,
                                  reason="the approved brain is not in this checkout")]
 
 # One incident per bug, from the generic detectors; the stair bug is on two
-# columns (two sites), and the sky jump also crosses the older above_world line.
-EXPECTED = {"impossible_jump": 1, "above_world": 1, "clip_into_pipe": 1, "invisible_collision": 1,
-            "clip_into_block": 1, "clip_into_step": 2, "hit_without_contact": 1}
+# columns (two sites), this route meets the invisible wall twice (stopped by
+# it, then standing on it), and the sky jump also crosses the older
+# above_world line.
+EXPECTED = {"impossible_jump": 1, "above_world": 1, "clip_into_pipe": 1, "invisible_collision": 2,
+            "clip_into_block": 1, "clip_into_step": 2, "stomp_without_contact": 1}
 
 
 def _run(variant, tmp_path):

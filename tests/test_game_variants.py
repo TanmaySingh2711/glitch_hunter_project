@@ -37,9 +37,10 @@ def test_the_clean_game_is_exactly_the_pinned_baseline():
         "edited - deliberate bugs go in mario_bugged/ (see mario_bugged/VARIANT.md)")
 
 
-# The six bugs the project owner specified on 2026-09-24, in the brief's order.
+# The six bugs the project owner specified on 2026-09-24, in the brief's order
+# (bug 5 turned into the far stomp at the owner's request on 2026-10-03).
 SPECIFIED_BUGS = ["stair-clip", "pipe-clip", "ceiling-clip", "invisible-wall",
-                  "false-goomba-hit", "open-sky-jump"]
+                  "far-stomp", "open-sky-jump"]
 REQUIRED_FIELDS = ("id", "number", "name", "summary", "subsystem", "files", "location",
                    "trigger", "expected_clean", "injected_behaviour", "implementation",
                    "reproducibility", "objective3_detection", "zone")
@@ -223,10 +224,10 @@ EXPECTED_GEOMETRY_CHANGES = {
     "removed": {("pipe_group", 2445, 366, 83, 170),        # pipe-clip
                 ("step_group", 5874, 366, 40, 176),        # stair-clip (step4)
                 ("step_group", 6001, 366, 40, 176)},       # stair-clip (step5)
-    "added": {("pipe_group", 2445, 366, 21, 170),
+    "added": {("pipe_group", 2445, 398, 83, 138),
               ("step_group", 5874, 452, 40, 90),
               ("step_group", 6001, 452, 40, 90),
-              ("step_group", 4412, 452, 40, 86)},          # invisible-wall
+              ("step_group", 3360, 495, 40, 43)},          # invisible-wall
 }
 
 

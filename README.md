@@ -95,16 +95,16 @@ Each one has its own write-up: [Objective 1](docs/OBJECTIVE1.md),
 | Feature | What it does |
 |---|---|
 | **Self-playing agent** | A trained brain plays the level with no human input |
-| **Bug detectors** | Rules checked on every game frame: no passing into solid things, no invisible walls, no enemy hits without contact, no impossible jumps, and a few more |
+| **Bug detectors** | 13 rules checked on every game frame: no passing into solid things, no invisible walls, no enemy hits or stomps without contact, no impossible jumps, and a few more |
 | **Stops on every bug** | Testing pauses at the exact frame a rule breaks |
 | **Saved evidence** | A full-size screenshot, a GIF of the moments before, and the full record of the run |
 | **Replay check** | The run is played again in a separate process to confirm the bug happens on the same frame |
 | **Reports** | A Markdown and a PDF report for every bug |
 | **Where to fix it** | Each report names the file and lines in the game's code that likely cause the bug, and the edit to make. It is a lead, not a proven cause |
-| **Live dashboard** | Watch the game, see what the AI is doing, and open every report from the browser |
+| **Live dashboard** | Watch the game, see what the agent is doing, and open every report from the browser. A retro arcade look: black and green, a pixel font and a few animations |
 | **Bug History** | Every saved bug and clean-run report in one place, with a Delete button for each and a Clear history button |
 | **Two games** | A clean game and a copy with six bugs added on purpose, to prove the detectors work |
-| **A new route every run** | The agent does not repeat the same path, so more of the level gets tested |
+| **A new route every run** | On both games the agent does not repeat the same path, so more of the level gets tested. On the bugged game each run meets its own set of the planted bugs |
 | **Clean-run report** | When a clean-game run reaches the castle with no bug, it gets its own short report |
 | **Works offline** | No internet is needed after installing |
 
@@ -121,7 +121,7 @@ Each one has its own write-up: [Objective 1](docs/OBJECTIVE1.md),
 | Images | OpenCV 5.0 (frames, screenshots), Pillow 12.3 (GIFs) |
 | Reports | fpdf2 2.8.8 (PDF), Markdown |
 | Backend | Flask 3.1.3, Flask-SocketIO 5.6.1 |
-| Frontend | HTML, CSS, plain JavaScript, Socket.IO client (bundled in the repo) |
+| Frontend | HTML, CSS, plain JavaScript, Socket.IO client and the Press Start 2P pixel font (both bundled in the repo) |
 | Packaging | pip (`requirements.txt`) or uv (`pyproject.toml`, `uv.lock`) |
 | Code quality | pytest, pytest-cov, Ruff, mypy (strict), pre-commit |
 | CI | GitHub Actions on Ubuntu, Windows and macOS |
@@ -183,10 +183,11 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 3. **The game moves forward** by four frames with that move held.
 4. **The detectors check each frame.** They compare what the game did with
    what is drawn on screen. Is Mario inside a solid block? Was he stopped by
-   nothing? Did an enemy hurt him without touching him? Did he jump higher
-   than the game allows?
-5. **If a rule breaks, testing stops.** The screenshot, the recent frames and
-   every button press of the run are saved.
+   nothing? Did an enemy hurt him, or get stomped, without touching him? Did
+   he jump higher than the game allows?
+5. **If a rule breaks, testing stops.** The game screen holds that frame.
+   The screenshot, the recent frames and every button press of the run are
+   saved.
 6. **The run is replayed.** A separate process repeats the same button
    presses to check that the bug shows up again on the same frame.
 7. **The reports are written:** a GIF, a Markdown report and a PDF. They
@@ -407,8 +408,9 @@ The page has four tabs: **Overview**, **Live Testing**, **How It Works** and
 
 1. Choose **Clean game** or **Bugged game**.
 2. Click **Start testing**. The game shows in the middle of the page. The
-   **Live status** panel tells you what the AI is doing.
-3. **When a bug is found, testing stops.** A **Bug found** card appears with
+   **Live status** panel tells you what the agent is doing.
+3. **When a bug is found, testing stops.** The game screen holds that frame,
+   with *BUG FOUND* in its top-left corner. A **Bug found** card appears with
    the bug, where it happened, where to fix it, and links to its files.
 4. Open the **PDF report**, **Markdown** report, **Trigger frame**, **GIF**,
    or **Download all (.zip)**. A report still being written shows as
@@ -419,10 +421,12 @@ What to expect:
 
 - **Clean game:** the Bug Tracker should stay empty. That is the healthy
   result. A run ends when Mario reaches the castle or dies. A castle finish
-  shows a green *Level complete · No bugs found* card with a run report.
-  Click **Start next run** to play again.
-- **Bugged game:** the first run follows one fixed route that meets all six
-  planted bugs. Later runs take new routes.
+  holds the last frame, with *LEVEL COMPLETE* in its corner, and shows a
+  green *Level complete · No bugs found* card with a run report. Click
+  **Start next run** to play again.
+- **Bugged game:** every run takes a new route and meets its own set of the
+  planted bugs, usually several (see [Results](#results)); press **Resume
+  testing** after each one. Most runs still reach the castle.
 - A run that gets stuck is ended after about 13 seconds without progress.
 - **Reset** clears the page. Saved evidence stays on disk.
 
@@ -566,49 +570,55 @@ The final brain has covered 84.25% of the reachable level (3,166,235 of
 3,757,990 pixels).
 
 On the dashboard, where each run takes a new route, 77% of 140 measured
-clean-game runs reached the castle.
+clean-game runs reached the castle. On the bugged game, 30 of 40 measured
+runs reached the castle (31 of 40 on the clean game with the same seeds), 39
+of 40 met at least two of the six planted bugs, and 4 met all six.
 
 **Bug detection**
 
 Six bugs were added on purpose to `games/mario_bugged/` to test the detectors.
 Each one is declared in
-[`INJECTED_BUGS.json`](games/mario_bugged/INJECTED_BUGS.json).
+[`INJECTED_BUGS.json`](games/mario_bugged/INJECTED_BUGS.json). They sit where
+the agent's routes pass, and none of them traps or kills Mario, so a run can
+meet several and still finish.
 
 | # | Planted bug | What goes wrong |
 |---|---|---|
 | 1 | Stair clipping | Mario sinks into the top of two stair columns |
-| 2 | Pipe clipping | Mario falls into the fourth pipe |
+| 2 | Pipe clipping | Mario sinks 32 px into the top of the fourth pipe |
 | 3 | Ceiling clipping | Mario jumps straight through a brick |
-| 4 | Invisible wall | Something that is not drawn blocks Mario |
-| 5 | False Goomba hit | A Goomba hurts Mario from about 30 px away |
+| 4 | Invisible wall | A one-block wall that is not drawn stops Mario |
+| 5 | Stomp from too far | A Goomba is stomped from up to 36 px above its head, without being touched |
 | 6 | Sky jump | One jump throws Mario far above the screen |
 
 | | Clean game | Bugged game |
 |---|---|---|
-| Result | 0 bug reports across 101 runs | All 6 bugs detected, reproduced and reported |
+| Result | 0 bug reports across 101 runs, and 0 in 80 more runs after the stomp check was added | All 6 bugs detected, reproduced and reported |
 
 **Fix hints.** The 11 edits suggested for the six planted bugs were applied
 to a copy of the bugged game. After that, every bug's spot behaved exactly
 like the clean game (`tests/test_fix_hint.py`).
 
-**Code checks.** 882 automated tests. The full check
+**Code checks.** 888 automated tests. The full check
 (`python tools/check.py --full`) requires at least 90% test coverage.
 
 ---
 
 ## Screenshots
 
-**Testing the clean game.** The Live status panel says what the AI is doing.
-The Bug Tracker stays empty, as it should.
+**Testing the clean game.** The Live status panel says what the agent is
+doing. The Bug Tracker stays empty, as it should.
 
 <p align="center"><img src="docs/assets/dashboard.png" alt="Dashboard testing the clean game" width="900"></p>
 
-**Stopped on a bug** (stair clipping, on the bugged game).
+**Stopped on a bug** (stair clipping, on the bugged game). The game screen
+holds the frame the bug was found on; the card on the right says where to fix
+it.
 
 <p align="center"><img src="docs/assets/bug-found.png" alt="Testing stopped on a detected stair-clipping bug" width="900"></p>
 
-**The GIF saved for that bug.** Mario lands and sinks into the stair column.
-The last frame is the exact frame the bug was detected.
+**A GIF the pipeline saved for the same bug.** Mario lands and sinks into the
+stair column. The last frame is the exact frame the bug was detected.
 
 <p align="center"><img src="docs/assets/bug-stair-clip.gif" alt="GIF of the stair-clipping bug" width="480"></p>
 
@@ -685,6 +695,7 @@ Some things in this repo are **not** covered by it:
 | `games/mario_clean/`, `games/mario_bugged/` | The Mario clone by Justin Meister. It was published without an open-source license, and its author describes it as meant for non-commercial, educational use. Do not use it commercially |
 | Game graphics, music and sounds | Nintendo's property (*Super Mario Bros.*). They also appear in the screenshots and reports. This project is not connected to or endorsed by Nintendo |
 | `web/static/vendor/socket.io.min.js` | The Socket.IO client, under its own MIT license |
+| `web/static/vendor/fonts/` | The Press Start 2P font, under the SIL Open Font License 1.1 (`OFL.txt` beside it) |
 
 Full details: [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
 

@@ -25,7 +25,7 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 
 ## End
 
-15. Injected six benchmark bugs into `mario_bugged`: stair clipping, pipe clipping, ceiling clipping, invisible wall, false Goomba hit, abnormal sky jump.
+15. Injected six benchmark bugs into `mario_bugged`: stair clipping, pipe clipping, ceiling clipping, invisible wall, false Goomba hit, abnormal sky jump. On 2026-10-03, at the owner's request, three were moved or reshaped so the dashboard's drawn routes meet them and still finish: the pipe clip, the invisible wall, and the false Goomba hit, which became the stomp from too far (bug 5).
 16. Added generic detectors for all six bug types.
 17. Verified **0 false alarms on the clean game**.
 18. Verified that all six bugs could be detected, reproduced, and automatically reported.
@@ -70,7 +70,7 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
   A run that reaches the castle gets a run report in `generated/run_reports/RUN-…/`
   (`reporting/run_report.py`): `run.json`, `final.png`, `finish.gif`,
   `report.md`, `report.pdf` - "No Bugs Found" when no detector fired. It
-  covers that run and those 12 detectors only; it does not prove the game
+  covers that run and those 13 detectors only; it does not prove the game
   bug-free.
 
 ## The six benchmark bugs (`games/mario_bugged/INJECTED_BUGS.json`)
@@ -78,10 +78,10 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
 | # | Bug | Where | Caught by (generic rule) |
 |---|---|---|---|
 | 1 | Stair clipping | top blocks of the first staircase's two columns | `clip_into_step` |
-| 2 | Pipe clipping | pipe 4: only its left rim is solid | `clip_into_pipe` |
+| 2 | Pipe clipping | pipe 4: its collider starts 32 px below its drawn top | `clip_into_pipe` |
 | 3 | Ceiling clipping | lone brick at x 5058: no collision while rising | `clip_into_block` |
-| 4 | Invisible wall | undrawn 2-tile collider at x 4412 | `invisible_collision` |
-| 5 | False Goomba hit | goomba14's hurt box 36 px too big | `hit_without_contact` |
+| 4 | Invisible wall | undrawn 1-tile collider at x 3360 | `invisible_collision` |
+| 5 | Stomp from too far | goomba14's stomp box reaches 36 px above its head | `stomp_without_contact` |
 | 6 | Abnormal sky jump | jump taken at x 250–480: 2.2× take-off | `impossible_jump` (+ `above_world`) |
 
 Every changed game line carries `INJECTED BUG <id>`; the whole clean→bugged
@@ -95,14 +95,17 @@ diff is pinned by hash; `mario_clean` stays byte-identical to its pin.
   checked everywhere against what is **drawn** (`reporting/level1_design.json`
   + live bricks/boxes/enemies), never against the game's own colliders:
   solid penetration > 6 px · collision with an undrawn collider · hit with no
-  contact (≤ 2 px) · rise faster than 12.5 px/frame or higher than 258 px.
+  contact (≤ 2 px) · stomp with no contact (≤ 2 px; added 2026-10-03 for the far
+  stomp) · rise faster than 12.5 px/frame or higher than 258 px.
 
 ## Validation
 
 | Check | Result |
 |---|---|
 | Clean game, 101 brain episodes + dashboard runs | **0 false alarms** |
-| Bugged game, dashboard route | all 6 bugs stop testing, each **reproduced**, GIF/MD/PDF done |
+| Clean game, 80 more drawn runs with the stomp check (2026-10-03) | **0 false alarms** |
+| Bugged game, one seeded dashboard run (`tests/test_bug_incidents.py`) | all 6 bugs stop testing, each **reproduced**, GIF/MD/PDF done |
+| Bugged game, 40 drawn dashboard runs (2026-10-03) | 30 reached the castle; 39 met at least two bugs, 4 met all six |
 | Bugged game, 40 sampled episodes | caught every clip deeper than 6 px; never fired without the bug |
 | Pipeline validation tool | 37/37 checks |
 | Full quality gate | lint, types, 730 tests, coverage 90.64%, Objective-2 artifacts unchanged |
@@ -121,11 +124,12 @@ diff is pinned by hash; `mario_clean` stays byte-identical to its pin.
 * Clips shallower than 6 px are deliberately not reported.
 * The designed-solids file is for Level 1-1 only (`tools/build_level_design.py`).
 * Every dashboard run takes a new route (moves drawn from the brain's own
-  policy at temperature 0.5), except the bugged game's first run, which keeps
-  the fixed top-pick route that meets all six bugs (the false Goomba hit ends
-  it). On the clean game 77% of 140 measured runs reached the castle, each by
-  a different route; a run stuck in a trap (the pit between the two pyramids,
-  pipe 4) is ended after 200 steps without progress.
+  policy at temperature 0.5), on both games. On the clean game 77% of 140
+  measured runs reached the castle, each by a different route. On the bugged
+  game 30 of 40 measured runs reached the castle (31 of 40 on the clean game,
+  same seeds), 39 of 40 met at least two of the six bugs and 4 met all six; a
+  run is not guaranteed to meet every bug. A run stuck in a trap (the pit
+  between the two pyramids, pipe 4) is ended after 200 steps without progress.
 * "Where to fix it" is a lead, not a proven cause: it reads Level 1-1's level
   and player code by function name (`level1.py`, `mario.py`).
 * The sky-jump landing leaves more agents stuck at pipe 4 in sampled play.

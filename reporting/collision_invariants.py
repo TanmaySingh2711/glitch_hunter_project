@@ -1,5 +1,5 @@
 """Collision and jump-physics invariants: what the engine does to Mario must
-agree with what is DRAWN and with the engine's own laws of motion. Four rules,
+agree with what is DRAWN and with the engine's own laws of motion. Five rules,
 each true everywhere in any correct build of the level and none aware of where
 (or whether) a bug was injected:
 
@@ -28,6 +28,12 @@ each true everywhere in any correct build of the level and none aware of where
                       of him at any point of that frame: the swept boxes of
                       their previous and current positions do not touch. Kind:
                       hit_without_contact.
+  STOMP WITHOUT CONTACT  An enemy was stomped (it entered the engine's own
+                      "jumped on" state) although Mario never came within
+                      HIT_CONTACT_TOL px of it during that frame. The engine
+                      stomps only on contact and puts Mario's feet on the
+                      enemy's head, so in a correct build the gap is 0. Kind:
+                      stomp_without_contact.
   IMPOSSIBLE JUMP     No legal move sends Mario up faster than the engine's own
                       fastest declared jump (constants.FAST_JUMP_VEL, 12.5
                       px/frame; ordinary jumps take off at 10-10.5, stomp
@@ -64,6 +70,7 @@ FASTEST_JUMP_SPEED = 12.5                    # -constants.FAST_JUMP_VEL
 JUMP_GRAVITY = 0.31                          # constants.JUMP_GRAVITY
 MAX_JUMP_RISE = FASTEST_JUMP_SPEED ** 2 / (2 * JUMP_GRAVITY) + PENETRATION_TOL   # 258 px
 ENEMY_DEATH_CAUSES = frozenset(("goomba", "koopa", "koopa_shell", "enemy"))
+STOMPED_STATE = "jumped on"                  # constants.JUMPED_ON: what a stomp sets
 SUSPENDED_STATES = frozenset(("death jump", "flag pole", "walking to castle", "end of level fall",
                               "small to big", "big to small", "big to fire"))
 DETECTOR = "collision_invariants"
@@ -148,11 +155,16 @@ class CollisionInvariants:
                "death_cause": getattr(mario, "death_cause", None),
                "enemies": {id(e): _rect(e) for grp in ("enemy_group", "shell_group")
                            for e in getattr(level, grp, ())},
+               "stomped": {id(e): _rect(e) for grp in ("enemy_group", "shell_group",
+                                                         "sprites_about_to_die_group")
+                           for e in getattr(level, grp, ())
+                           if str(getattr(e, "state", "")) == STOMPED_STATE},
                "blocks": blocks}
         prev, self._prev = self._prev, now
         hits: list[Hit] = []
         if prev is not None:
             hits += self._hit_without_contact(prev, now)
+            hits += self._stomp_without_contact(prev, now)
         suspended = (now["dead"] or now["state"] in SUSPENDED_STATES
                      or bool(getattr(mario, "in_transition_state", False))
                      or bool(getattr(mario, "in_castle", False)))
@@ -268,6 +280,28 @@ class CollisionInvariants:
                    "mario_rect": list(now["rect"]), "contact_tolerance_px": HIT_CONTACT_TOL}
         return [("hit_without_contact", message, metrics, f"{DETECTOR}/hit_without_contact",
                  "hit_without_contact")]
+
+    # ── rule 5 ────────────────────────────────────────────────────────────
+    def _stomp_without_contact(self, prev: dict[str, Any], now: dict[str, Any]) -> list[Hit]:
+        new = [eid for eid in now["stomped"] if eid not in prev.get("stomped", {})]
+        if not new:
+            return []
+        swept_mario = union(prev["rect"], now["rect"])
+        hits: list[Hit] = []
+        for eid in new:
+            rect = now["stomped"][eid]
+            g = gap(swept_mario, union(prev["enemies"].get(eid, rect), rect))
+            if g <= HIT_CONTACT_TOL:
+                continue
+            message = (f"An enemy was stomped although Mario never touched it: he stayed "
+                       f"{g} px away from it during that frame (contact means <= "
+                       f"{HIT_CONTACT_TOL} px).")
+            metrics = {"event": "stomp", "gap_px": g, "enemy_rect": list(rect),
+                       "mario_rect": list(now["rect"]), "y_vel": now["y_vel"],
+                       "contact_tolerance_px": HIT_CONTACT_TOL}
+            hits.append(("stomp_without_contact", message, metrics,
+                         f"{DETECTOR}/stomp_without_contact", "stomp_without_contact"))
+        return hits
 
     # ── rule 4 ────────────────────────────────────────────────────────────
     def _impossible_jump(self, now: dict[str, Any]) -> list[Hit]:

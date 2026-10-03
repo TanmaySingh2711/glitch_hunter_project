@@ -27,7 +27,7 @@ with open(os.path.join(ROOT, "tests", "fix_hint_incidents.json"), encoding="utf-
 BUG_OF_KIND = {"impossible_jump": "open-sky-jump", "above_world": "open-sky-jump",
                "clip_into_pipe": "pipe-clip", "invisible_collision": "invisible-wall",
                "clip_into_block": "ceiling-clip", "clip_into_step": "stair-clip",
-               "hit_without_contact": "false-goomba-hit"}
+               "stomp_without_contact": "far-stomp"}
 
 
 def _changed_blocks(rel):
@@ -90,13 +90,13 @@ def test_a_short_collider_gets_the_drawn_size_as_the_fix():
     hint = fh.fix_hint(record)
     assert hint["diagnosis"] == "collider_smaller_than_drawing"
     assert "width 83, height 170" in hint["suggestion"]
-    assert hint["places"][0]["code"] == ["pipe4 = collider.Collider(2445, 366, 21, 170)"]
+    assert hint["places"][0]["code"] == ["pipe4 = collider.Collider(2445, 398, 83, 138)"]
 
 
 def test_a_stray_collider_is_found_where_it_is_built_and_where_it_joins_the_level():
     record = next(r for r in INCIDENTS if r["fingerprint"]["kind"] == "invisible_collision")
     places = fh.fix_hint(record)["places"]
-    assert [p["code"] for p in places] == [["stray_step = collider.Collider(4412, 452, 40, 86)"],
+    assert [p["code"] for p in places] == [["stray_step = collider.Collider(3360, 495, 40, 43)"],
                                            ["stray_step)  # INJECTED BUG invisible-wall"]]
 
 
@@ -175,10 +175,10 @@ def test_the_report_carries_the_lead_and_labels_it_inferred():
 # ── the proof: apply every suggested fix, and each bug is gone ─────────────
 BUG_SCENARIOS = {
     "stair-clip": ("land_on_step4", "land_on_step5", "walk_step3_into_step4"),
-    "pipe-clip": ("pipe4_walk_top", "pipe4_walk_in_from_right"),
+    "pipe-clip": ("pipe4_walk_top",),
     "ceiling-clip": ("jump_under_brick20",),
     "invisible-wall": ("walk_across_wall_spot",),
-    "false-goomba-hit": ("goomba14_walks_into_mario",),
+    "far-stomp": ("drop_onto_goomba14",),
     "open-sky-jump": ("tap_jump_at_x300", "held_jump_at_x300"),
 }
 
@@ -224,7 +224,7 @@ def test_every_suggested_fix_is_a_concrete_edit():
     assert set(edits) == {"games/mario_bugged/data/states/level1.py",
                           "games/mario_bugged/data/components/mario.py"}
     # 2 take-offs, 1 pipe, 2 stair columns, 2 for the wall (built, listed),
-    # 3 for the brick (its flag, both collision checks), 1 goomba check.
+    # 3 for the brick (its flag, both collision checks), 1 stomp check.
     assert sum(len(v) for v in edits.values()) == 11
     for record in INCIDENTS:
         assert fh.headline(fh.fix_hint(record))["fixes"], record["fingerprint"]["kind"]

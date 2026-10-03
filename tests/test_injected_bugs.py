@@ -47,7 +47,7 @@ def test_every_scenario_is_repeatable(runs):
 
 def test_every_control_spot_is_identical_on_both_games(runs):
     controls = [k for k in runs["clean"] if k.startswith("control_")]
-    assert len(controls) == 8
+    assert len(controls) == 9
     for name in controls:
         assert runs["clean"][name] == runs["bugged"][name], name
 
@@ -68,11 +68,11 @@ def test_stair_clip(runs):
 # ── 2. pipe-clip ─────────────────────────────────────────────────────────────
 def test_pipe_clip(runs):
     clean, bugged = scenario(runs, "pipe4_walk_top")
-    assert clean["max_depth_inside_pipe_px"] == 0
-    assert bugged["max_depth_inside_pipe_px"] == 40                 # his full height inside the pipe
-    clean, bugged = scenario(runs, "pipe4_walk_in_from_right")
-    assert clean["min_left_x"] == clean["pipe_right_edge"] == 2528
-    assert bugged["min_left_x"] == 2466                             # 62 px into the pipe
+    assert clean["max_depth_inside_pipe_px"] == 0 and clean["min_bottom_while_over_pipe"] == 366
+    assert bugged["max_depth_inside_pipe_px"] == 32                 # standing 32 px inside its top
+    # The sides are untouched, so Mario is never trapped in the pipe.
+    clean, bugged = scenario(runs, "control_pipe4_walk_in_from_right")
+    assert clean["min_left_x"] == bugged["min_left_x"] == clean["pipe_right_edge"] == 2528
 
 
 # ── 3. ceiling-clip ──────────────────────────────────────────────────────────
@@ -87,17 +87,21 @@ def test_ceiling_clip(runs):
 # ── 4. invisible-wall ────────────────────────────────────────────────────────
 def test_invisible_wall(runs):
     clean, bugged = scenario(runs, "walk_across_wall_spot")
-    assert not clean["stopped_at_spot"] and clean["max_right_edge"] > 4412 + 100
-    assert bugged["stopped_at_spot"] and bugged["max_right_edge"] == 4412
+    assert not clean["stopped_at_spot"] and clean["max_right_edge"] > 3360 + 100
+    assert bugged["stopped_at_spot"] and bugged["max_right_edge"] == 3360
     # Nothing is drawn there: the pixels are the clean game's own.
     assert bugged["drawn_pixels_sha256"] == clean["drawn_pixels_sha256"]
 
 
-# ── 5. false-goomba-hit ──────────────────────────────────────────────────────
-def test_false_goomba_hit(runs):
-    clean, bugged = scenario(runs, "goomba14_walks_into_mario")
-    assert clean["end"] == ["death", "goomba"] and clean["gap_at_hit_px"] == 0
-    assert bugged["end"] == ["death", "goomba"] and 30 <= bugged["gap_at_hit_px"] <= 36
+# ── 5. far-stomp ─────────────────────────────────────────────────────────────
+def test_far_stomp(runs):
+    clean, bugged = scenario(runs, "drop_onto_goomba14")
+    assert clean["stomped"] and clean["gap_at_stomp_px"] == 0      # feet on its head
+    assert bugged["stomped"] and 30 <= bugged["gap_at_stomp_px"] <= 36
+    assert clean["end"] == bugged["end"] == ["ok", None]           # Mario is never hurt by it
+    for control in ("control_drop_onto_goomba15", "control_drop_onto_goomba12"):
+        clean, bugged = scenario(runs, control)
+        assert clean["stomped"] and clean["gap_at_stomp_px"] == bugged["gap_at_stomp_px"] == 0
 
 
 # ── 6. open-sky-jump ─────────────────────────────────────────────────────────
@@ -119,10 +123,9 @@ EXPECTED_DETECTIONS = {
     "land_on_step5": ["clip_into_step"],
     "walk_step3_into_step4": ["clip_into_step"],
     "pipe4_walk_top": ["clip_into_pipe"],
-    "pipe4_walk_in_from_right": ["clip_into_pipe"],
     "jump_under_brick20": ["clip_into_block"],
     "walk_across_wall_spot": ["invisible_collision"],
-    "goomba14_walks_into_mario": ["hit_without_contact"],
+    "drop_onto_goomba14": ["stomp_without_contact"],
     "tap_jump_at_x300": ["above_world", "impossible_jump"],
     "held_jump_at_x300": ["above_world", "impossible_jump"],
 }

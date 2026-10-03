@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Glitch Hunter: an AI agent plays Super Mario Bros Level 1-1, hunts for bugs and reports them automatically.">
-    <title>Glitch Hunter · Autonomous AI game tester</title>
+    <meta name="description" content="Glitch Hunter: an agent plays Super Mario Bros Level 1-1, hunts for bugs and reports them automatically.">
+    <title>Glitch Hunter · Autonomous game-testing agent</title>
     <!-- Inline SVG favicon: without one the browser requests /favicon.ico on
          every load and the server logs a 404 each time. Inline keeps it to
          zero extra requests and zero extra files. -->
@@ -21,7 +21,7 @@
         <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="16" cy="16" r="3.4" class="brand__core"/><path d="M16 1.5v7M16 23.5v7M1.5 16h7M23.5 16h7" stroke="currentColor" stroke-width="2.6"/></svg>
         <span class="brand__text">
             <span class="brand__name">Glitch Hunter</span>
-            <span class="brand__tag">Autonomous AI game tester</span>
+            <span class="brand__tag">Autonomous game-testing agent</span>
         </span>
     </a>
     <nav class="tabs" role="tablist" aria-label="Dashboard sections">
@@ -46,65 +46,53 @@
                     <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="16" cy="16" r="3.4" class="brand__core"/><path d="M16 1.5v7M16 23.5v7M1.5 16h7M23.5 16h7" stroke="currentColor" stroke-width="2.6"/></svg>
                     <span class="brand__text">
                         <span class="brand__name">Glitch Hunter</span>
-                        <span class="brand__tag">Autonomous AI game tester</span>
+                        <span class="brand__tag">Autonomous game-testing agent</span>
                     </span>
                 </span>
             </div>
             <div class="hero">
-                <h1 class="hero__title">An AI that plays the game, hunts for bugs and reports them on its own.</h1>
+                <h1 class="hero__title">An <em>agent</em> that plays the game, hunts for bugs and reports them on its own.</h1>
+                <p class="press-start" aria-hidden="true">PRESS START</p>
                 <div class="hero__actions">
                     <button class="btn btn--primary btn--lg" type="button" data-goto="live">Open Live Testing <span aria-hidden="true">→</span></button>
                     <button class="btn btn--ghost btn--lg" type="button" data-goto="method">See how it works</button>
                 </div>
             </div>
 
-            <h2 class="section-title">Three objectives, one system</h2>
-            <ol class="objectives">
-                <li class="objective card">
-                    <p class="objective__num"><span class="obj-badge">1</span> Objective 1</p>
-                    <h3 class="objective__title">An autonomous agent</h3>
-                    <p class="objective__goal">Build an AI agent that can autonomously explore the game.</p>
-                    <ul class="objective__built">
-                        <li>A PPO reinforcement-learning agent that learns by playing</li>
-                        <li>It sees only the screen: 4 stacked 84&times;84 grey frames</li>
-                        <li>It presses one of <b data-fact="action-count">its</b> actions every 4 game frames</li>
-                    </ul>
-                    <div class="objective__result">
-                        <p class="objective__metric" data-fact="o1-steps">-</p>
-                        <p class="objective__metric-label">training steps</p>
-                        <p class="objective__note" data-fact="o1-completion">Result not available</p>
-                    </div>
+            <h2 class="section-title">How the agent works</h2>
+            <p class="section-lead">Glitch Hunter is a game tester with no human at the controls. A trained agent plays Super Mario Bros Level 1-1
+                while the dashboard watches the game for bugs. One test step, over and over:</p>
+            <ol class="stages">
+                <li class="stage">
+                    <span class="stage__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg></span>
+                    <h3 class="stage__label">See</h3>
+                    <p class="stage__text">The agent looks at the game screen: the <b>last 4 frames</b>, made small and grey.</p>
                 </li>
-                <li class="objective card">
-                    <p class="objective__num"><span class="obj-badge">2</span> Objective 2</p>
-                    <h3 class="objective__title">QA training: glitch hunting</h3>
-                    <p class="objective__goal">Train the agent with a QA-focused reward to explore the game and seek physics and collision anomalies.</p>
-                    <ul class="objective__built">
-                        <li>Reward for reaching places it has never visited</li>
-                        <li>Explores first, heads for the flag only on evidence</li>
-                        <li>A safety check stops it forgetting how to finish</li>
-                    </ul>
-                    <div class="objective__result">
-                        <p class="objective__metric" data-fact="o2-coverage">-</p>
-                        <p class="objective__metric-label">of the reachable level explored</p>
-                        <p class="objective__note" data-fact="o2-completion">Result not available</p>
-                    </div>
+                <li class="stage">
+                    <span class="stage__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M6 8h12a4 4 0 0 1 4 4v1a4 4 0 0 1-7 2.6L14 14h-4l-1 1.6A4 4 0 0 1 2 13v-1a4 4 0 0 1 4-4Z"/><path d="M7 11v3M5.5 12.5h3"/><path d="M16 11.5h.01M18 13.5h.01"/></svg></span>
+                    <h3 class="stage__label">Play</h3>
+                    <p class="stage__text">It presses one of its <b data-fact="action-count">10</b> button moves, and the game runs <b>4 frames</b> with it.</p>
                 </li>
-                <li class="objective card">
-                    <p class="objective__num"><span class="obj-badge">3</span> Objective 3</p>
-                    <h3 class="objective__title">Automatic bug reporting</h3>
-                    <p class="objective__goal">Automatically capture, preserve and report every detected bug.</p>
-                    <ul class="objective__built">
-                        <li>Rules checked on every frame, against what is drawn</li>
-                        <li>Evidence frozen at the exact frame; testing pauses</li>
-                        <li>The run is replayed to confirm; GIF, Markdown and PDF written</li>
-                    </ul>
-                    <div class="objective__result">
-                        <p class="objective__metric" data-fact="o3-caught">-</p>
-                        <p class="objective__metric-label">benchmark bugs with saved evidence</p>
-                    </div>
+                <li class="stage">
+                    <span class="stage__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13Z"/><path d="M15.5 15.5 21 21"/><path d="M8 10.5l2 2 3.5-3.5"/></svg></span>
+                    <h3 class="stage__label">Check</h3>
+                    <p class="stage__text"><b data-fact="detector-count">Its</b> rules check <b>every frame</b>: no passing through solid blocks, no invisible walls,
+                        no hits without contact, no impossible jumps.</p>
+                </li>
+                <li class="stage stage--bug">
+                    <span class="stage__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><path d="M8.5 9.5h7v5a3.5 3.5 0 0 1-7 0Z"/><path d="M12 9.5v8.5"/><path d="M5 13.5h3.5M15.5 13.5H19"/><path d="M6 8.5l2.5 1.5M18 8.5l-2.5 1.5"/><path d="M9.5 7a2.5 2.5 0 0 1 5 0v2.5h-5Z"/></svg></span>
+                    <h3 class="stage__label">Report</h3>
+                    <p class="stage__text">A broken rule <b>stops the test</b>. The frame, a GIF and a replay check are saved, and a report
+                        says <b>where to fix</b> the bug.</p>
                 </li>
             </ol>
+
+            <h2 class="section-title">The agent in numbers</h2>
+            <div id="overview-stats" class="stat-grid"></div>
+
+            <div class="page-cta">
+                <button class="btn btn--primary btn--lg" type="button" data-goto="live">Start testing <span aria-hidden="true">→</span></button>
+            </div>
         </div>
     </section>
 
@@ -136,7 +124,7 @@
                 <section class="card controls" aria-labelledby="controls-title">
                     <div class="card__head">
                         <h2 class="card__title" id="controls-title"><span class="step-num">2</span> Run the test</h2>
-                        <button id="info-btn" class="info-btn" type="button" aria-label="Show the 10 actions the AI can take" title="The actions the AI can take">i</button>
+                        <button id="info-btn" class="info-btn" type="button" aria-label="Show the 10 actions the agent can take" title="The actions the agent can take">i</button>
                     </div>
                     <button id="start-btn" class="btn btn--primary btn--block btn--lg" type="button">Start testing</button>
                     <div class="controls__row">
@@ -150,9 +138,8 @@
             <div class="live__stage">
                 <div class="monitor-wrap">
                     <div id="monitor" class="monitor">
-                        <p id="monitor-empty" class="monitor__empty"><span class="monitor__nosignal">NO SIGNAL</span><span>Press Start testing</span></p>
-                        <img id="video-feed" alt="Live view of the AI playing" />
-                        <img id="evidence-view" class="monitor__evidence" alt="" hidden />
+                        <p id="monitor-empty" class="monitor__empty"><span class="monitor__nosignal">NO SIGNAL</span><span class="monitor__hint">PRESS START TESTING</span></p>
+                        <img id="video-feed" alt="Live view of the agent playing" />
                         <span id="monitor-badge" class="monitor__badge" hidden></span>
                     </div>
                 </div>
@@ -206,84 +193,136 @@
     <!-- ═══════════════════════════ HOW IT WORKS ═══════════════════════════ -->
     <section id="view-method" class="view view--scroll" role="tabpanel" aria-labelledby="tab-method" hidden>
         <div class="page">
-            <p class="eyebrow">Methodology</p>
+            <p class="eyebrow">How it works</p>
             <h1 class="page__title">How Glitch Hunter works</h1>
-            <p class="page__lead">Each objective builds on the one before it. Objective 1 gives the project an AI that can play;
-                Objective 2 turns it into a tester; Objective 3 turns what it finds into evidence and reports.</p>
+            <p class="page__lead">Five short charts: how the agent was built, how it tests each game, what is on this dashboard,
+                what you do from start to end, and which bugs were planted in the bugged game.</p>
 
-            <div class="flow" aria-label="Project methodology flowchart">
-                <section class="flow__lane">
-                    <header class="flow__lane-head"><span class="obj-badge">1</span><span><b>Objective 1</b><br>An AI that can play</span></header>
-                    <div class="flow__node">
-                        <h3>Game environment</h3>
-                        <p>Super Mario Bros Level 1-1 (a Python copy of the game), wrapped as a standard AI environment. Two copies: clean and bugged.</p>
-                    </div>
-                    <div class="flow__arrow" aria-hidden="true"></div>
-                    <div class="flow__node">
-                        <h3>Autonomous agent</h3>
-                        <p>A PPO brain learns from the screen alone which buttons move Mario forward and finish the level.</p>
-                        <p class="flow__fact" data-fact="o1-flow">-</p>
-                    </div>
-                </section>
-                <div class="flow__handoff" aria-hidden="true"><span>brain</span></div>
-                <section class="flow__lane">
-                    <header class="flow__lane-head"><span class="obj-badge">2</span><span><b>Objective 2</b><br>From player to tester</span></header>
-                    <div class="flow__node">
-                        <h3>QA reward</h3>
-                        <p>The agent is paid for reaching reachable places it has never visited, not just for winning.</p>
-                    </div>
-                    <div class="flow__arrow" aria-hidden="true"></div>
-                    <div class="flow__node">
-                        <h3>QA / glitch hunting</h3>
-                        <p>It explores every ledge, gap and corner, then heads for the flag only when exploring has dried up.</p>
-                    </div>
-                    <div class="flow__arrow" aria-hidden="true"></div>
-                    <div class="flow__node flow__node--key">
-                        <h3>Final QA brain</h3>
-                        <p class="flow__fact" data-fact="o2-flow">-</p>
-                    </div>
-                </section>
-                <div class="flow__handoff" aria-hidden="true"><span>tester</span></div>
-                <section class="flow__lane">
-                    <header class="flow__lane-head"><span class="obj-badge">3</span><span><b>Objective 3</b><br>Automatic bug reports</span></header>
-                    <div class="flow__node">
-                        <h3>Bug detection</h3>
-                        <p><span data-fact="detector-count">The</span> rules checked on every frame: never inside a solid, never stopped by something invisible, never hurt without contact, never an impossible jump or speed.</p>
-                    </div>
-                    <div class="flow__arrow" aria-hidden="true"></div>
-                    <div class="flow__node">
-                        <h3>Evidence capture</h3>
-                        <p>The exact frame, the movement history and every button press are saved; testing pauses.</p>
-                    </div>
-                    <div class="flow__arrow" aria-hidden="true"></div>
-                    <div class="flow__node">
-                        <h3>Replay check</h3>
-                        <p>A separate process replays the run from its start to prove the bug happens again.</p>
-                    </div>
-                    <div class="flow__arrow" aria-hidden="true"></div>
-                    <div class="flow__node">
-                        <h3>Bug reporting</h3>
-                        <p>A GIF, a Markdown and a PDF report and a downloadable evidence bundle are written. The report also points to where to fix the bug in the game's code.</p>
-                    </div>
-                    <div class="flow__arrow" aria-hidden="true"></div>
-                    <div class="flow__node flow__node--key">
-                        <h3>Final QA result</h3>
-                        <p>Bugged game: every bug in the Bug Tracker. Clean game: a "No Bugs Found" run report.</p>
-                    </div>
-                </section>
+            <h2 class="section-title"><span class="section-title__num">1</span>How the agent was built</h2>
+            <div class="chart">
+                <div class="chart__flow">
+                    <div class="chart__node chart__node--start"><h3>The game</h3><p>Super Mario Bros Level 1-1, a Python copy of the game. Two copies: the clean game and the bugged game.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node"><h3>Made playable by a program</h3><p>The game is wrapped as a standard environment: the program gets the screen and presses the buttons.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node"><h3>Stage 1 training: learn to finish</h3><p>The agent plays again and again and is rewarded for moving forward and reaching the flag.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node chart__node--key"><h3>First agent</h3><p class="chart__fact" data-fact="o1-flow">-</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node"><h3>Stage 2 training: learn to explore</h3><p>Rewarded for reaching places it has never been, like a tester. A safety check keeps it close to a good agent, so it never forgets how to finish.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node chart__node--ok"><h3>Final agent (used by this dashboard)</h3><p class="chart__fact" data-fact="o2-flow">-</p></div>
+                </div>
             </div>
 
-            <h2 class="section-title">Why there are two games</h2>
-            <div class="two-col">
-                <div class="card">
-                    <h3 class="card__title">Clean game</h3>
-                    <p>The original level, never modified; its files are locked by a fingerprint. Every brain was trained and measured on it.
-                        Any report here would be a false alarm, so it is how the project proves the detectors stay quiet.</p>
+            <h2 class="section-title"><span class="section-title__num">2</span>How the agent tests each game</h2>
+            <div class="chart">
+                <div class="chart__flow">
+                    <div class="chart__node chart__node--start"><h3>Start testing</h3><p>The agent loads the chosen game and starts a run from the beginning of the level.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node"><h3>Play one step</h3><p>See the last 4 frames, pick a move, the game runs 4 frames. Each run takes a new route: the agent draws its moves from what it learned.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node"><h3>Check every frame</h3><p><span data-fact="detector-count">Its</span> rules, judged against what is drawn on screen.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node chart__node--ask"><h3>A rule broken?</h3><p>No: keep playing. Yes: a bug.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__split">
+                        <div class="chart__lane chart__lane--clean">
+                            <p class="chart__lane-title">Clean game</p>
+                            <div class="chart__node"><h3>No rule should break</h3><p>The original game. Any bug report here would be a false alarm.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Mario reaches the castle</h3><p>Or he dies, or gets stuck: a stuck run is ended after about 13 seconds without progress.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node chart__node--ok"><h3>Testing stops</h3><p>The game screen holds the last frame, with LEVEL COMPLETE in its corner.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>No Bugs Found report</h3><p>A PDF, Markdown, the final frame and a GIF, saved and listed in Bug History.</p></div>
+                        </div>
+                        <div class="chart__lane chart__lane--bugged">
+                            <p class="chart__lane-title">Bugged game</p>
+                            <div class="chart__node chart__node--bug"><h3>A planted bug is met</h3><p>Each run takes its own route, so it meets its own set of the planted bugs.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Testing stops at that frame</h3><p>The game screen holds the frame, with BUG FOUND in its corner.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Evidence, replay, report</h3><p>The frame, a GIF and the run are saved; a separate replay proves the bug happens again; PDF and Markdown reports say where to fix it.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Resume testing</h3><p>The run carries on from the same moment and stops again at the next bug.</p></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="card">
+            </div>
+
+            <h2 class="section-title"><span class="section-title__num">3</span>What is on the dashboard</h2>
+            <div class="parts">
+                <div class="part"><p class="part__where">Top bar</p><h3>Status and connection</h3><p>The status label says what the dashboard is doing right now (Ready, Testing, Bug found, No bugs found, Paused). The dot beside it shows the link to the server.</p></div>
+                <div class="part"><p class="part__where">Tab</p><h3>Overview</h3><p>What the agent does, in four steps, and the agent's measured numbers.</p></div>
+                <div class="part"><p class="part__where">Live Testing</p><h3>1. Choose the game</h3><p>Clean game: the original, where no bug should be found. Bugged game: a copy with planted bugs.</p></div>
+                <div class="part"><p class="part__where">Live Testing</p><h3>2. Run the test</h3><ul><li><b>Start testing</b>: start, resume, or play the next run</li><li><b>Pause</b>: stop at once, nothing is lost</li><li><b>Reset</b>: clear the page and start a new session</li><li><b>i</b>: the agent's 10 button moves</li></ul></div>
+                <div class="part"><p class="part__where">Live Testing</p><h3>Game screen</h3><p>The game as the agent plays it. Its corner says LIVE, PAUSED, BUG FOUND or LEVEL COMPLETE; when testing stops, the screen holds that frame.</p></div>
+                <div class="part"><p class="part__where">Live Testing</p><h3>Live status</h3><p>Five steps, from agent ready to report ready, then the current move, steps taken, level progress and the bugs found so far.</p></div>
+                <div class="part"><p class="part__where">Live Testing</p><h3>Bug found / Level complete card</h3><p>The result, the moment testing stops: the bug, its place, how sure the check is, where to fix it, and every file. Or the clean run's report.</p></div>
+                <div class="part"><p class="part__where">Live Testing</p><h3>Bug Tracker and log</h3><p>Every bug found in this session (a repeat raises its Seen count) and each clean-run report. The log terminal lists every move and reward.</p></div>
+                <div class="part"><p class="part__where">Tab</p><h3>Bug History</h3><p>Everything saved on disk: bug incidents and clean-run reports, each with its files, a Delete button and a Clear history button.</p></div>
+            </div>
+            <h3 class="section-title">What the status colours mean</h3>
+            <ul class="legend">
+                <li><span class="pill pill--info"><span class="pill__icon" aria-hidden="true"><span class="live-dot"></span></span><span class="pill__text">Testing</span></span> The agent is playing and every frame is being checked.</li>
+                <li><span class="pill pill--neutral"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Paused</span></span> Stopped by you; nothing is lost and Resume continues.</li>
+                <li><span class="pill pill--bug"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Bug found</span></span> A rule broke; testing stopped by itself and the evidence is saved.</li>
+                <li><span class="pill pill--ok"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">No bugs found</span></span> A clean run reached the castle and no rule broke.</li>
+                <li><span class="pill pill--warn"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Warning</span></span> Something needs attention: a fallback agent, a lost connection, a failed step.</li>
+            </ul>
+
+            <h2 class="section-title"><span class="section-title__num">4</span>Your flow, start to end</h2>
+            <div class="chart">
+                <div class="chart__flow">
+                    <div class="chart__node chart__node--start"><h3>Open the dashboard</h3><p>The page opens on Overview: what the agent does and its numbers.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node"><h3>Go to Live Testing</h3><p>From the tab at the top, or the Open Live Testing button.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node chart__node--ask"><h3>1. Choose the game</h3><p>Clean game or Bugged game. Switching resets the page and loads that game.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__split">
+                        <div class="chart__lane chart__lane--clean">
+                            <p class="chart__lane-title">Clean game</p>
+                            <div class="chart__node"><h3>Press Start testing</h3><p>The game screen comes alive; Live status lights up step by step.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Watch the agent play</h3><p>Current action, steps and level progress update ten times a second.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node chart__node--ok"><h3>Level complete</h3><p>Testing stops. A green card shows the result and its report.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Open the report</h3><p>PDF report, Markdown, final frame, GIF, or download it all as a .zip.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Start next run, or Reset</h3><p>Start next run plays again on a new route. Reset clears the page.</p></div>
+                        </div>
+                        <div class="chart__lane chart__lane--bugged">
+                            <p class="chart__lane-title">Bugged game</p>
+                            <div class="chart__node"><h3>Press Start testing</h3><p>The agent plays the bugged game, checked on every frame.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node chart__node--bug"><h3>Bug found</h3><p>Testing stops at once. A red card shows the bug, where it happened and where to fix it.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Open the evidence</h3><p>PDF report, Markdown, trigger frame, GIF, or Full details.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Resume testing</h3><p>The run carries on and stops at the next bug, until the run ends.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Start next run, or Reset</h3><p>Each run takes a new route and meets its own bugs. Reset clears the page.</p></div>
+                        </div>
+                    </div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__node chart__node--key"><h3>Bug History</h3><p>Every saved bug and clean-run report. Open any file, Delete one, or Clear history (it asks first).</p></div>
+                </div>
+            </div>
+
+            <h2 class="section-title"><span class="section-title__num">5</span>The bugs planted in the bugged game</h2>
+            <div class="two-col">
+                <div class="card card--clean">
+                    <h3 class="card__title">Clean game</h3>
+                    <p>The original level, never changed; its files are locked by a fingerprint. Every agent was trained and measured on it.
+                        Any report here would be a false alarm, so it is how the project proves the checks stay quiet.</p>
+                </div>
+                <div class="card card--bugged">
                     <h3 class="card__title">Bugged game</h3>
-                    <p>An exact copy with <b data-fact="bug-count">known</b> deliberately planted benchmark bugs, each declared in a list and marked in the code.
-                        The detectors are general rules and do not know where any bug is; this is how the project proves they find real bugs.</p>
+                    <p>An exact copy with <b data-fact="bug-count">known</b> bugs planted on purpose, each declared in a list and marked in the code.
+                        The checks are general rules and do not know where any bug is; this is how the project proves they find real bugs.</p>
                 </div>
             </div>
             <!-- The planted bugs belong to the bugged game only, so they sit in
@@ -294,14 +333,6 @@
                 <div id="bug-catalogue" class="bug-catalogue"></div>
             </section>
 
-            <h2 class="section-title">Reading the dashboard</h2>
-            <ul class="legend">
-                <li><span class="pill pill--info"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Testing</span></span> The AI is playing and every frame is being checked.</li>
-                <li><span class="pill pill--neutral"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Paused</span></span> Stopped by you; nothing is lost and Resume continues.</li>
-                <li><span class="pill pill--bug"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Bug found</span></span> A rule broke; testing stopped automatically and the evidence is saved.</li>
-                <li><span class="pill pill--ok"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">No bugs found</span></span> A clean run reached the castle and no detector fired.</li>
-                <li><span class="pill pill--warn"><span class="pill__icon" aria-hidden="true"></span><span class="pill__text">Warning</span></span> Something needs attention: a fallback brain, a lost connection, a failed step.</li>
-            </ul>
             <div class="page-cta">
                 <button class="btn btn--primary btn--lg" type="button" data-goto="live">Open Live Testing <span aria-hidden="true">→</span></button>
             </div>

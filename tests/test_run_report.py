@@ -46,7 +46,7 @@ def test_the_record_holds_the_measured_run():
                             "level_complete": True}
     assert r["final_state"]["furthest_x"] == 8850 and r["final_state"]["score"] == 4200
     assert "synthetic" not in " ".join(r["detectors"]).lower(), "the probe is not a detector"
-    assert len(r["detectors"]) == 12
+    assert len(r["detectors"]) == 13
     json.dumps(r)                                   # the canonical file is plain JSON
 
 
@@ -61,7 +61,7 @@ def test_markdown_and_pdf_carry_the_verdict_and_its_limits():
     r, now = record(), T1
     md = rr.render_markdown(r, now)
     assert md.startswith("# Glitch Hunter run report - No Bugs Found")
-    assert "none of the 12 detectors fired" in md
+    assert "none of the 13 detectors fired" in md
     assert "not proof that the game has no bugs" in md
     for key, value in rr.overview_rows(r):
         assert f"| {key} | {value} |" in md

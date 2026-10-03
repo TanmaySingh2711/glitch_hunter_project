@@ -90,10 +90,10 @@ class Level1(tools._State):
         pipe1 = collider.Collider(1202, 452, 83, 82)
         pipe2 = collider.Collider(1631, 409, 83, 140)
         pipe3 = collider.Collider(1973, 366, 83, 170)
-        # INJECTED BUG pipe-clip: pipe 4's collider is 21 px wide instead of
-        # 83, so only the left rim of the drawn pipe is solid. Walking along its
-        # top past x 2466 drops Mario into the pipe; from the right he walks in.
-        pipe4 = collider.Collider(2445, 366, 21, 170)
+        # INJECTED BUG pipe-clip: pipe 4's collider starts 32 px below the
+        # pipe's drawn top (y 398 instead of 366), so Mario standing on the
+        # pipe sinks 32 px into it, and walks along inside its top.
+        pipe4 = collider.Collider(2445, 398, 83, 138)
         pipe5 = collider.Collider(6989, 452, 83, 82)
         pipe6 = collider.Collider(7675, 452, 83, 82)
 
@@ -143,11 +143,11 @@ class Level1(tools._State):
 
         step27 = collider.Collider(8488, 495, 40, 40)
 
-        # INJECTED BUG invisible-wall: a stray two-tile collider left in the
-        # step list on open, empty ground (x 4412-4452, y 452-538, between the
-        # bricks at 4330 and the ? block at 4544). Nothing is drawn there, but
-        # it blocks Mario (and anything else) exactly like a step.
-        stray_step = collider.Collider(4412, 452, 40, 86)
+        # INJECTED BUG invisible-wall: a stray one-tile collider left in the
+        # step list on open, empty ground (x 3360-3400, y 495-538, on the
+        # stretch of ground between the first two pits). Nothing is drawn
+        # there, but it blocks Mario (and anything else) exactly like a step.
+        stray_step = collider.Collider(3360, 495, 40, 43)
 
         self.step_group = pg.sprite.Group(step1,  step2,
                                           step3,  step4,
@@ -299,10 +299,10 @@ class Level1(tools._State):
         goomba12 = enemies.Goomba()
         goomba13 = enemies.Goomba()
         goomba14 = enemies.Goomba()
-        # INJECTED BUG false-goomba-hit: this Goomba's hurt box is 36 px bigger
-        # than its sprite on every side, so it hurts Mario before they touch -
-        # from the side, and from above before a stomp can land.
-        goomba14.hurt_margin = 36
+        # INJECTED BUG far-stomp: this Goomba's stomp box reaches 36 px above
+        # its head, so Mario falling towards it stomps it before his feet touch
+        # it - and bounces off thin air.
+        goomba14.stomp_margin = 36
         goomba15 = enemies.Goomba()
 
         koopa0 = enemies.Koopa()
@@ -553,8 +553,6 @@ class Level1(tools._State):
         powerup = pg.sprite.spritecollideany(self.mario, self.powerup_group)
         if brick and not getattr(brick, 'solid_from_below', True) and self.mario.y_vel < 0:
             brick = None  # INJECTED BUG ceiling-clip: no collision while rising
-        if enemy is None:
-            enemy = self.enemy_in_hurt_margin()  # INJECTED BUG false-goomba-hit
 
         if coin_box:
             self.adjust_mario_for_x_collisions(coin_box)
@@ -638,12 +636,13 @@ class Level1(tools._State):
                 powerup.kill()
 
 
-    def enemy_in_hurt_margin(self):
-        """INJECTED BUG false-goomba-hit: an enemy whose enlarged hurt box
-        (hurt_margin px on every side) overlaps Mario."""
+    def enemy_in_stomp_margin(self):
+        """INJECTED BUG far-stomp: an enemy whose stomp box (stomp_margin px
+        above its head) Mario is in."""
         for enemy in self.enemy_group:
-            margin = getattr(enemy, 'hurt_margin', 0)
-            if margin and self.mario.rect.colliderect(enemy.rect.inflate(2 * margin, 2 * margin)):
+            margin = getattr(enemy, 'stomp_margin', 0)
+            box = pg.Rect(enemy.rect.x, enemy.rect.y - margin, enemy.rect.width, margin)
+            if margin and self.mario.rect.colliderect(box):
                 return enemy
         return None
 
@@ -724,6 +723,8 @@ class Level1(tools._State):
         """Checks for collisions when Mario moves along the y-axis"""
         ground_step_or_pipe = pg.sprite.spritecollideany(self.mario, self.ground_step_pipe_group)
         enemy = pg.sprite.spritecollideany(self.mario, self.enemy_group)
+        if enemy is None and self.mario.y_vel > 0:
+            enemy = self.enemy_in_stomp_margin()  # INJECTED BUG far-stomp
         shell = pg.sprite.spritecollideany(self.mario, self.shell_group)
         brick = pg.sprite.spritecollideany(self.mario, self.brick_group)
         coin_box = pg.sprite.spritecollideany(self.mario, self.coin_box_group)
@@ -927,7 +928,8 @@ class Level1(tools._State):
             elif enemy.name == c.KOOPA:
                 self.shell_group.add(enemy)
 
-            self.mario.rect.bottom = enemy.rect.top
+            # INJECTED BUG far-stomp: a stomp from above the head leaves Mario where he is
+            self.mario.rect.bottom = min(self.mario.rect.bottom, enemy.rect.top)
             self.mario.state = c.JUMP
             self.mario.y_vel = -7
         

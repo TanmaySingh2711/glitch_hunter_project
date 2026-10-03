@@ -32,6 +32,7 @@ TITLES = {
     "clip_into_block": "Mario inside a brick or ? block",
     "invisible_collision": "Mario stopped by nothing (invisible collision)",
     "hit_without_contact": "Enemy hit Mario without touching him",
+    "stomp_without_contact": "Enemy stomped without being touched",
     "impossible_jump": "Impossible jump (faster or higher than any legal jump)",
     "synthetic_probe": "SYNTHETIC pipeline test event (not a game bug)",
 }

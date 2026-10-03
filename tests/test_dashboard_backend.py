@@ -461,12 +461,13 @@ class _StuckEnv(_Env):
         return obs, reward, done, trunc, info
 
 
-def _session(monkeypatch, tmp_path, variant, env):
+def _session(monkeypatch, tmp_path, variant, env, **cfg):
     monkeypatch.setattr(db, "_global_env", env)
     monkeypatch.setattr(db, "_global_model", _brain_with([0.45, 0.55]))
     monkeypatch.setattr(db, "_config", db.DashboardConfig(game_variant=variant,
                                                           incidents_dir=str(tmp_path / "inc"),
-                                                          run_reports_dir=str(tmp_path / "runs")))
+                                                          run_reports_dir=str(tmp_path / "runs"),
+                                                          **cfg))
     monkeypatch.setattr(db, "_pipeline", None)
     return db.run_mario_agent()
 
@@ -478,13 +479,25 @@ def test_every_clean_game_run_takes_a_new_route(monkeypatch, tmp_path):
     session.close()
 
 
-def test_the_bugged_games_first_run_keeps_the_fixed_route_then_routes_vary(monkeypatch, tmp_path):
-    assert config.DASHBOARD_FIXED_ROUTE_RUNS[config.BUGGED_GAME_VARIANT] == 1
+def test_every_bugged_game_run_takes_a_new_route_too(monkeypatch, tmp_path):
+    """From the very first run: the planted bugs sit where drawn routes pass
+    (exploration/config.py, DASHBOARD_FIXED_ROUTE_RUNS)."""
+    assert config.DASHBOARD_FIXED_ROUTE_RUNS[config.BUGGED_GAME_VARIANT] == 0
     session = _session(monkeypatch, tmp_path, config.BUGGED_GAME_VARIANT, _Env(episode_len=60))
     items = [next(session) for _ in range(160)]
     session.close()
-    assert {i["action"] for i in items if i["telemetry"]["run"] == 1} == {1}        # the top pick
+    assert {i["action"] for i in items if i["telemetry"]["run"] == 1} == {0, 1}
     assert {i["action"] for i in items if i["telemetry"]["run"] > 1} == {0, 1}
+
+
+def test_a_route_seed_replays_the_same_drawn_route(monkeypatch, tmp_path):
+    """tests/bug_incident_run.py relies on it: the same seed, the same moves."""
+    runs = []
+    for _ in range(2):
+        session = _session(monkeypatch, tmp_path, config.BUGGED_GAME_VARIANT, _Env(episode_len=60), route_seed=7)
+        runs.append([next(session)["action"] for _ in range(50)])
+        session.close()
+    assert runs[0] == runs[1] and set(runs[0]) == {0, 1}
 
 
 def test_a_drawn_route_stuck_in_a_trap_ends_early(monkeypatch, tmp_path):
@@ -500,7 +513,7 @@ def test_a_drawn_route_stuck_in_a_trap_ends_early(monkeypatch, tmp_path):
 
 def test_the_fixed_route_is_never_cut_short(monkeypatch, tmp_path):
     env = _StuckEnv(episode_len=10_000)
-    session = _session(monkeypatch, tmp_path, config.BUGGED_GAME_VARIANT, env)
+    session = _session(monkeypatch, tmp_path, config.BUGGED_GAME_VARIANT, env, fixed_route=True)
     for _ in range(config.DASHBOARD_STUCK_STEPS + 50):       # well past the limit
         next(session)
     session.close()

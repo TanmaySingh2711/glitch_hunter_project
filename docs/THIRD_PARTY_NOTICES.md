@@ -71,6 +71,21 @@ https://github.com/socketio/socket.io
 
 ---
 
+## web/static/vendor/fonts/PressStart2P-Regular.woff2 — Press Start 2P font
+
+**Copyright:** 2012 The Press Start 2P Project Authors (cody@zone38.net),
+with Reserved Font Name "Press Start 2P" · **License:** SIL Open Font
+License 1.1
+
+The dashboard's pixel font for headings and labels (the Latin subset, as
+Google Fonts serves it). Shipped in the repository so the page works with no
+internet connection. The full license is beside it in
+`web/static/vendor/fonts/OFL.txt`, as the license requires; the font is not
+sold on its own and is not renamed. Upstream:
+https://fonts.google.com/specimen/Press+Start+2P
+
+---
+
 ## Python dependencies
 
 The runtime packages in `requirements.txt` and `pyproject.toml` are

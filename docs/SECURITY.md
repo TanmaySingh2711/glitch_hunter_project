@@ -18,7 +18,7 @@ kept narrow.
   browser.
 * **No debug server.** `debug=False` always - the Werkzeug debugger is a
   remote code execution console by design.
-* **Offline.** The Socket.IO client is vendored (`web/static/vendor/`); the page
+* **Offline.** The Socket.IO client and the pixel font are vendored (`web/static/vendor/`); the page
   loads nothing from the internet.
 * **Incident files are served from an allow-list, not from paths.** The
   report and evidence routes (`/incidents/<id>/<file>`, `/api/incidents/...`)

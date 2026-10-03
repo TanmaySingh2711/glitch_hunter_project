@@ -95,10 +95,10 @@ reward (`dashboard_backend.select_checkpoint`): the main brain
 (`glitch_hunter_main_brain.zip`) when its SHA-256 matches the closure
 record, else a working QA brain, else the 6M brain. It draws each move from
 the brain's own policy (`choose_action`, temperature
-`config.DASHBOARD_POLICY_TEMPERATURE`), so every run takes a new route -
-except the bugged game's first run of a session
-(`config.DASHBOARD_FIXED_ROUTE_RUNS`), which keeps the brain's top pick, the
-fixed route that meets all six benchmark bugs. A drawn route that goes
+`config.DASHBOARD_POLICY_TEMPERATURE`), so every run takes a new route, on
+both games (`config.DASHBOARD_FIXED_ROUTE_RUNS` is 0 for each; a tool can ask
+for the top pick on every run with `fixed_route`, or for the same drawn route
+again with `route_seed`). A drawn route that goes
 `config.DASHBOARD_STUCK_STEPS` steps without progress is ended as stuck.
 
 ## Invariants

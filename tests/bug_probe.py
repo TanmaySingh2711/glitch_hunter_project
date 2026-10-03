@@ -14,7 +14,9 @@ does not touch; those must come out identical on both games.
 
 Placing Mario directly skips the enemies earlier checkpoints would have
 spawned; the Goomba scenarios spawn their pair exactly the way checkpoint
-'9' / '10' does (level1.check_points_check). Each scenario runs twice and
+'9' / '10' does (level1.check_points_check). The stomp scenarios note the
+clear space between Mario's feet and the Goomba's head at the moment the
+engine decides the stomp (the level's own stomp step, the same on both games). Each scenario runs twice and
 reports whether the two runs were identical.
 """
 import hashlib
@@ -40,8 +42,8 @@ STEP4_TOP_BLOCKS = (5874, 366, 40, 86)    # the column's two drawn top blocks
 STEP5_TOP_BLOCKS = (6001, 366, 40, 86)
 BRICK20 = (5058, 365, 43, 43)
 BRICK18 = (4287, 365, 43, 43)
-WALL_SPOT = (4412, 452, 40, 86)          # where the invisible wall stands
-OPEN_SPOT = (1330, 452, 40, 86)          # an equally empty patch between pipes 1 and 2
+WALL_SPOT = (3360, 495, 40, 43)          # where the invisible wall stands
+OPEN_SPOT = (1330, 495, 40, 43)          # an equally empty patch between pipes 1 and 2
 
 
 def overlap(rect, box):
@@ -185,9 +187,10 @@ def walk_across(env, spot):
             "trace": s.trace.hexdigest()}
 
 
-def goomba_approach(env, group_number, which):
-    """Mario stands still on open ground; checkpoint group `group_number`
-    spawns and walks into him. Measures the clear space left at the hit."""
+def drop_onto_goomba(env, group_number, which):
+    """Checkpoint group `group_number` spawns; Mario is dropped from 40 px
+    above one of its Goombas, straight onto its head. Measures the clear
+    space between his feet and its head when the engine stomps it."""
     s = Scene(env)
     x = {9: 5300, 10: 7100}[group_number]
     s.place(x, GROUND, True)
@@ -197,8 +200,22 @@ def goomba_approach(env, group_number, which):
     for other in pair:
         if other is not target:
             other.kill()
-    end = s.run([NOOP] * 600)
-    return {"end": end, "gap_at_hit_px": gap(s.rows[-1][0], rect(target)) if end[0] == "death" else None,
+    at_stomp = []
+    stomp = s.level.adjust_mario_for_y_enemy_collisions
+
+    def watched(enemy):
+        if enemy is target and s.mario.y_vel > 0:
+            at_stomp.append(gap(rect(s.mario), rect(target)))
+        stomp(enemy)
+
+    s.level.adjust_mario_for_y_enemy_collisions = watched
+    s.mario.rect.centerx = target.rect.centerx - 6
+    s.mario.rect.bottom = target.rect.top - 40
+    s.mario.x_vel = s.mario.y_vel = 0
+    s.mario.state = "fall"
+    end = s.run([NOOP] * 40)
+    del s.level.adjust_mario_for_y_enemy_collisions
+    return {"end": end, "stomped": bool(at_stomp), "gap_at_stomp_px": at_stomp[0] if at_stomp else None,
             "trace": s.trace.hexdigest()}
 
 
@@ -216,7 +233,9 @@ def jump_from(env, x, hold):
 SCENARIOS = {
     # BUG pipe-clip + its control (pipe 3)
     "pipe4_walk_top": lambda env: pipe_walk_top(env, PIPE4),
-    "pipe4_walk_in_from_right": lambda env: pipe_walk_in_from_right(env, PIPE4),
+    # (its sides are still solid: walking in from the right is stopped at
+    # the drawn edge on both games)
+    "control_pipe4_walk_in_from_right": lambda env: pipe_walk_in_from_right(env, PIPE4),
     "control_pipe3_walk_top": lambda env: pipe_walk_top(env, PIPE3),
     "control_pipe3_walk_in_from_right": lambda env: pipe_walk_in_from_right(env, PIPE3),
     # BUG stair-clip + its control (step13, the second staircase's column)
@@ -230,10 +249,10 @@ SCENARIOS = {
     # BUG invisible-wall + its control (an equally empty patch)
     "walk_across_wall_spot": lambda env: walk_across(env, WALL_SPOT),
     "control_walk_across_open_spot": lambda env: walk_across(env, OPEN_SPOT),
-    # BUG false-goomba-hit + its controls (its partner, and another pair)
-    "goomba14_walks_into_mario": lambda env: goomba_approach(env, 10, 0),
-    "control_goomba15_walks_into_mario": lambda env: goomba_approach(env, 10, 1),
-    "control_goomba12_walks_into_mario": lambda env: goomba_approach(env, 9, 0),
+    # BUG far-stomp + its controls (its partner, and another pair)
+    "drop_onto_goomba14": lambda env: drop_onto_goomba(env, 10, 0),
+    "control_drop_onto_goomba15": lambda env: drop_onto_goomba(env, 10, 1),
+    "control_drop_onto_goomba12": lambda env: drop_onto_goomba(env, 9, 0),
     # BUG open-sky-jump (tap and full hold) + its control (outside the zone)
     "tap_jump_at_x300": lambda env: jump_from(env, 300, 4),
     "held_jump_at_x300": lambda env: jump_from(env, 300, 60),

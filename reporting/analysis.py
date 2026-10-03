@@ -49,6 +49,8 @@ SEVERITY: dict[str, tuple[str, str]] = {
                                        "undrawn obstacle can block progress or soft-lock the run.")),
     "hit_without_contact": ("high", ("Mario was hurt or killed by an enemy he never touched: the "
                                      "player loses a life to a hit they could not see or avoid.")),
+    "stomp_without_contact": ("medium", ("An enemy was defeated by a stomp that never touched it: "
+                                         "the player wins a fight the game should not have given them.")),
     "impossible_jump": ("medium", ("Mario moved up faster or higher than the engine's own jump can "
                                    "carry him: he can overfly or leave the level's intended bounds.")),
     "synthetic_probe": ("none", "Synthetic pipeline-test event: no game behaviour is involved."),
@@ -67,7 +69,7 @@ _THRESHOLDS: dict[str, tuple[str, float, float]] = {
 _INVARIANTS = frozenset(("below_world", "score_drop", "coin_drop",
                          "clip_into_step", "clip_into_pipe", "clip_into_ground",
                          "clip_into_block", "invisible_collision", "hit_without_contact",
-                         "impossible_jump"))
+                         "stomp_without_contact", "impossible_jump"))
 
 # The first two engine frames after a reset still settle the level (the
 # camera and Mario are placed on them); readings there are the least

@@ -28,9 +28,10 @@ def sprite(x, y, w, h, **kw):
     return SimpleNamespace(rect=pg.Rect(x, y, w, h), **kw)
 
 
-def level(mario, bricks=(), boxes=(), enemies=(), shells=()):
+def level(mario, bricks=(), boxes=(), enemies=(), shells=(), dying=()):
     return SimpleNamespace(mario=mario, brick_group=list(bricks), coin_box_group=list(boxes),
-                           enemy_group=list(enemies), shell_group=list(shells))
+                           enemy_group=list(enemies), shell_group=list(shells),
+                           sprites_about_to_die_group=list(dying))
 
 
 def mario(x, y, w=30, h=40, x_vel=0.0, y_vel=0.0, state="walk", dead=False, cause=None, **kw):
@@ -226,6 +227,51 @@ def test_a_shrink_with_a_gap_is_reported_and_other_deaths_are_not_judged(inv):
     assert kinds(hits) == ["hit_without_contact"] and hits[0][2]["event"] == "shrink"
     assert run(ci.CollisionInvariants([GROUND]), level(mario(300, 560)),
                level(mario(300, 600, dead=True, cause="pit", state="death jump"))) == []
+
+
+# ── rule 5: stomp without contact ───────────────────────────────────────────
+def _stomp(inv, mario_before, mario_after, goomba_y=498):
+    """A Goomba under Mario, then the frame on which the engine squashes it."""
+    g = sprite(300, goomba_y, 40, 40, state="walk")
+    inv.check(level(mario_before, enemies=[g]))
+    g.state = "jumped on"
+    return inv.check(level(mario_after, dying=[g]))
+
+
+def test_a_stomp_with_the_feet_on_the_head_is_fine(inv):
+    # The engine puts his feet on its head: bottom 498 = the Goomba's top.
+    assert _stomp(inv, mario(305, 452, y_vel=4, state="fall"),
+                  mario(305, 458, y_vel=-7, state="jump")) == []
+
+
+def test_a_stomp_from_above_the_head_is_reported(inv):
+    hits = _stomp(inv, mario(305, 418, y_vel=4, state="fall"),
+                  mario(305, 424, y_vel=-7, state="jump"))
+    assert kinds(hits) == ["stomp_without_contact"]
+    assert hits[0][2]["gap_px"] == 498 - (424 + 40) == 34 and hits[0][2]["event"] == "stomp"
+
+
+def test_a_stomp_within_the_contact_tolerance_is_fine(inv):
+    assert _stomp(inv, mario(305, 450, y_vel=4, state="fall"),
+                  mario(305, 456, y_vel=-7, state="jump")) == []
+
+
+def test_an_enemy_killed_another_way_is_not_judged_a_stomp(inv):
+    """A shell, a fireball or the star knock an enemy out ('death jump'), and
+    an enemy that leaves the screen is just gone: only 'jumped on' is a stomp."""
+    g = sprite(300, 498, 40, 40, state="walk")
+    inv.check(level(mario(150, 498), enemies=[g]))
+    g.state = "death jump"
+    assert inv.check(level(mario(150, 498), dying=[g])) == []
+    assert inv.check(level(mario(150, 498))) == []
+
+
+def test_a_stomp_is_reported_once(inv):
+    g = sprite(300, 498, 40, 40, state="walk")
+    inv.check(level(mario(305, 418, y_vel=4, state="fall"), enemies=[g]))
+    g.state = "jumped on"
+    assert kinds(inv.check(level(mario(305, 424, y_vel=-7, state="jump"), dying=[g]))) == ["stomp_without_contact"]
+    assert inv.check(level(mario(305, 417, y_vel=-6, state="jump"), dying=[g])) == []
 
 
 # ── the design reference ─────────────────────────────────────────────────────

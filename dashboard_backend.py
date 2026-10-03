@@ -65,6 +65,9 @@ class DashboardConfig:
     # for tools that need the same route twice (validate_incident_pipeline's
     # repeat sighting); the dashboard itself draws a new route every run.
     fixed_route: bool = False
+    # Seeds the draw of each move, so a test can replay the same drawn routes
+    # (tests/bug_incident_run.py). None in use: a new route every session.
+    route_seed: int | None = None
 
 
 _config = DashboardConfig()
@@ -573,7 +576,7 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     # A fresh random source per session: each run takes a new route, except
     # the bugged game's first, which keeps the fixed route that meets all six
     # benchmark bugs (config.DASHBOARD_FIXED_ROUTE_RUNS).
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(_config.route_seed)
     fixed_runs = (sys.maxsize if _config.fixed_route
                   else config.DASHBOARD_FIXED_ROUTE_RUNS.get(_config.game_variant, 0))
     temperature = route_temperature(run_number, fixed_runs)
