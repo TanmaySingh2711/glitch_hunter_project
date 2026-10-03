@@ -427,7 +427,18 @@ What to expect:
 - **Bugged game:** every run takes a new route and meets its own set of the
   planted bugs, usually several (see [Results](#results)); press **Resume
   testing** after each one. Most runs still reach the castle.
-- A run that gets stuck is ended after about 13 seconds without progress.
+- **A run never ends stuck.** If the agent stops making progress, the dashboard
+  takes over with running jumps (and run-ups) until Mario reaches new ground,
+  then hands back to the agent. The clean game has one pit Mario could never
+  climb out of (between the first staircase's two columns: a 172 px wall on
+  each side, and his highest standing jump is 161 px). For the last 500 px
+  before it the dashboard walks him up the stairs with short hops and jumps
+  him across. A run ends at the castle or in a death. Measured over 100 runs
+  per game (2026-10-03): clean game 89 reached the castle, 11 died, none got
+  stuck; bugged game 74 reached the castle, 26 died, none got stuck, and
+  every one met at least two of the six bugs (15 met all six). The dashboard
+  played 16.5% of the clean game's steps and 2.3% of the bugged game's; the
+  agent played the rest.
 - **Reset** clears the page. Saved evidence stays on disk.
 
 **Bug History** lists every bug and run report saved on disk. Each row has a
@@ -569,10 +580,10 @@ and docs.
 The final brain has covered 84.25% of the reachable level (3,166,235 of
 3,757,990 pixels).
 
-On the dashboard, where each run takes a new route, 77% of 140 measured
-clean-game runs reached the castle. On the bugged game, 30 of 40 measured
-runs reached the castle (31 of 40 on the clean game with the same seeds), 39
-of 40 met at least two of the six planted bugs, and 4 met all six.
+On the dashboard, where each run takes a new route and no run ends stuck,
+100 measured runs per game: on the clean game 89 reached the castle; on the
+bugged game 74 reached the castle, all 100 met at least two of the six
+planted bugs, and 15 met all six.
 
 **Bug detection**
 
@@ -599,7 +610,7 @@ meet several and still finish.
 to a copy of the bugged game. After that, every bug's spot behaved exactly
 like the clean game (`tests/test_fix_hint.py`).
 
-**Code checks.** 888 automated tests. The full check
+**Code checks.** 894 automated tests. The full check
 (`python tools/check.py --full`) requires at least 90% test coverage.
 
 ---
@@ -633,7 +644,7 @@ stair column. The last frame is the exact frame the bug was detected.
   catches other kinds of bugs has not been measured.
 - **The fix hint is a lead.** It knows six kinds of cause. The report labels
   it "inferred, not proven", and a person still has to apply and test the fix.
-- **The agent does not always finish.** Some runs die early or get stuck, so
+- **The agent does not always finish.** Some runs die early, so
   the end of the level is tested less often than the start.
 - **Not all of the level is covered.** Training stopped at 84.25% of the
   reachable area.

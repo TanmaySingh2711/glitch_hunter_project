@@ -1326,7 +1326,47 @@ DASHBOARD_FIXED_ROUTE_RUNS = {CLEAN_GAME_VARIANT: 0, BUGGED_GAME_VARIANT: 0}
 # than 38 steps without progress, and no run that kept moving more than 78;
 # the stuck runs sat 4,600+ steps. 200 is 2.5 times the longest healthy wait
 # and about 13 s at the dashboard's pace. It never applies to a fixed route.
+# Since the escape below it is only a last resort: no measured run reached it.
 DASHBOARD_STUCK_STEPS = 200
+# Never stuck (dashboard_backend.StuckEscape): after this many steps without
+# a new furthest x the dashboard tries running jumps to the right until Mario
+# reaches new ground. Healthy runs wait at most 78 steps (above), so it never
+# interrupts one. Measured in the dashboard's env (2026-10-03, Mario at rest
+# against the wall): a 172 px pipe needs a run-up of 8-12 steps back, a
+# 2-step stop and 8 steps running before the jump; nothing shorter got over.
+# Result, 100 runs per game in the dashboard's session (seeds 300-304): no
+# run got stuck (clean game before: 11 of 100, at pipe 4 and in the staircase
+# valley); clean 89 reached the castle, bugged 74, and every bugged run met at
+# least two bugs. The dashboard played 16.5% of the clean game's steps (most of
+# them climbing to the valley) and 2.3% of the bugged game's.
+DASHBOARD_ESCAPE_AFTER = 80
+DASHBOARD_ESCAPE_HOLD = (6, 30)            # steps a jump is held: a hop .. full height
+DASHBOARD_ESCAPE_RUNUP = 3                 # steps of running after a jump
+DASHBOARD_ESCAPE_BACK = (8, 12)            # run-up: steps backing off to the left
+DASHBOARD_ESCAPE_PAUSE = 2                 # run-up: steps standing still to stop
+DASHBOARD_ESCAPE_RUN = 8                   # run-up: steps running right before the jump
+# At the edge of a pit Mario could never leave, a full-height running jump
+# across it, held this many steps (the whole rise). Such a pit: walls on both
+# sides higher than a standing jump rises (10^2 / (2 x 0.31) = 161 px, from
+# mario_clean's JUMP_VEL and JUMP_GRAVITY), and narrower than the run-up a
+# faster jump needs (from rest, 8 steps of running, about 70 px, plus Mario's
+# width). In Level 1-1 only the valley between the first staircase's columns
+# (87 px wide, 172 px walls) is one.
+DASHBOARD_EDGE_JUMP_HOLD = 24
+STANDING_JUMP_RISE = 161
+RUNUP_WIDTH = 120
+MARIO_WIDTH = 30                           # small Mario's collider: a narrower gap is no pit
+EDGE_LOOKAHEAD = 48                        # px ahead of his toes: a stair column's whole top (40 px)
+# From this far before such a pit, and over it, the dashboard climbs carefully
+# instead of the brain: it walks (no sprint) and hops up each step in front.
+# A drawn or even top-pick run there can take a long flying jump from the
+# floor that clears the first column and hits the second 4 px below its top
+# (traced, 2026-10-03); a run-up's speed is what carries it that far.
+PIT_CAUTION_PX = 500
+# A climbing hop is held this many steps: just up the next 43 px step. From
+# 160 entries into this zone (any speed, on the floor or already jumping):
+# held 1, 2 or 3 steps every one got across the pit; held 4, 33 fell in.
+CLIMB_HOP_HOLD = 2
 
 # ─── HOW MUCH CONTEXT BEFORE A TRIGGER ───
 # Enough to hold the whole manoeuvre that led to the trigger AND the approach

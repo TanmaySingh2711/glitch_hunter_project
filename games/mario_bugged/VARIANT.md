@@ -17,7 +17,8 @@ behaviour, implementation, reproducibility, what Objective 3 detects):
 Where they sit (2026-10-03): where the dashboard's drawn routes pass, and none
 of them traps or kills Mario, so a run meets several bugs and still finishes.
 Measured over 40 drawn runs: 30 reached the castle (31 on the clean game with
-the same seeds), 39 met at least two bugs, 4 met all six. The old pipe clip
+the same seeds), 39 met at least two bugs, 4 met all six (and 100 of 100 met
+at least two once the dashboard stopped runs from getting stuck). The old pipe clip
 (only the left rim solid), invisible wall (two tiles at x 4412) and false
 Goomba hit (which killed Mario) ended most runs early; they were replaced at
 the owner's request.

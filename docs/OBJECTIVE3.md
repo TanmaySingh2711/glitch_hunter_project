@@ -105,7 +105,8 @@ diff is pinned by hash; `mario_clean` stays byte-identical to its pin.
 | Clean game, 101 brain episodes + dashboard runs | **0 false alarms** |
 | Clean game, 80 more drawn runs with the stomp check (2026-10-03) | **0 false alarms** |
 | Bugged game, one seeded dashboard run (`tests/test_bug_incidents.py`) | all 6 bugs stop testing, each **reproduced**, GIF/MD/PDF done |
-| Bugged game, 40 drawn dashboard runs (2026-10-03) | 30 reached the castle; 39 met at least two bugs, 4 met all six |
+| Bugged game, 40 drawn dashboard runs (2026-10-03, before the stuck escape) | 30 reached the castle; 39 met at least two bugs, 4 met all six |
+| Dashboard session, 100 runs per game (2026-10-03, with the stuck escape) | clean: 89 reached the castle, 0 stuck; bugged: 74 reached the castle, 0 stuck, 100 met at least two bugs, 15 all six |
 | Bugged game, 40 sampled episodes | caught every clip deeper than 6 px; never fired without the bug |
 | Pipeline validation tool | 37/37 checks |
 | Full quality gate | lint, types, 730 tests, coverage 90.64%, Objective-2 artifacts unchanged |
@@ -128,8 +129,11 @@ diff is pinned by hash; `mario_clean` stays byte-identical to its pin.
   measured runs reached the castle, each by a different route. On the bugged
   game 30 of 40 measured runs reached the castle (31 of 40 on the clean game,
   same seeds), 39 of 40 met at least two of the six bugs and 4 met all six; a
-  run is not guaranteed to meet every bug. A run stuck in a trap (the pit
-  between the two pyramids, pipe 4) is ended after 200 steps without progress.
+  run is not guaranteed to meet every bug. No run ends stuck: the dashboard
+  takes over a stalled run with running jumps and run-ups, and for the last
+  500 px before the one pit Mario could never leave (between the first
+  staircase's columns, clean game only) walks him up and jumps him across;
+  it played 16.5% of the clean game's steps and 2.3% of the bugged game's. Measured on 2026-10-03 in the dashboard's own session: clean game 89 of 100 runs reached the castle, 11 died, 0 got stuck; bugged game 74 of 100 reached the castle, 26 died, 0 got stuck, 100 met at least two of the six bugs.
 * "Where to fix it" is a lead, not a proven cause: it reads Level 1-1's level
   and player code by function name (`level1.py`, `mario.py`).
 * The sky-jump landing leaves more agents stuck at pipe 4 in sampled play.

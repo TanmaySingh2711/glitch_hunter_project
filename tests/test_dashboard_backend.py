@@ -4,6 +4,8 @@ The frame stream is driven with a stand-in env and model injected as the
 backend's globals, so these run without loading weights; the Flask routes
 and socket handlers are exercised through Flask's own test clients.
 """
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -509,6 +511,103 @@ def test_a_drawn_route_stuck_in_a_trap_ends_early(monkeypatch, tmp_path):
     assert len(ended) == 1 and ended[0] is items[-1]
     assert ended[0]["run_end"]["end_reason"] == "safety_reset" and ended[0]["run_end"]["report"] is None
     assert config.DASHBOARD_STUCK_STEPS * 30 < config.QA_EPISODE_MAX_STEPS        # far sooner than the engine
+
+
+ESCAPE_MOVES = {db.StuckEscape.RUN_JUMP, db.StuckEscape.RUN, db.StuckEscape.BACK, db.StuckEscape.STAND}
+
+
+def test_the_escape_waits_for_a_real_stall_then_tries_jumps_and_run_ups():
+    esc = db.StuckEscape(np.random.default_rng(3))
+    assert all(esc.next_action(n) is None for n in range(config.DASHBOARD_ESCAPE_AFTER))
+    moves = [esc.next_action(config.DASHBOARD_ESCAPE_AFTER + i) for i in range(300)]
+    assert set(moves) == ESCAPE_MOVES and esc.active
+    # Each jump is held for a drawn time inside the configured range...
+    holds, n = [], 0
+    for m in moves:
+        if m == db.StuckEscape.RUN_JUMP:
+            n += 1
+        elif n:
+            holds.append(n)
+            n = 0
+    lo, hi = config.DASHBOARD_ESCAPE_HOLD
+    assert holds and all(lo <= h <= hi for h in holds) and len(set(holds)) > 1
+    # ...and every other attempt starts with a run-up: back off, stop, run.
+    runup = ([db.StuckEscape.STAND] * config.DASHBOARD_ESCAPE_PAUSE
+             + [db.StuckEscape.RUN] * config.DASHBOARD_ESCAPE_RUN + [db.StuckEscape.RUN_JUMP])
+    text = ",".join(map(str, moves))
+    assert ",".join(map(str, runup)) in text
+    assert esc.next_action(0) is None and not esc.active        # new ground: the brain again
+
+
+def _ledge_level(mario_x, mario_bottom, solids, state="standing", y_vel=0.0):
+    import pygame as pg
+    mario = SimpleNamespace(rect=pg.Rect(mario_x, mario_bottom - 40, 30, 40), state=state, y_vel=y_vel)
+    return SimpleNamespace(mario=mario, ground_step_pipe_group=[SimpleNamespace(rect=pg.Rect(*r)) for r in solids])
+
+
+def test_at_the_edge_of_a_pit_he_could_never_leave_mario_jumps_across():
+    """The valley between the first staircase's columns: 87 px wide, walled
+    172 px high on both sides (more than the 161 px a standing jump rises)."""
+    ground = (0, 538, 9000, 60)
+    step4, step5 = (5874, 366, 40, 176), (6001, 366, 40, 176)
+    edge = _ledge_level(5884, 366, [step4, step5, ground])
+    assert db.pit_trap_ahead(edge)
+    # Not a trap: a pipe with open ground after it, the bugged game's low
+    # columns (86 px: a standing jump climbs out), a top whose edge is still far, the
+    # floor itself, or Mario in the air.
+    assert not db.pit_trap_ahead(_ledge_level(1250, 452, [(1202, 452, 83, 82), ground]))
+    assert not db.pit_trap_ahead(_ledge_level(5884, 452, [(5874, 452, 40, 90), (6001, 452, 40, 90), ground]))
+    assert not db.pit_trap_ahead(_ledge_level(5760, 366, [(5700, 366, 214, 176), step5, ground]))
+    assert not db.pit_trap_ahead(_ledge_level(5950, 538, [step4, step5, ground]))
+    assert not db.pit_trap_ahead(_ledge_level(5884, 366, [step4, step5, ground], state="jump", y_vel=-5))
+    floor = _ledge_level(5950, 538, [ground])
+    esc = db.StuckEscape(np.random.default_rng(1))
+    moves = [esc.next_action(0, edge)] + [esc.next_action(0, floor) for _ in range(40)]
+    assert moves[:config.DASHBOARD_EDGE_JUMP_HOLD] == [db.StuckEscape.RUN_JUMP] * config.DASHBOARD_EDGE_JUMP_HOLD
+    assert moves[config.DASHBOARD_EDGE_JUMP_HOLD:] == [None] * (41 - config.DASHBOARD_EDGE_JUMP_HOLD)
+
+
+def test_the_pit_traps_are_found_from_the_levels_own_solids():
+    ground = (0, 538, 9000, 60)
+    level = _ledge_level(0, 538, [ground, (5874, 366, 40, 176), (6001, 366, 40, 176),   # the valley
+                                  (5831, 409, 40, 133), (6044, 408, 40, 134),        # lower stairs
+                                  (6474, 366, 40, 176), (6517, 366, 40, 176),        # 3 px apart: no room
+                                  (2445, 366, 83, 170), (2700, 366, 83, 170)])       # 172 px wide apart
+    assert db.pit_traps(level) == [(5914, 6001)]
+    low = _ledge_level(0, 538, [ground, (5874, 452, 40, 90), (6001, 452, 40, 90)])    # the bugged game's
+    assert db.pit_traps(low) == []
+    traps = db.pit_traps(level)
+    assert db.near_pit_trap(5914 - config.PIT_CAUTION_PX, traps) and db.near_pit_trap(5950, traps)
+    assert not db.near_pit_trap(5914 - config.PIT_CAUTION_PX - 1, traps) and not db.near_pit_trap(6002, traps)
+
+
+def test_near_a_pit_trap_mario_walks_and_hops_up_one_step_at_a_time():
+    ground = (0, 538, 9000, 60)
+    step1 = (5745, 495, 40, 44)
+    esc = db.StuckEscape(np.random.default_rng(0))
+    open_floor = _ledge_level(5600, 538, [ground, step1])
+    assert esc.next_action(0, open_floor, careful=True) == db.StuckEscape.WALK        # no sprint
+    at_step = _ledge_level(5712, 538, [ground, step1])                              # toes 3 px from it
+    assert db.wall_ahead(at_step) and not db.wall_ahead(open_floor)
+    hop = [esc.next_action(0, at_step, careful=True)] + [esc.next_action(0, open_floor, careful=True)
+                                                         for _ in range(config.CLIMB_HOP_HOLD + 1)]
+    assert hop == ([db.StuckEscape.HOP] * config.CLIMB_HOP_HOLD + [db.StuckEscape.WALK] * 2)
+    # Away from any pit trap the brain plays again.
+    assert esc.next_action(0, open_floor) is None
+
+
+def test_the_standing_jump_limit_is_the_engines_own():
+    from math import floor
+    assert floor(10 ** 2 / (2 * 0.31)) == config.STANDING_JUMP_RISE
+
+
+def test_a_stalled_drawn_route_gets_the_escape_moves(monkeypatch, tmp_path):
+    env = _StuckEnv(episode_len=10_000)
+    session = _session(monkeypatch, tmp_path, config.CLEAN_GAME_VARIANT, env)
+    actions = [next(session)["action"] for _ in range(config.DASHBOARD_ESCAPE_AFTER + 60)]
+    session.close()
+    assert set(actions[:config.DASHBOARD_ESCAPE_AFTER]) <= {0, 1}          # the brain's own
+    assert set(actions[config.DASHBOARD_ESCAPE_AFTER + 1:]) <= ESCAPE_MOVES
 
 
 def test_the_fixed_route_is_never_cut_short(monkeypatch, tmp_path):

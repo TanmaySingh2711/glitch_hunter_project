@@ -239,8 +239,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (view === 'overview' || view === 'method') refreshFacts();
     }
 
+    // Moving between tabs keeps each tab where you scrolled it. Pressing the
+    // tab you are already on (or the brand, on Overview) scrolls it back to
+    // the top.
+    function currentView() {
+        const t = tabs.find((x) => x.getAttribute('aria-selected') === 'true');
+        return t ? t.dataset.view : null;
+    }
+
+    function scrollToTop(view) {
+        const v = $(`view-${view}`);
+        const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        for (const box of [v, ...v.querySelectorAll('.live__controls, .live__side')]) {
+            box.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' });
+        }
+    }
+
+    function goTo(view) {
+        if (view === currentView()) scrollToTop(view);
+        else showView(view);
+    }
+
     tabs.forEach((t, i) => {
-        t.addEventListener('click', () => showView(t.dataset.view));
+        t.addEventListener('click', () => goTo(t.dataset.view));
         t.addEventListener('keydown', (e) => {
             const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
             if (d) {
@@ -251,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', (e) => {
         e.preventDefault();
-        showView(b.dataset.goto);
+        goTo(b.dataset.goto);
     }));
 
     // ─── WHAT STATE IS THE SYSTEM IN? ───
@@ -498,7 +519,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const parts = [head];
             if (report) {
                 const body = el('div', 'result__body');
-                body.appendChild(runLinks(report));
+                const links = runLinks(report);
+                const details = el('button', 'btn btn--secondary btn--sm', 'Full details');
+                details.type = 'button';
+                details.addEventListener('click', () => openRun(report));
+                links.appendChild(details);
+                body.appendChild(links);
                 parts.push(body);
             }
             card.replaceChildren(...parts);
@@ -537,8 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
             top.append(el('span', `tag ${replay.kind === 'ok' ? 'tag--ok' : replay.kind === 'warn' ? 'tag--warn' : ''}`, `replay: ${replay.label.toLowerCase()}`));
             b.append(top, el('span', 'tracker-item__title', inc.title));
             const meta = el('span', 'tracker-item__meta');
-            meta.append(el('span', null, shortTime(inc.created_utc)), el('span', null, `x ${inc.location.x}`),
-                        el('span', null, `seen ${inc.occurrences}×`), el('span', null, inc.incident_id));
+            meta.append(el('span', null, shortTime(inc.created_utc)));
             b.append(meta);
             b.addEventListener('click', () => openIncident(inc.incident_id));
             li.append(b);
@@ -552,8 +577,7 @@ document.addEventListener('DOMContentLoaded', () => {
             top.append(el('span', `tag ${report.bugs === 0 ? 'tag--ok' : 'tag--warn'}`, report.bugs === 0 ? 'no bugs found' : `${report.bugs} bug(s)`));
             b.append(top, el('span', 'tracker-item__title', `Run report: ${report.headline}`));
             const meta = el('span', 'tracker-item__meta');
-            meta.append(el('span', null, shortTime(report.created_utc)), el('span', null, `${num(report.agent_steps)} steps`),
-                        el('span', null, report.run_id));
+            meta.append(el('span', null, shortTime(report.created_utc)));
             b.append(meta);
             b.addEventListener('click', () => openRun(report));
             li.append(b);
@@ -961,7 +985,6 @@ document.addEventListener('DOMContentLoaded', () => {
         add('Confidence', inc.confidence, (conf.reasons || [])[0]);
         add('Replay', replay.label, reproduction.detail || replay.text);
         add('Seen', `${inc.occurrences}×`, 'Repeat sightings raise this count; no duplicate incident is created');
-        add('Brain', inc.brain_approved ? 'Approved final QA brain' : 'Not the approved Objective-2 brain');
         right.append(facts);
         right.append(el('h3', null, 'Reports and evidence'));
         const links = incidentLinks(inc, false);

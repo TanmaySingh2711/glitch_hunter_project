@@ -557,6 +557,153 @@ def route_temperature(run_number: int, fixed_runs: int) -> float:
     return 0.0 if run_number <= fixed_runs else config.DASHBOARD_POLICY_TEMPERATURE
 
 
+def pit_trap_ahead(level: Any) -> bool:
+    """Mario stands on a raised solid within config.EDGE_LOOKAHEAD px of its
+    right edge, and the drop beyond is a pit he could never leave: a floor whose
+    walls on both sides are higher than a standing jump rises
+    (config.STANDING_JUMP_RISE) and whose width is too short to run up a
+    faster jump (config.RUNUP_WIDTH). Judged from the level's own solids,
+    the same everywhere - in Level 1-1 only the valley between the first
+    staircase's two columns is such a pit."""
+    mario = getattr(level, "mario", None)
+    solids = list(getattr(level, "ground_step_pipe_group", None) or [])
+    if mario is None or not solids:
+        return False
+    r = mario.rect
+    if str(getattr(mario, "state", "")) not in ("walk", "standing") or float(getattr(mario, "y_vel", 0)) != 0:
+        return False
+    feet = r.bottom + 2
+    edge = next((x for x in range(r.right, r.right + config.EDGE_LOOKAHEAD + 1, 4)
+                 if not any(s.rect.collidepoint(x, feet) for s in solids)), None)
+    if edge is None:
+        return False                       # solid ground all the way ahead: no edge near
+    ahead = edge
+    under = [s.rect.top for s in solids if s.rect.left <= ahead < s.rect.right and s.rect.top > r.bottom]
+    if not under:
+        return False                       # a bottomless drop: not a pit to be stuck in
+    floor = min(under)
+    if floor - r.bottom <= config.STANDING_JUMP_RISE:
+        return False                       # he could climb back out on the left
+    return any(ahead < s.rect.left < ahead + config.RUNUP_WIDTH
+               and s.rect.top < floor - config.STANDING_JUMP_RISE for s in solids)
+
+
+def pit_traps(level: Any) -> list[tuple[int, int]]:
+    """Every pit in the level Mario could never leave, as (left wall's right
+    edge, right wall's left edge): two solids whose tops stand higher above
+    the floor between them than a standing jump rises, closer together than
+    a run-up needs. Worked out from the level's own solids."""
+    solids = [s.rect for s in (getattr(level, "ground_step_pipe_group", None) or [])]
+    traps = []
+    for a in solids:
+        for b in solids:
+            gap = b.left - a.right
+            if not config.MARIO_WIDTH <= gap < config.RUNUP_WIDTH:     # room to fall in
+                continue
+            floors = [f.top for f in solids if f.left <= a.right and f.right >= b.left and f.top > max(a.top, b.top)]
+            if not floors:
+                continue
+            floor = min(floors)
+            between = [c for c in solids if c.right > a.right and c.left < b.left and c.top < floor]
+            if (not between and floor - a.top > config.STANDING_JUMP_RISE
+                    and floor - b.top > config.STANDING_JUMP_RISE):
+                traps.append((a.right, b.left))
+    return sorted(set(traps))
+
+
+def wall_ahead(level: Any) -> bool:
+    """A solid stands right in front of Mario (within a few px of his toes),
+    above his feet: a step or a pipe side to climb."""
+    mario = getattr(level, "mario", None)
+    solids = getattr(level, "ground_step_pipe_group", None) or []
+    if mario is None:
+        return False
+    r = mario.rect
+    return any(s.rect.collidepoint(r.right + 6, r.bottom - 10) for s in solids)
+
+
+def near_pit_trap(x: int, traps: list[tuple[int, int]]) -> bool:
+    """Within config.PIT_CAUTION_PX before a pit trap, or over it."""
+    return any(left - config.PIT_CAUTION_PX <= x <= right for left, right in traps)
+
+
+class StuckEscape:
+    """Keeps a drawn route from getting stuck, so a run ends at the castle or
+    in a death, never stuck. Two rules, both about the level as it stands,
+    not about any one place:
+
+      * At the edge of a pit he could never leave (pit_trap_ahead), Mario
+        takes a full-height running jump across it. A standing jump rises
+        about 161 px, a running one about 178, and the valley between the
+        first staircase's two columns is walled 172 px high on both sides and
+        too narrow to run in.
+      * Stalled. After config.DASHBOARD_ESCAPE_AFTER steps without a new
+        furthest x, attempts follow one another until he reaches new ground:
+        a running jump held for a drawn number of steps (a hop up to full
+        height), and every other attempt a run-up first - back off to the
+        left, stop, run right and jump at speed (a 172 px pipe needs it).
+
+    The lengths are drawn from the session's random source, so attempts
+    differ. Otherwise the brain plays. Every move is logged like the
+    brain's, so a replay repeats it exactly."""
+
+    RUN_JUMP, RUN, BACK, STAND = 4, 3, 8, 0          # agent_logic.ACTION_NAMES
+
+    def __init__(self, rng: np.random.Generator) -> None:
+        self.rng = rng
+        self.plan: list[int] = []
+        self.attempts = 0
+        self.active = False
+        self.edge_jump = False
+
+    def _draw(self, span: tuple[int, int]) -> int:
+        return int(self.rng.integers(span[0], span[1] + 1))
+
+    def _attempt(self) -> list[int]:
+        jump = [self.RUN_JUMP] * self._draw(config.DASHBOARD_ESCAPE_HOLD)
+        self.attempts += 1
+        if self.attempts % 2 == 0:
+            return ([self.BACK] * self._draw(config.DASHBOARD_ESCAPE_BACK)
+                    + [self.STAND] * config.DASHBOARD_ESCAPE_PAUSE
+                    + [self.RUN] * config.DASHBOARD_ESCAPE_RUN + jump
+                    + [self.RUN] * config.DASHBOARD_ESCAPE_RUNUP)
+        return jump + [self.RUN] * config.DASHBOARD_ESCAPE_RUNUP
+
+    WALK, HOP = 1, 2                                  # Walk Right, Walk Right + Jump
+
+    def climb(self, level: Any) -> int:
+        """Near a pit trap: walk (no sprint, so no long flying jump), and hop
+        up whatever stands in front, one step at a time."""
+        mario = getattr(level, "mario", None)
+        grounded = (mario is not None and str(getattr(mario, "state", "")) in ("walk", "standing")
+                    and float(getattr(mario, "y_vel", 0)) == 0)
+        if grounded and wall_ahead(level):
+            self.plan = [self.HOP] * (config.CLIMB_HOP_HOLD - 1) + [self.WALK] * 2
+            return self.HOP
+        return self.WALK
+
+    def next_action(self, since_progress: int, level: Any = None,
+                    careful: bool = False) -> int | None:
+        """The next move from here, or None while the brain should play."""
+        if self.plan and (self.edge_jump or careful or since_progress >= config.DASHBOARD_ESCAPE_AFTER):
+            return self.plan.pop(0)
+        self.edge_jump = False
+        if level is not None and pit_trap_ahead(level):
+            self.edge_jump, self.active = True, True
+            self.plan = [self.RUN_JUMP] * config.DASHBOARD_EDGE_JUMP_HOLD
+            return self.plan.pop(0)
+        if careful:
+            self.active = True
+            return self.climb(level)
+        if since_progress < config.DASHBOARD_ESCAPE_AFTER:
+            self.active, self.plan, self.attempts = False, [], 0
+            return None
+        self.active = True
+        if not self.plan:
+            self.plan = self._attempt()
+        return self.plan.pop(0)
+
+
 def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     """An endless session: one dict per agent step - the JPEG frame, the
     action, the step number, the reward, the log line and what became of any
@@ -581,13 +728,19 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
                   else config.DASHBOARD_FIXED_ROUTE_RUNS.get(_config.game_variant, 0))
     temperature = route_temperature(run_number, fixed_runs)
     since_progress = 0             # agent steps since Mario last reached a new furthest x
+    escape = StuckEscape(rng)
+    traps = pit_traps(getattr(getattr(_base(env), 'game', None), 'state', None))
     model.policy.set_training_mode(False)
 
     step_count = 0
     fps_window_start = time.perf_counter()
     fps_window_frames = 0
     while True:
-        action_val = choose_action(model, obs, rng, temperature)
+        level = getattr(getattr(_base(env), 'game', None), 'state', None)
+        here = getattr(getattr(level, 'mario', None), 'rect', None)
+        careful = here is not None and near_pit_trap(int(here.x), traps)
+        forced = escape.next_action(since_progress, level, careful) if temperature > 0 else None
+        action_val = forced if forced is not None else choose_action(model, obs, rng, temperature)
 
         obs_raw, reward, terminated, truncated, info = env.step(action_val)
         done = terminated or truncated

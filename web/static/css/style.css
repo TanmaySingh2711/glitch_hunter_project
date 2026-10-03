@@ -58,23 +58,14 @@ body {
     line-height: 1.55;
     color: var(--text);
     background:
+        repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px),
         linear-gradient(rgba(57, 255, 106, 0.035) 1px, transparent 1px) 0 0 / 32px 32px,
         linear-gradient(90deg, rgba(57, 255, 106, 0.035) 1px, transparent 1px) 0 0 / 32px 32px,
         radial-gradient(ellipse at 50% -10%, #0c2412 0%, var(--bg) 60%);
+    background-attachment: fixed;
     display: flex;
     flex-direction: column;
     -webkit-font-smoothing: antialiased;
-}
-
-/* CRT scanlines over the whole cabinet; clicks go straight through. */
-body::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 100;
-    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
-    mix-blend-mode: multiply;
 }
 
 h1, h2, h3, p { margin: 0; }
@@ -652,18 +643,6 @@ a { color: var(--accent-strong); }
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-/* Scanlines and a soft vignette on the glass, above the picture. */
-.monitor::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    pointer-events: none;
-    background:
-        repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px),
-        radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, 0.55) 100%);
-}
-
 .monitor--live { border-color: var(--accent); box-shadow: 0 0 0 6px #050b06, 0 0 0 8px var(--border-strong), 0 0 34px rgba(57, 255, 106, 0.28); }
 .monitor--bug { border-color: var(--bug); box-shadow: 0 0 0 6px #120306, 0 0 0 8px #5a1324, 0 0 40px rgba(255, 56, 96, 0.4); animation: shake 0.45s ease-in-out 1, alarm-glow 1.2s ease-in-out infinite 0.45s; }
 .monitor--ok { border-color: var(--ok); box-shadow: 0 0 0 6px #050b06, 0 0 0 8px var(--border-strong), 0 0 44px rgba(57, 255, 106, 0.45); animation: level-clear 0.9s ease-out 1; }
@@ -722,7 +701,6 @@ a { color: var(--accent-strong); }
     width: 100%;
     height: 100%;
     object-fit: contain;
-    image-rendering: pixelated;
     opacity: 0;
     transition: opacity 0.25s ease;
 }
@@ -939,18 +917,26 @@ a { color: var(--accent-strong); }
     height: 170px;
     overflow-y: auto;
     margin: 0 12px 12px;
-    padding: 10px 12px;
-    background: #000;
-    border: 1px solid var(--border);
-    font-family: var(--mono);
-    font-size: 0.8rem;
-    color: var(--accent-strong);
-    text-shadow: 0 0 4px rgba(57, 255, 106, 0.35);
+    padding: 12px 14px;
+    background:
+        repeating-linear-gradient(0deg, rgba(57, 255, 106, 0.045) 0 1px, transparent 1px 3px),
+        radial-gradient(ellipse at center, #031a08 0%, #000 85%);
+    border: 2px solid var(--border-strong);
+    box-shadow: inset 0 0 24px rgba(57, 255, 106, 0.12);
+    font-family: var(--pixel);
+    font-size: 0.56rem;
+    color: var(--accent);
+    text-shadow: 0 0 6px rgba(57, 255, 106, 0.55);
 }
 
-.log__terminal p { margin: 0 0 3px; line-height: 1.45; overflow-wrap: anywhere; }
-.log__terminal p.log-bug { color: var(--bug-strong); font-weight: 700; text-shadow: 0 0 4px rgba(255, 56, 96, 0.4); }
-.log__terminal p.log-note { color: var(--warn); }
+.log__terminal p { margin: 0 0 7px; line-height: 1.7; overflow-wrap: anywhere; }
+.log__terminal p::before { content: "> "; color: var(--text-faint); }
+.log__terminal p:last-child::after { content: "_"; margin-left: 4px; animation: blink 0.9s steps(1) infinite; }
+.log__terminal p.log-bug { color: var(--bug-strong); text-shadow: 0 0 6px rgba(255, 56, 96, 0.6); animation: alarm-text 1s steps(1) 3; }
+.log__terminal p.log-note { color: var(--warn); text-shadow: 0 0 6px rgba(255, 210, 63, 0.5); }
+.log__terminal p.placeholder::before { content: ""; }
+
+@keyframes alarm-text { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.35; } }
 .placeholder { color: var(--text-faint) !important; font-style: italic; }
 
 /* ─── How it works: flowcharts ────────────────────────────────────────── */
