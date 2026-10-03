@@ -413,8 +413,8 @@ The page has four tabs: **Overview**, **Live Testing**, **How It Works** and
    with *BUG FOUND* in its top-left corner. A **Bug found** card appears with
    the bug, where it happened, where to fix it, and links to its files.
 4. Open the **PDF report**, **Markdown** report, **Trigger frame**, **GIF**,
-   or **Download all (.zip)**. A report still being written shows as
-   *writing…* and fills in by itself.
+   **Download all (.zip)** or **Full details**. A file still being written
+   shows with a spinner (for example *PDF report…*) and fills in by itself.
 5. Click **Resume testing** to continue from the same moment.
 
 What to expect:
@@ -426,7 +426,10 @@ What to expect:
   **Start next run** to play again.
 - **Bugged game:** every run takes a new route and meets its own set of the
   planted bugs, usually several (see [Results](#results)); press **Resume
-  testing** after each one. Most runs still reach the castle.
+  testing** after each one. Most runs still reach the castle; there testing
+  stops, the screen holds the last frame with *LEVEL COMPLETE* in its corner,
+  and the card says how many bugs that run found. Click **Start next run**
+  to play again. After a death the bugged game plays on to its next run.
 - **A run never ends stuck.** If the agent stops making progress, the dashboard
   takes over with running jumps (and run-ups) until Mario reaches new ground,
   then hands back to the agent. The clean game has one pit Mario could never
@@ -610,7 +613,7 @@ meet several and still finish.
 to a copy of the bugged game. After that, every bug's spot behaved exactly
 like the clean game (`tests/test_fix_hint.py`).
 
-**Code checks.** 894 automated tests. The full check
+**Code checks.** 895 automated tests. The full check
 (`python tools/check.py --full`) requires at least 90% test coverage.
 
 ---

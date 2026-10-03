@@ -183,13 +183,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const box = el('div', 'actions');
         const pdf = incidentFile(inc, 'report.pdf');
         if (pdf) box.appendChild(link('PDF report', fileUrl(inc.incident_id, pdf), { primary: true }));
-        else box.appendChild(pendingChip('PDF report: ' + (renderState(inc, 'report.pdf') === 'failed' ? 'failed' : 'writing…'),
+        else box.appendChild(pendingChip(renderState(inc, 'report.pdf') === 'failed' ? 'PDF failed' : 'PDF report…',
                                          renderState(inc, 'report.pdf') === 'failed'));
         const md = incidentFile(inc, 'report.md');
         if (md) box.appendChild(link('Markdown', fileUrl(inc.incident_id, md)));
+        if (incidentFile(inc, 'trigger.png')) box.appendChild(link('Trigger frame', fileUrl(inc.incident_id, 'trigger.png')));
         const gif = incidentFile(inc, 'context.gif');
         if (gif) box.appendChild(link('GIF', fileUrl(inc.incident_id, gif)));
-        if (incidentFile(inc, 'trigger.png')) box.appendChild(link('Trigger frame', fileUrl(inc.incident_id, 'trigger.png')));
         box.appendChild(link('Download all (.zip)', `/incidents/${encodeURIComponent(inc.incident_id)}/bundle.zip`, { download: true }));
         if (withDetails) {
             const b = el('button', 'btn btn--secondary btn--sm', 'Full details');
@@ -210,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 box.appendChild(link(label, runFileUrl(report.run_id, name), { primary: name === 'report.pdf' }));
             } else {
                 const failed = (report.renders || {})[name] === 'failed';
-                box.appendChild(pendingChip(`${label}: ${failed ? 'failed' : 'writing…'}`, failed));
+                box.appendChild(pendingChip(failed ? `${label} failed` : `${label}…`, failed));
             }
         }
         box.appendChild(link('Download all (.zip)', `/runs/${encodeURIComponent(report.run_id)}/bundle.zip`, { download: true }));
@@ -282,6 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.bugFound && state.bugFound.length) return 'bug';
         if (state.runResult) {
             const r = state.runResult;
+            if (r.end_reason === 'level_complete' && !r.report) return 'complete';     // the bugged game
             return r.end_reason === 'level_complete' && r.report && r.report.bugs === 0 ? 'clean' : 'ended';
         }
         if (state.testing) return 'testing';
@@ -297,6 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
         switching: ['info', 'clock', 'Loading game'],
         bug: ['bug', 'bug', 'Bug found'],
         clean: ['ok', 'check', 'No bugs found'],
+        complete: ['ok', 'flag', 'Level complete'],
         ended: ['neutral', 'flag', 'Run ended'],
         testing: ['info', null, 'Testing'],
         error: ['warn', 'alert', 'Stopped: error'],
@@ -319,14 +321,14 @@ document.addEventListener('DOMContentLoaded', () => {
             : state.everConnected ? 'Reconnecting…' : 'Connecting';
 
         const dot = $('tab-live-dot');
-        dot.hidden = !['testing', 'bug', 'clean'].includes(p);
-        dot.className = `tab__dot${p === 'bug' ? ' tab__dot--bug' : p === 'clean' ? ' tab__dot--ok' : ''}`;
+        dot.hidden = !['testing', 'bug', 'clean', 'complete'].includes(p);
+        dot.className = `tab__dot${p === 'bug' ? ' tab__dot--bug' : ['clean', 'complete'].includes(p) ? ' tab__dot--ok' : ''}`;
     }
 
     function renderControls(p) {
         const labels = {
             switching: 'Loading game…', testing: 'Testing…', bug: 'Resume testing',
-            clean: 'Start next run', ended: 'Start next run', paused: 'Resume testing',
+            clean: 'Start next run', ended: 'Start next run', complete: 'Start next run', paused: 'Resume testing',
             error: 'Resume testing', capture_failed: 'Resume testing',
         };
         startBtn.textContent = labels[p] || 'Start testing';
@@ -355,7 +357,7 @@ document.addEventListener('DOMContentLoaded', () => {
         steps.push({
             title: p === 'paused' ? 'Exploring (paused)' : 'Exploring & checking',
             sub: `Objective 2 agent${d ? ` · ${d} checks per frame` : ''}`,
-            st: p === 'testing' ? 'active' : ['bug', 'clean', 'ended'].includes(p) || ran ? 'done' : 'pending',
+            st: p === 'testing' ? 'active' : ['bug', 'clean', 'ended', 'complete'].includes(p) || ran ? 'done' : 'pending',
         });
         if (p === 'bug') {
             const inc = state.bugFound[0];
@@ -366,6 +368,11 @@ document.addEventListener('DOMContentLoaded', () => {
                          st: replay.kind === 'wait' ? 'active' : replay.kind === 'ok' ? 'done' : 'warn' });
             steps.push({ title: 'Report ready', sub: reports.kind === 'ok' ? 'GIF · Markdown · PDF' : reports.text,
                          st: reports.kind === 'ok' ? 'ok' : reports.kind === 'wait' ? 'active' : 'warn' });
+        } else if (p === 'complete') {
+            const n = state.runResult.bugs || 0;
+            steps.push({ title: 'Level complete', sub: `Objective 3 · ${n} bug${n === 1 ? '' : 's'} found this run`, st: 'ok' });
+            steps.push({ title: 'Evidence saved', sub: 'Every bug as its own incident', st: 'done' });
+            steps.push({ title: 'Reports ready', sub: 'In the Bug Tracker, one per bug', st: 'done' });
         } else if (p === 'clean' || p === 'ended') {
             const r = state.runResult;
             const report = r.report;
@@ -414,14 +421,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── THE MONITOR: live frames; when testing stops it holds the last one ───
     function renderMonitor(p) {
         const monitor = $('monitor');
-        monitor.className = `monitor${p === 'testing' ? ' monitor--live' : p === 'bug' ? ' monitor--bug' : p === 'clean' ? ' monitor--ok' : ''}`;
+        monitor.className = `monitor${p === 'testing' ? ' monitor--live' : p === 'bug' ? ' monitor--bug' : ['clean', 'complete'].includes(p) ? ' monitor--ok' : ''}`;
         // Stopped with a result: the result and the session's bugs come first.
-        document.querySelector('.live__side').classList.toggle('live__side--stopped', ['bug', 'clean', 'ended'].includes(p));
+        document.querySelector('.live__side').classList.toggle('live__side--stopped', ['bug', 'clean', 'ended', 'complete'].includes(p));
         const badge = $('monitor-badge');
         const B = {
             testing: ['live', null, 'LIVE · Agent playing'],
             bug: ['bug', 'bug', 'BUG FOUND · Stopped at the detection frame'],
             clean: ['ok', 'check', 'LEVEL COMPLETE · No bugs found'],
+            complete: ['ok', 'flag', 'LEVEL COMPLETE'],
             paused: ['', 'pause', 'PAUSED'],
             ended: ['', 'flag', 'RUN ENDED'],
         }[p];
@@ -499,6 +507,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 parts.push(body);
                 return parts;
             }));
+            card.hidden = false;
+            return;
+        }
+        if (p === 'complete') {
+            const n = state.runResult.bugs || 0;
+            card.className = 'card result result--ok';
+            const head = el('div', 'result__head');
+            const ic = el('span', 'result__icon');
+            ic.appendChild(icon('flag'));
+            head.appendChild(ic);
+            const tx = el('div');
+            tx.appendChild(el('p', 'result__kicker', 'Level complete · Testing stopped'));
+            tx.appendChild(el('p', 'result__title', `Bugged game finished · ${n} bug${n === 1 ? '' : 's'} found this run`));
+            head.appendChild(tx);
+            const body = el('div', 'result__body');
+            body.appendChild(el('p', 'result__desc', 'Every bug of this run is in the Bug Tracker below, with its reports. Start next run plays a new route.'));
+            card.replaceChildren(head, body);
             card.hidden = false;
             return;
         }
@@ -908,7 +933,15 @@ document.addEventListener('DOMContentLoaded', () => {
             runBox.replaceChildren(table(['When', 'Result', 'Game', 'Steps', 'Evidence'],
                 runs.map((r) => {
                     const tr = el('tr');
-                    const actions = runLinks(r);
+                    const actions = el('div', 'actions');
+                    const details = el('button', 'btn btn--secondary btn--sm', 'Details');
+                    details.type = 'button';
+                    details.addEventListener('click', () => openRun(r));
+                    actions.append(details);
+                    const has = (n) => (r.available || []).includes(n);
+                    if (has('report.pdf')) actions.append(link('PDF', runFileUrl(r.run_id, 'report.pdf')));
+                    if (has('finish.gif')) actions.append(link('GIF', runFileUrl(r.run_id, 'finish.gif')));
+                    actions.append(link('.zip', `/runs/${encodeURIComponent(r.run_id)}/bundle.zip`, { download: true }));
                     actions.append(deleteButton(`Delete ${r.run_id}`, () => askToDelete(
                         'Delete this run report?',
                         `${r.headline} (${r.run_id}) is deleted from disk. This cannot be undone.`,

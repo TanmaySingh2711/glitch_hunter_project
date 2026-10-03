@@ -805,7 +805,10 @@ a { color: var(--accent-strong); }
 .fix__do::before { content: "> "; color: var(--accent); }
 
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-.result .actions { justify-content: center; }
+/* The result card's files: two rows of three, every button the same width. */
+.result .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.result .actions .btn, .result .actions .pending-chip { width: 100%; padding: 6px 6px; font-size: 0.76rem; white-space: nowrap; justify-content: center; }
+.result .actions .btn--primary { font-size: 0.5rem; }
 .actions .btn { font-size: 0.82rem; padding: 6px 11px; }
 .actions .btn--primary { font-size: 0.56rem; }
 .pending-chip {

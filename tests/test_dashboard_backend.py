@@ -141,9 +141,20 @@ def test_a_clean_run_that_dies_ends_without_a_report(injected, monkeypatch, tmp_
     session.close()
 
 
-def test_the_bugged_game_plays_on_from_run_to_run(injected, monkeypatch, tmp_path):
+def test_the_bugged_game_stops_at_the_castle_without_a_clean_run_report(injected, monkeypatch, tmp_path):
     _backend, session = _session_ending_with(monkeypatch, tmp_path, "mario_bugged",
                                              {'flag_get': True})
+    items = [next(session) for _ in range(3)]
+    assert 'run_end' not in items[0] and 'run_end' not in items[1]
+    end = items[2]['run_end']
+    assert end['end_reason'] == 'level_complete' and end['report'] is None and end['bugs'] >= 0
+    assert not (tmp_path / "runs").exists() or not any((tmp_path / "runs").iterdir())
+    session.close()
+
+
+def test_the_bugged_game_plays_on_after_a_death(injected, monkeypatch, tmp_path):
+    _backend, session = _session_ending_with(monkeypatch, tmp_path, "mario_bugged",
+                                             {'is_dead': True, 'death_cause': 'goomba'})
     assert all('run_end' not in next(session) for _ in range(6))
     session.close()
 

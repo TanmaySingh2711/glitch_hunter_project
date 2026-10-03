@@ -531,6 +531,12 @@ def _finish_run(env: gym.Env[Any, Any], info: dict[str, Any], recorder: SessionR
     return out
 
 
+def _bugged_run_completed(info: dict[str, Any]) -> bool:
+    end_reason = str(info.get('episode_end_reason')
+                     or classify_end(info, bool(info.get('safety_reset_reason'))))
+    return end_reason == 'level_complete'
+
+
 def choose_action(model: PPO, obs: np.ndarray, rng: np.random.Generator,
                   temperature: float = config.DASHBOARD_POLICY_TEMPERATURE) -> int:
     """The brain's next action: drawn from its own policy, not its top pick.
@@ -712,7 +718,9 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
 
     On the clean game the step that ends an episode also carries 'run_end'
     (why it ended, and the run report when Mario reached the castle), so the
-    dashboard can stop there. The bugged game carries none and plays on."""
+    dashboard can stop there. The bugged game carries one only when Mario
+    reaches the castle (with this run's number of bugs, and no report); after
+    a death it plays on."""
     env, model = _ensure_global_env_and_model()
     obs = _reset_obs(env)
     recorder = SessionRecorder()
@@ -768,9 +776,14 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
             # A drawn route stuck in a trap: end the run now rather than when
             # the engine's own safety reset comes, minutes later.
             done, info = True, {**info, 'episode_end_reason': 'safety_reset'}
-        run_end = (_finish_run(env, info, recorder, run_started, furthest_x,
-                               list(run_bugs.values()))
-                   if done and _config.game_variant == config.CLEAN_GAME_VARIANT else None)
+        run_end = None
+        if done and _config.game_variant == config.CLEAN_GAME_VARIANT:
+            run_end = _finish_run(env, info, recorder, run_started, furthest_x,
+                                  list(run_bugs.values()))
+        elif done and _bugged_run_completed(info):
+            # The bugged game stops at the castle too (no clean-run report:
+            # its bugs are its incidents); after a death it plays on.
+            run_end = {'end_reason': 'level_complete', 'report': None, 'bugs': len(run_bugs)}
 
         # ─── SERVER-SIDE FPS INSTRUMENTATION ───
         # Logs the actual measured frame rate every ~2 seconds, so "is it

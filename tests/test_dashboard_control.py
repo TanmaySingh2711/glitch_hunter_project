@@ -213,8 +213,9 @@ def test_the_window_stays_responsive_while_paused(svc):
     svc.stop_testing()
     svc.wait_idle()
     polls = sum(1 for c, _t in svc.fake.calls if c == 'poll')
-    time.sleep(0.3)
-    assert sum(1 for c, _t in svc.fake.calls if c == 'poll') >= polls + 3
+    # Every IDLE_PUMP_S (50 ms); waited for, not timed, because a shared CI
+    # machine's timer can sleep far longer (macOS CI: 2 polls in 0.3 s).
+    assert wait_for(lambda: sum(1 for c, _t in svc.fake.calls if c == 'poll') >= polls + 3),         "the window's events stopped being pumped while paused"
     svc.fake.close_requested = True                  # X while paused
     assert wait_for(lambda: svc.fake.window == 'hidden')
 

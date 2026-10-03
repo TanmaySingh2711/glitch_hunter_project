@@ -46,13 +46,14 @@ step - the evidence is already on disk by then
 by itself, not even when the reports finish rendering. A later sighting of an
 incident already recorded is counted but does not pause.
 
-RUN END (clean game only). When a run of the clean game ends - Mario reaches
-the castle, dies, runs out of time, or the agent gets stuck - testing stops
-and the result is kept as `run_result` until the user presses Start or Reset.
-A run that reached the castle also has its run report ("no bugs found" when
-no detector fired; reporting/run_report.py). Start plays the next run; Reset
-clears the dashboard first. The bugged game plays on from one run to the
-next, as before, and stops only on bugs.
+RUN END. When a run of the clean game ends - Mario reaches the castle, dies,
+or runs out of time - testing stops and the result is kept as `run_result`
+until the user presses Start or Reset. A run that reached the castle also
+has its run report ("no bugs found" when no detector fired;
+reporting/run_report.py). The bugged game stops the same way at the castle
+(no report: its bugs are its incidents, and the result says how many this
+run found); after a death it plays on to its next run, and it stops on every
+bug. Start plays the next run; Reset clears the dashboard first.
 """
 from __future__ import annotations
 
