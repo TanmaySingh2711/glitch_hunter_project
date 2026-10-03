@@ -14,5 +14,5 @@ under a second; installed libraries keep the caches they were installed with.
 import os
 import sys
 
-sys.dont_write_bytecode = True
-os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+sys.pycache_prefix = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "generated", "cache", "pycache")
+os.environ.setdefault("PYTHONPYCACHEPREFIX", sys.pycache_prefix)

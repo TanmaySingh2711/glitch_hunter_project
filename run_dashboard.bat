@@ -9,7 +9,7 @@ rem Close this window (or press Ctrl+C in it) to stop the dashboard.
 cd /d "%~dp0"
 title Glitch Hunter dashboard
 rem No __pycache__ folders in the project (see common/__init__.py).
-set "PYTHONDONTWRITEBYTECODE=1"
+set "PYTHONPYCACHEPREFIX=%~dp0generated\cache\pycache"
 
 if not exist "venv_gpu\Scripts\python.exe" (
     echo venv_gpu was not found in %CD%.

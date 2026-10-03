@@ -1,7 +1,7 @@
 <h1 align="center">Glitch Hunter</h1>
 
 <p align="center">
-  <b>An AI agent that plays Super Mario Bros Level 1-1, looks for game bugs by itself,<br>
+  <b>An agent that plays Super Mario Bros Level 1-1, looks for game bugs by itself,<br>
   and writes a report for every bug it finds.</b>
 </p>
 
@@ -52,7 +52,7 @@ There is no hosted demo. The project runs on your own computer, and the setup is
 
 Glitch Hunter is a game tester that needs no human at the controls.
 
-A trained AI agent plays Level 1-1 of a Super Mario Bros clone. While it
+A trained agent plays Level 1-1 of a Super Mario Bros clone. While it
 plays, a set of checks watches the game. When the game breaks one of its own
 rules, for example Mario sinks into a solid block, testing stops. The project
 then saves a screenshot and a short GIF of that moment, plays the same run
@@ -116,7 +116,7 @@ Each one has its own write-up: [Objective 1](docs/OBJECTIVE1.md),
 |---|---|
 | Language | Python 3.12 |
 | Game | Pygame 2.6.1 (the Mario clone) |
-| AI / ML | Stable-Baselines3 2.9.0 (PPO), PyTorch 2.14.0, Gymnasium 1.3.0 |
+| Agent / ML | Stable-Baselines3 2.9.0 (PPO), PyTorch 2.14.0, Gymnasium 1.3.0 |
 | Data | NumPy 2.5.2, cloudpickle 3.1.2, JSON files |
 | Images | OpenCV 5.0 (frames, screenshots), Pillow 12.3 (GIFs) |
 | Reports | fpdf2 2.8.8 (PDF), Markdown |
@@ -195,6 +195,9 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
    code together with what the detector measured.
 8. **The dashboard shows the bug** and adds it to the Bug Tracker. You can
    open the files, then resume testing.
+9. **A run ends at the castle** (testing stops there on both games) or when
+   Mario dies. If the agent ever stops making progress, the dashboard takes
+   over until it moves again, so a run never ends stuck.
 
 The detectors are general rules. None of them knows where a bug was planted.
 
@@ -231,6 +234,7 @@ glitch_hunter_project/
 ├── docs/                       # documentation and README images
 ├── generated/                  # created while running, not in git:
 │                               #   incidents/, run_reports/, logs/, caches
+│                               #   (Python's bytecode cache goes here too)
 │
 ├── glitch_hunter_main_brain.zip           # the trained brain the dashboard uses
 ├── glitch_hunter_main_brain_coverage.npz  # its saved exploration map

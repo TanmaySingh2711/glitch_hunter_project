@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 # No __pycache__ in the project, from the first project import on (common/__init__.py).
-sys.dont_write_bytecode = True
+sys.pycache_prefix = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated", "cache", "pycache")  # bytecode goes to generated/ (common/__init__.py)
 
 import gymnasium as gym
 from stable_baselines3 import PPO

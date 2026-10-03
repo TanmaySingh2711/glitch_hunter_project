@@ -16,7 +16,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.dont_write_bytecode = True
+sys.pycache_prefix = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "generated", "cache", "pycache")  # bytecode goes to generated/ (common/__init__.py)
 import common  # noqa: F401 - before any project module: no __pycache__ (common/__init__.py)
 
 _SESSION_ENV = []

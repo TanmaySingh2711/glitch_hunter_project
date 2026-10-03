@@ -27,9 +27,12 @@ python tools/check.py --full # before a merge or a release: + slow tests, 90% co
 Everything the project writes as it runs lands in `generated/` (git-ignored):
 the dashboard's evidence and run reports, the tools' outputs, the training
 log, and the ruff, mypy, pytest and coverage caches. The project writes no
-`__pycache__` folders: entry points set `sys.dont_write_bytecode` before their
-first project import (see `common/__init__.py`), and a new entry point should
-do the same.
+`__pycache__` folders: entry points set `sys.pycache_prefix` to
+`generated/cache/pycache` before their first project import (see
+`common/__init__.py`), and a new entry point should do the same.
+Running bare `pytest` leaves one `tests/__pycache__/conftest...pyc` (pytest
+compiles `conftest.py` before it can run); `python tools/check.py` sets
+`PYTHONPYCACHEPREFIX` for it, so it leaves none.
 
 CI (`.github/workflows/ci.yml`) runs the same gates on every push, on Linux,
 Windows and macOS, with an 86% coverage floor on the fast tests. It also runs the

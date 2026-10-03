@@ -49,8 +49,8 @@ if isinstance(sys.stdout, io.TextIOWrapper):
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 # No __pycache__ in the project, from the very first project import on (the
 # rest of common/__init__.py's reason).
-os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
-sys.dont_write_bytecode = True
+sys.pycache_prefix = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated", "cache", "pycache")
+os.environ.setdefault("PYTHONPYCACHEPREFIX", sys.pycache_prefix)
 # SDL (under pygame) otherwise takes over SIGTERM, which Python leaves at its
 # default, and turns it into a quit event nobody reads here: on Linux and
 # macOS `kill` (or a test harness stopping the server) would not stop the
