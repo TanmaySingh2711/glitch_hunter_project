@@ -72,7 +72,8 @@ def test_main_prints_the_advice_and_fails(monkeypatch, capsys):
 
 def test_the_scripts_run_the_check():
     bat = read("run_dashboard.bat")
-    assert bat.index("app.py --desktop") < bat.index(r"if errorlevel 1 venv_gpu\Scripts\python.exe tools\check_environment.py")
+    assert bat.index("app.py --desktop") < bat.index("if not errorlevel 1 exit /b 0") < bat.index(
+        r"venv_gpu\Scripts\python.exe tools\check_environment.py")
     assert r"tools\check_environment.py || goto :fail" in read("setup.bat")
     assert 'tools/check_environment.py' in read("setup.sh")
 

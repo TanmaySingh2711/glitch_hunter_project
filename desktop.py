@@ -349,6 +349,35 @@ def install_console_close_handler(on_close: Callable[[], None]) -> None:
         ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, True)
 
 
+ESC = ""
+
+
+def watch_keys(kbhit: Callable[[], bool], getwch: Callable[[], str],
+               on_escape: Callable[[], None], alive: Callable[[], bool] = lambda: True,
+               poll_s: float = 0.1) -> None:
+    """Calls on_escape once, when Esc is pressed in this console, then returns.
+    Any other key is read and ignored (so it does not pile up for the shell)."""
+    while alive():
+        if kbhit():
+            if getwch() == ESC:
+                on_escape()
+                return
+        else:
+            time.sleep(poll_s)
+
+
+def install_escape_to_stop(on_escape: Callable[[], None]) -> bool:
+    """Esc in the dashboard's console window stops it, as Ctrl+C does. Windows
+    consoles only; False (and nothing started) anywhere else or when the
+    dashboard has no console to read keys from."""
+    if sys.platform == 'win32' and sys.stdin is not None and sys.stdin.isatty():
+        import msvcrt
+        threading.Thread(target=watch_keys, args=(msvcrt.kbhit, msvcrt.getwch, on_escape),
+                         name="escape-to-stop", daemon=True).start()
+        return True
+    return False
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # CENTRED WINDOWS
 # ═══════════════════════════════════════════════════════════════════════

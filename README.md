@@ -401,7 +401,7 @@ Then open **http://localhost:5000**.
 There is only one process to start. The server, the game and the agent all
 run inside it.
 
-**To stop:** press `Ctrl + C` in the terminal, or close that window.
+**To stop:** press `Esc` in the terminal (the window then closes by itself), or press `Esc` on the dashboard page and choose **Yes**. `Ctrl + C`, or closing the window, work too.
 
 ---
 
@@ -520,6 +520,7 @@ project, but it is there if you want to read the data yourself. These are
 | `DELETE /api/incidents/<id>` | Deletes one saved bug |
 | `DELETE /api/incidents` | Deletes every saved bug (Clear history) |
 | `DELETE /api/runs/<id>`, `DELETE /api/runs` | The same for clean-run reports |
+| `POST /api/stop` | Stops the dashboard like Ctrl+C (what Esc > Yes on the page sends) |
 
 Example:
 

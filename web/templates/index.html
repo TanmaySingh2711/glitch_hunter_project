@@ -390,6 +390,20 @@
     </div>
 </dialog>
 
+<!-- Esc anywhere on the page opens this. Yes stops the dashboard like Ctrl+C in its console; No (or Esc again) closes it. -->
+<dialog id="stop-dialog" class="dialog" aria-labelledby="stop-dialog-title">
+    <div class="dialog__head">
+        <h2 id="stop-dialog-title" class="dialog__title">Stop the dashboard?</h2>
+    </div>
+    <div class="dialog__body">
+        <p id="stop-dialog-text" class="dialog__text">This closes the dashboard and the game window, and stops a test that is running. Saved bugs and reports stay on disk.</p>
+        <div id="stop-dialog-actions" class="dialog__actions">
+            <button id="stop-dialog-no" class="btn btn--secondary" type="button" data-close autofocus>No</button>
+            <button id="stop-dialog-yes" class="btn btn--danger" type="button">Yes, stop</button>
+        </div>
+    </div>
+</dialog>
+
 <!-- The agent's actions. Keep in sync with ACTION_NAMES in agent_logic.py and
      the action space in custom_mario_env.py. -->
 <dialog id="info-modal" class="dialog" aria-labelledby="info-modal-title">

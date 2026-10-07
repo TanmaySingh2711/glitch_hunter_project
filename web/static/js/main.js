@@ -966,6 +966,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     $('info-btn').addEventListener('click', () => infoModal.showModal());
 
+    // ─── STOPPING THE DASHBOARD ───
+    // Esc asks; Yes tells the server to stop the way Ctrl+C in its console
+    // does. While any dialog is open, Esc only closes that dialog (the
+    // browser does it), and Esc in the stop dialog is "No". The default
+    // button is No, so a stray Enter never stops anything.
+    const stopDialog = $('stop-dialog');
+    const stopText = $('stop-dialog-text').textContent;
+    stopDialog.addEventListener('click', (e) => {
+        if (e.target === stopDialog || e.target.closest('[data-close]')) stopDialog.close();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
+        if (!state.connected) return;            // nothing left to stop
+        $('stop-dialog-title').textContent = 'Stop the dashboard?';
+        $('stop-dialog-text').textContent = stopText;
+        $('stop-dialog-actions').hidden = false;
+        stopDialog.showModal();
+    });
+    $('stop-dialog-yes').addEventListener('click', async () => {
+        $('stop-dialog-actions').hidden = true;
+        $('stop-dialog-title').textContent = 'Stopping…';
+        try {
+            await fetch('/api/stop', { method: 'POST' });
+            $('stop-dialog-title').textContent = 'The dashboard has stopped';
+            $('stop-dialog-text').textContent = 'You can close this tab.';
+            window.close();                      // only works for a tab a script opened
+        } catch (err) {
+            $('stop-dialog-title').textContent = 'Could not stop it';
+            $('stop-dialog-text').textContent = 'The dashboard server did not answer. Press Ctrl+C in its window instead.';
+            $('stop-dialog-actions').hidden = false;
+        }
+    });
+
     // The still picture beside a report's details: the trigger frame of a
     // bug, the final frame of a run. The GIF and the other files are links on
     // the right.

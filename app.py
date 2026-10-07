@@ -16,6 +16,8 @@ kept inside the incident store. A clean-game run that reaches the castle gets
 a run report ("no bugs found"), served the same way under /runs/<id>/<file>.
 The only requests that change what is saved are the Bug History page's Delete
 and Clear history (DELETE /api/incidents..., /api/runs...); see DELETING below.
+Pressing Esc on the page asks "Stop the dashboard?"; Yes posts to /api/stop,
+which ends the server exactly as Ctrl+C in its console does (see STOPPING below).
 """
 from __future__ import annotations
 
@@ -57,6 +59,7 @@ os.environ.setdefault("PYTHONPYCACHEPREFIX", sys.pycache_prefix)
 # dashboard. Only this process; training keeps SDL's usual handling.
 os.environ.setdefault("SDL_NO_SIGNAL_HANDLERS", "1")
 
+import _thread
 import argparse
 import threading
 import time
@@ -435,6 +438,28 @@ def api_clear_runs() -> dict[str, Any]:
     return {"deleted": deleted, "kept": kept}
 
 
+# ─── STOPPING ───
+# The page's Esc > Yes. It stops the server the way Ctrl+C in the console does:
+# KeyboardInterrupt in the main thread, so the same clean-up runs (the laptop's
+# power mode comes back, see _desktop_mode). The reply is sent first; the
+# interrupt follows a moment later.
+STOP_DELAY_S = 0.4
+
+
+def _interrupt_main() -> None:
+    _thread.interrupt_main()
+
+
+@app.route('/api/stop', methods=['POST'])
+def api_stop() -> dict[str, Any]:
+    _own_page_or_403()
+    log.info("Stop asked for on the dashboard page. Stopping.")
+    timer = threading.Timer(STOP_DELAY_S, _interrupt_main)
+    timer.daemon = True
+    timer.start()
+    return {"stopping": True}
+
+
 @socketio.on('connect')
 def handle_connect() -> None:
     # A (re)connecting client starts from "not running", and the dashboard
@@ -554,6 +579,10 @@ def _desktop_mode() -> None:
     guard.start()
     atexit.register(guard.stop)
     desktop.install_console_close_handler(guard.stop)
+    # Esc in the console stops the dashboard exactly as Ctrl+C does: the same
+    # KeyboardInterrupt in the main thread, so the same clean-up runs.
+    if desktop.install_escape_to_stop(_thread.interrupt_main):
+        log.info("Press Esc in this window to stop the dashboard.")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -603,4 +632,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except KeyboardInterrupt:       # Esc or Ctrl+C before the server is up: a normal stop
+        sys.exit(0)

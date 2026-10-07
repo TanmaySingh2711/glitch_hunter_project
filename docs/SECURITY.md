@@ -45,6 +45,11 @@ kept narrow.
   address; the browser's own cross-origin check stops it before that too. The
   bug or run Live Testing is stopped on, and a report still being written,
   are kept. `tests/test_history_delete.py` checks each refusal.
+* **One request stops the dashboard: `POST /api/stop`.** It is what Esc, then
+  Yes, on the page sends, and it ends the server exactly as Ctrl+C in its
+  console does (the power mode is put back). It changes nothing saved, takes no
+  argument, and is refused (403) when the browser says the page is on another
+  website, like the `DELETE` routes. `tests/test_dashboard_stop.py` checks it.
 * **The project-facts test count (`/api/project`) runs the project's own tests' collection.**
   Once per start, `app.py` runs `python -m pytest --collect-only` on the
   `tests/` folder in a low-priority child process; collection imports the
@@ -62,7 +67,7 @@ changes only two things. Its own process opts out of Windows' power
 throttling. While the dashboard runs, the Windows power mode is set to *Best
 performance* - when it starts and whenever the laptop is plugged in or
 unplugged; a mode you pick yourself in between is left alone. Your own power
-mode is put back when the dashboard stops (Ctrl+C,
+mode is put back when the dashboard stops (Esc then Yes on the page, Ctrl+C,
 or closing its window). Windows only lets a normal user change the mode of
 the power source in use, so a battery mode changed while on battery is put
 back the next time the laptop is on battery, by a small background process

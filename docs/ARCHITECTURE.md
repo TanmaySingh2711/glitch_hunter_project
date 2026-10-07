@@ -219,6 +219,7 @@ decision, not a refactor.
 | the one-click setup | `setup.bat`, `setup.sh` (checked on clean machines by CI's *One-click setup* job) | `setup.bat norun` / `bash setup.sh norun` |
 | a library that will not load (Windows blocking PyTorch, a missing package) gets a plain answer | `tools/check_environment.py`, run by `run_dashboard.bat` after an error and by both setup scripts | `pytest tests/test_check_environment.py` |
 | `run_dashboard.bat`: speed on battery, centred windows | `desktop.py`, `game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |
+| Esc stops the dashboard (in its console window, or on the page: Esc then Yes), like Ctrl+C | `desktop.py` (`watch_keys`), `app.py` (`/api/stop`), `web/static/js/main.js` | `pytest tests/test_dashboard_stop.py` |
 | the game itself (deliberate bugs) | `games/mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |
 | anything | - | `python tools/check.py` |
