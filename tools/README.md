@@ -10,6 +10,7 @@ refuses (with the reason) rather than guessing when an input is missing.
 | Tool | What it does | Writes |
 |---|---|---|
 | `check.py` | Every quality gate CI runs: ruff, mypy, tests, artifact hashes. `--full` adds the slow tests and the coverage floor. | nothing |
+| `check_environment.py` | Tries to load every library the dashboard needs (torch first) and, when one will not load, says in plain words what to do: for Windows' Smart App Control blocking PyTorch's DLL (WinError 4551), where to switch it off; for a missing or damaged library, to run the setup script again. Silent when everything loads. `run_dashboard.bat` runs it when the dashboard stops with an error; `setup.bat` and `setup.sh` run it before starting. | nothing |
 | `final_brain.py` | The four files are in git; for a checkout that lacks them, `install`: downloads the final 16M brain bundle from the GitHub Release (or takes `--zip FILE`), verifies all four files against `artifacts.json`, and puts them in place read-only - never overwriting a different file. `bundle OUT.zip`: builds that release asset (maintainers). | the four final-brain files (install); one zip (bundle) |
 | `verify_artifacts.py` | Re-hashes the protected artifacts (the 6M brain, masks, baseline) against `artifacts.json`. | nothing (`--record` rewrites the manifest) |
 | `benchmark_step.py` | Milliseconds per agent step for the bare engine, the legacy wrapper and the QA wrapper; `--profile` shows where the time goes. | nothing |

@@ -617,7 +617,7 @@ meet several and still finish.
 to a copy of the bugged game. After that, every bug's spot behaved exactly
 like the clean game (`tests/test_fix_hint.py`).
 
-**Code checks.** 895 automated tests. The full check
+**Code checks.** 912 automated tests. The full check
 (`python tools/check.py --full`) requires at least 90% test coverage.
 
 ---
@@ -641,6 +641,18 @@ stair column. The last frame is the exact frame the bug was detected.
 <p align="center"><img src="docs/assets/bug-stair-clip.gif" alt="GIF of the stair-clipping bug" width="480"></p>
 
 ---
+
+## Troubleshooting
+
+**`run_dashboard.bat` stops with "Windows is blocking PyTorch".** Windows'
+Smart App Control refuses PyTorch's `torch_python.dll` (it is not signed by a
+company Windows knows). The dashboard now explains this in the window instead
+of only printing an error (`tools/check_environment.py`). To fix it, turn
+Smart App Control off: **Settings > Privacy & security > Windows Security >
+App & browser control > Smart App Control settings > Off**. Windows may not
+let you turn it back on later without resetting the PC. A reinstall does not
+help. The same message appears for any other library that will not load, with
+the step to take (usually running `setup.bat` again).
 
 ## Limitations
 

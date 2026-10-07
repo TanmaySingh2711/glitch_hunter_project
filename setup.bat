@@ -69,6 +69,7 @@ if defined MISSING (
     echo        Some brain files are missing. Downloading them ...
     "%VPY%" tools\final_brain.py install || goto :fail
 )
+"%VPY%" tools\check_environment.py || goto :fail
 "%VPY%" app.py --help >nul || goto :fail
 
 echo.

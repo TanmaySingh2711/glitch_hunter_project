@@ -69,6 +69,7 @@ if ! "$VPY" -c "import cv2" >/dev/null 2>&1; then
     echo "  sudo apt-get install -y libgl1"
     exit 1
 fi
+"$VPY" tools/check_environment.py
 "$VPY" app.py --help >/dev/null
 
 echo

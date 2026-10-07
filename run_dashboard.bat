@@ -21,6 +21,10 @@ if not exist "venv_gpu\Scripts\python.exe" (
 venv_gpu\Scripts\python.exe desktop.py center-console
 start "" venv_gpu\Scripts\pythonw.exe desktop.py open-dashboard
 venv_gpu\Scripts\python.exe app.py --desktop %*
+rem A stop with an error: say in plain words what is wrong (a library that will
+rem not load, for example Windows blocking PyTorch), instead of leaving only a
+rem traceback. Silent when everything loads (tools\check_environment.py).
+if errorlevel 1 venv_gpu\Scripts\python.exe tools\check_environment.py
 
 echo.
 echo The dashboard has stopped.
