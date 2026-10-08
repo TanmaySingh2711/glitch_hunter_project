@@ -312,26 +312,20 @@
                 </div>
             </div>
 
-            <h2 class="section-title"><span class="section-title__num">5</span>The bugs planted in the bugged game</h2>
+            <h2 class="section-title"><span class="section-title__num">5</span>The clean game and the bugged game</h2>
+            <p class="section-lead">Live Testing can run the same level in two versions. You choose one with the game switch before pressing Start Testing.</p>
             <div class="two-col">
                 <div class="card card--clean">
                     <h3 class="card__title">Clean game</h3>
-                    <p>The original level, never changed; its files are locked by a fingerprint. Every agent was trained and measured on it.
-                        Any report here would be a false alarm, so it is how the project proves the checks stay quiet.</p>
+                    <p>The original level, exactly as it ships. Its files are locked by a fingerprint, so nothing in it can be changed by accident.</p>
+                    <p><b>What it is for:</b> watching the agent play, and proving the checks stay quiet. It has no bugs, so any report here would be a false alarm. Reaching the castle ends the run with a No Bugs Found report. Every agent was trained and measured on this game.</p>
                 </div>
                 <div class="card card--bugged">
                     <h3 class="card__title">Bugged game</h3>
-                    <p>An exact copy with <b data-fact="bug-count">known</b> bugs planted on purpose, each declared in a list and marked in the code.
-                        The checks are general rules and do not know where any bug is; this is how the project proves they find real bugs.</p>
+                    <p>An exact copy of the level with <b data-fact="bug-count">known</b> bugs planted on purpose. Each one is declared in a list and marked in the code.</p>
+                    <p><b>What it is for:</b> proving the checks find real bugs. The agent takes its own route each run and meets some of them; each one it meets stops the run with saved evidence and a report. The checks are general rules and do not know where any bug is.</p>
                 </div>
             </div>
-            <!-- The planted bugs belong to the bugged game only, so they sit in
-                 their own titled box, not as loose cards under both games. -->
-            <section class="bug-box" aria-labelledby="bug-box-title">
-                <h3 class="bug-box__title" id="bug-box-title">The <span data-fact="bug-count">planted</span> bugs in the bugged game</h3>
-                <p class="bug-box__lead">The clean game has none of these.</p>
-                <div id="bug-catalogue" class="bug-catalogue"></div>
-            </section>
 
             <div class="page-cta">
                 <button class="btn btn--primary btn--lg" type="button" data-goto="live">Open Live Testing <span aria-hidden="true">→</span></button>

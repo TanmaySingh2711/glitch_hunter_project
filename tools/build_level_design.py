@@ -16,7 +16,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.pycache_prefix = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated", "cache", "pycache")  # bytecode goes to generated/ (common/__init__.py)
+sys.pycache_prefix = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "generated", "cache", "pycache")  # bytecode goes to generated/ (common/__init__.py)
 
 from common.cli import prepare_tool
 

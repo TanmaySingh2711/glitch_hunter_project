@@ -3,7 +3,7 @@ rem Double-click to start the Glitch Hunter dashboard.
 rem This window is centred on the screen; the browser opens
 rem http://localhost:5000 (also centred) the moment the dashboard is ready.
 rem While it runs, the laptop is kept at full speed even on battery, and your
-rem own power mode comes back when it stops (see desktop.py).
+rem own power mode comes back when it stops (see dashboard/desktop.py).
 rem To stop the dashboard press Esc in this window (it closes by itself), or
 rem press Esc on the dashboard page and choose Yes. Ctrl+C and the window's X
 rem work too.
@@ -20,8 +20,8 @@ if not exist "venv_gpu\Scripts\python.exe" (
     exit /b 1
 )
 
-venv_gpu\Scripts\python.exe desktop.py center-console
-start "" venv_gpu\Scripts\pythonw.exe desktop.py open-dashboard
+venv_gpu\Scripts\python.exe -m dashboard.desktop center-console
+start "" venv_gpu\Scripts\pythonw.exe -m dashboard.desktop open-dashboard
 venv_gpu\Scripts\python.exe app.py --desktop %*
 rem A normal stop (Esc, Ctrl+C, Stop on the page) closes this window.
 if not errorlevel 1 exit /b 0

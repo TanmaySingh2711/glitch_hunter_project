@@ -18,7 +18,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import dashboard_backend as db
+from dashboard import backend as db
 
 # A drawn route that meets every benchmark bug in its first run (measured,
 # 2026-10-03: seeds 1, 2 and 8 do so in one run; 3-7 need two or three).

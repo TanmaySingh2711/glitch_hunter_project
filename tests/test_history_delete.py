@@ -13,8 +13,8 @@ import pytest
 from incident_helpers import context, detection
 from test_run_report import jpeg, record
 
-import dashboard_backend as db
 from common import fileio
+from dashboard import backend as db
 from reporting import run_report as rr
 from reporting.pipeline import DeleteRefused, IncidentPipeline
 from reporting.store import IncidentStore, StoreError

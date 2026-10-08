@@ -3,7 +3,7 @@
    scanlines, and colour used for meaning - green = healthy / running,
    cyan = information, amber = warning, red = bug found. Every state also
    carries an icon and a word, never colour alone. The pixel font is served
-   from this project (web/static/vendor/fonts/), so the page still works
+   from this project (dashboard/web/static/vendor/fonts/), so the page still works
    offline. Animations stop for anyone who asks for reduced motion. */
 @font-face {
     font-family: "Press Start 2P";
@@ -15,7 +15,6 @@
 
 :root {
     --bg: #030703;
-    --bg-deep: #000300;
     --surface: #08120a;
     --surface-2: #0d1b10;
     --surface-3: #142817;
@@ -29,7 +28,6 @@
     --accent-soft: rgba(57, 255, 106, 0.12);
     --accent-glow: rgba(57, 255, 106, 0.45);
     --info: #3ee8ff;
-    --info-soft: rgba(62, 232, 255, 0.12);
     --ok: #39ff6a;
     --ok-soft: rgba(57, 255, 106, 0.13);
     --warn: #ffd23f;
@@ -39,7 +37,6 @@
     --bug-soft: rgba(255, 56, 96, 0.14);
     --radius: 4px;
     --radius-sm: 3px;
-    --shadow: 0 0 0 1px var(--border-strong), 0 18px 40px rgba(0, 0, 0, 0.6);
     --font: "Segoe UI", Inter, system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
     --mono: "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
     --pixel: "Press Start 2P", "Cascadia Mono", Consolas, monospace;
@@ -668,12 +665,7 @@ a { color: var(--accent-strong); }
     text-align: center;
     color: var(--text-muted);
     padding: 20px;
-    /* TV static while there is no signal. */
-    background:
-        repeating-radial-gradient(circle at 17% 32%, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 3px),
-        repeating-radial-gradient(circle at 73% 61%, rgba(57, 255, 106, 0.05) 0 1px, transparent 1px 4px),
-        #010401;
-    animation: static 0.25s steps(3) infinite;
+    background: #010401;
 }
 
 .monitor__empty span { display: block; }
@@ -687,13 +679,6 @@ a { color: var(--accent-strong); }
     animation: flicker 4s linear infinite;
 }
 .monitor__empty .monitor__hint { font-family: var(--pixel); text-transform: uppercase; font-size: 0.6rem; color: var(--warn); animation: blink 1.1s steps(1) infinite; }
-
-@keyframes static {
-    0% { background-position: 0 0, 0 0, 0 0; }
-    33% { background-position: 3px 2px, -2px 3px, 0 0; }
-    66% { background-position: -2px 3px, 3px -2px, 0 0; }
-    100% { background-position: 1px -3px, -3px 1px, 0 0; }
-}
 
 #video-feed {
     position: absolute;
@@ -756,7 +741,6 @@ a { color: var(--accent-strong); }
 .status-row:first-child { border-top: 0; padding-top: 0; }
 .status-row dt { color: var(--text-muted); }
 .status-row dd { margin: 0; min-width: 0; font-weight: 600; font-family: var(--mono); font-size: 0.84rem; }
-.status-row__why { display: block; margin-top: 3px; color: var(--text-muted); font-weight: 400; font-size: 0.8rem; }
 .status-row--bar dd { display: flex; flex-direction: column; gap: 4px; }
 
 /* Level progress: a segmented, arcade-style bar. */
@@ -769,7 +753,6 @@ a { color: var(--accent-strong); }
     box-shadow: 0 0 8px var(--accent-glow);
     transition: width 0.3s steps(8);
 }
-.bar__fill--ok { background: var(--ok); }
 
 /* Result card: Bug Found, or how a clean run ended. */
 .result { padding: 0; overflow: hidden; animation: pop-in 0.35s ease-out; }
@@ -1054,18 +1037,6 @@ a { color: var(--accent-strong); }
 .two-col .card--bugged { border-color: rgba(255, 56, 96, 0.5); }
 .two-col .card--bugged .card__title { color: var(--bug-strong); }
 
-/* The planted bugs: one titled box under the two game cards, edged in the
-   bug colour, so they read as the bugged game's and nobody else's. Three
-   columns: six bugs make two full rows, with no card left hanging. */
-.bug-box { margin-top: 16px; padding: 18px; border: 2px solid rgba(255, 56, 96, 0.55); border-radius: var(--radius); background: var(--bug-soft); }
-.bug-box__title { font-family: var(--pixel); text-transform: uppercase; font-size: 0.62rem; line-height: 1.6; color: var(--bug-strong); }
-.bug-box__lead { margin-top: 6px; color: var(--text-muted); font-size: 0.86rem; }
-.bug-catalogue { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-.bug-catalogue__item { padding: 12px 14px; background: var(--surface); border: 2px solid var(--border); font-size: 0.86rem; transition: border-color 0.2s ease, transform 0.2s ease; }
-.bug-catalogue__item:hover { border-color: var(--bug); transform: translateY(-3px); }
-.bug-catalogue__item b { display: block; margin-bottom: 4px; color: var(--text); }
-.bug-catalogue__item span { color: var(--text-muted); }
-
 .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .legend li { display: flex; gap: 14px; align-items: center; color: var(--text-muted); font-size: 0.92rem; }
 .legend .pill { min-width: 170px; }
@@ -1145,7 +1116,6 @@ table.data tbody tr:hover { background: var(--surface-2); }
     .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .stage:nth-child(3)::before { display: none; }
     .parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .bug-catalogue { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .view--live { overflow-y: auto; }
     .live {
         height: auto;
@@ -1179,5 +1149,5 @@ table.data tbody tr:hover { background: var(--surface-2); }
     .chart { padding: 14px; }
     .chart__split { grid-template-columns: 1fr; }
     .live { grid-template-columns: minmax(0, 1fr); grid-template-areas: "controls" "stage" "side" "log"; padding: 12px; }
-    .two-col, .incident-detail, .bug-catalogue { grid-template-columns: 1fr; }
+    .two-col, .incident-detail { grid-template-columns: 1fr; }
 }

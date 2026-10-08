@@ -1,4 +1,4 @@
-"""dashboard_backend.py and app.py: what the browser is sent, and from where.
+"""dashboard/backend.py and app.py: what the browser is sent, and from where.
 
 The frame stream is driven with a stand-in env and model injected as the
 backend's globals, so these run without loading weights; the Flask routes
@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import dashboard_backend as db
 from agent_logic import ACTION_NAMES
+from dashboard import backend as db
 from exploration import config
 
 
@@ -245,7 +245,7 @@ def test_main_preloads_before_listening_and_warns_off_loopback(app_module, monke
     import logging
     order = []
     monkeypatch.setattr(app_module.service, "start", lambda: order.append("preload"))
-    monkeypatch.setattr(app_module.dashboard_facts.TESTS, "start", lambda: order.append("tests"))
+    monkeypatch.setattr(app_module.facts.TESTS, "start", lambda: order.append("tests"))
     monkeypatch.setattr(app_module.socketio, "run",
                         lambda app, **kw: order.append(("run", kw['host'], kw['port'],
                                                          kw['debug'])))
@@ -273,7 +273,7 @@ def test_a_run_report_that_cannot_be_written_is_logged_not_raised(injected, monk
 
 
 def test_desktop_mode_boosts_and_guards_and_restores_on_exit(app_module, monkeypatch):
-    import desktop
+    from dashboard import desktop
     calls = []
 
     class Guard:
@@ -407,7 +407,7 @@ def test_the_project_facts_route_answers_from_the_backend(app_module, monkeypatc
     monkeypatch.setattr(type(app_module.backend), "pipeline", property(lambda _s: None))
     monkeypatch.setattr(type(app_module.backend), "run_reports", property(lambda _s: None))
     monkeypatch.setattr(app_module.backend, "brain_facts", lambda: {"parameters": 5})
-    monkeypatch.setattr(app_module.dashboard_facts, "code_census", lambda: {"commits": 1})
+    monkeypatch.setattr(app_module.facts, "code_census", lambda: {"commits": 1})
     facts = app_module.app.test_client().get('/api/project').get_json()
     assert facts["brain"] == {"parameters": 5}
     assert facts["objective3"]["evidence"]["incidents"] == 0

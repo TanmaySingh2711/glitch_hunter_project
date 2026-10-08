@@ -41,6 +41,8 @@ echo "      Using $PY"
 echo "[2/5] Creating the environment (venv_gpu) ..."
 [ -x venv_gpu/bin/python ] || "$PY" -m venv venv_gpu
 VPY=venv_gpu/bin/python
+# Bytecode caches go to generated/, never next to the source (tools/pycache_hook.py).
+"$VPY" tools/pycache_hook.py >/dev/null
 "$VPY" -m pip install --quiet --upgrade pip
 
 echo "[3/5] Installing PyTorch (the biggest download, please wait) ..."

@@ -19,8 +19,8 @@ import pytest
 from incident_helpers import context, detection
 from test_dashboard_control import FakeBackend, wait_for
 
-import dashboard_backend as db
-import dashboard_service as ds
+from dashboard import backend as db
+from dashboard import service as ds
 from exploration import config
 from reporting.pipeline import IncidentPipeline
 from reporting.store import IncidentStore

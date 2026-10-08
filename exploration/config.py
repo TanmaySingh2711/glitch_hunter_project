@@ -1285,7 +1285,6 @@ CLEAN_GAME_TREE_SHA256 = "b1f6b18467db398a41f7272c414d7f2a81ae4929b1c7a788dc572f
 # so the project folder itself holds only the project. (Python's own
 # bytecode caches are not written at all: common/__init__.py.)
 GENERATED_DIR = "generated"
-CACHE_DIR = f"{GENERATED_DIR}/cache"                 # ruff, mypy, pytest, coverage
 LOGS_DIR = f"{GENERATED_DIR}/logs"                   # train.log + TensorBoard curves
 COVERAGE_AUDITS_DIR = f"{GENERATED_DIR}/coverage_audits"
 CALIBRATION_RUNS_DIR = f"{GENERATED_DIR}/calibration_runs"
@@ -1300,7 +1299,7 @@ RUN_REPORTS_DIR = f"{GENERATED_DIR}/run_reports"
 
 # ─── A NEW ROUTE EVERY DASHBOARD RUN (both games) ───
 # On the clean game the dashboard draws each action from the brain's own
-# policy (dashboard_backend.choose_action) instead of always taking its top
+# policy (dashboard.backend.choose_action) instead of always taking its top
 # pick, which replayed one fixed route. The policy is sharpened by this
 # temperature (< 1 favours the likelier actions; 0 is the old greedy play).
 # Measured on 2026-09-29 in the dashboard's own env (clean game, runs
@@ -1328,7 +1327,7 @@ DASHBOARD_FIXED_ROUTE_RUNS = {CLEAN_GAME_VARIANT: 0, BUGGED_GAME_VARIANT: 0}
 # and about 13 s at the dashboard's pace. It never applies to a fixed route.
 # Since the escape below it is only a last resort: no measured run reached it.
 DASHBOARD_STUCK_STEPS = 200
-# Never stuck (dashboard_backend.StuckEscape): after this many steps without
+# Never stuck (dashboard.backend.StuckEscape): after this many steps without
 # a new furthest x the dashboard tries running jumps to the right until Mario
 # reaches new ground. Healthy runs wait at most 78 steps (above), so it never
 # interrupts one. Measured in the dashboard's env (2026-10-03, Mario at rest

@@ -31,7 +31,7 @@ from gymnasium.wrappers import (
     ResizeObservation,
 )
 
-import game_window
+from dashboard import game_window
 from exploration import config
 from reporting.collision_invariants import CollisionInvariants
 from reporting.events import Detection, ExtraDetector, json_safe
@@ -193,7 +193,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         # checkpoint cannot be loaded here - it has to be retrained.
         #
         # Keep this list in sync with ACTION_NAMES in agent_logic.py and the
-        # info modal in web/templates/index.html.
+        # info modal in dashboard/web/templates/index.html.
         # ═══════════════════════════════════════════════════════════════════
         self.action_space = spaces.Discrete(10)
         self.observation_space = spaces.Box(low=0, high=255, shape=(240, 256, 3), dtype=np.uint8)
@@ -249,7 +249,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         # The window is created by <variant>/data/setup.py the first time it
         # is imported in this process (see WINDOW LIFECYCLE below). Wherever
         # that happens - the dashboard, a training worker, a tool, a test - it
-        # opens centred on the display the user is on (game_window.py). This
+        # opens centred on the display the user is on (dashboard/game_window.py). This
         # replaced a random offset per window, which put windows at arbitrary
         # places on the desktop.
         creates_window = 'data.setup' not in sys.modules
@@ -464,7 +464,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
     # GLITCH DETECTION — what actually feeds the dashboard's BUG TRACKER
     #
     # Sets info['glitch_alert'] to a human-readable string when the game
-    # violates an invariant it is supposed to hold. dashboard_backend.py turns
+    # violates an invariant it is supposed to hold. dashboard/backend.py turns
     # that into a "BUG FOUND" log line, which main.js routes into the bug
     # panel. Nothing wrote this key before, so that panel could never show
     # anything - this is the piece that was missing.
@@ -883,7 +883,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
     # that created it, and DESTROYS the window when that thread exits. The
     # dashboard used to create it on a short-lived socket-handler thread: the
     # popup vanished as soon as the handler returned, and the X button never
-    # reached anyone. dashboard_service.GameWindowService now owns it.
+    # reached anyone. dashboard.service.GameWindowService now owns it.
     #
     # Important quirk this works around: pygame's actual OS window is
     # created ONCE, at module-import time, by the top-level
@@ -1006,7 +1006,7 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         (width, height) BEFORE the numpy conversion via pg.transform.scale -
         the same technique _fast_obs() uses, see that method's comment for
         why this matters. Used by the dashboard's streaming path
-        (dashboard_backend.py), which only needs display-quality output at well
+        (dashboard/backend.py), which only needs display-quality output at well
         under the window's native 800x600 resolution."""
         surface: pg.Surface | None = pg.display.get_surface()
         if surface is None:

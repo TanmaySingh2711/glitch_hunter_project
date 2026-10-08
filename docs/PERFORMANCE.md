@@ -36,7 +36,7 @@ about 2% on top of the engine.
 | Render only the two frames the max-pool keeps | `custom_mario_env.SkipObservation` | 8.85 -> 7.68 ms per agent step: -13% time, +15% rollout throughput | `tests/test_env.py`: identical to `MaxAndSkipObservation`, frame for frame |
 | Downscale before copying to numpy | `CustomMarioEnv._fast_obs` | 5.6 -> 0.47 ms per capture; byte-identical to the old cv2 path (checked once, when made) | observation shape: `tests/test_env.py` |
 | No `chdir` in the engine step | `CustomMarioEnv.step` | ~1.9% of a step | `tests/test_env.py` |
-| Downscaled JPEG frames, raw bytes over the socket | `dashboard_backend` | 36% of the pixels, no base64 | `tests/test_dashboard_backend.py` |
+| Downscaled JPEG frames, raw bytes over the socket | `dashboard.backend` | 36% of the pixels, no base64 | `tests/test_dashboard_backend.py` |
 | Frozen T1 target per episode | `EpisodeLifecycle.begin_episode` | avoids a full-grid count on every discovering substep | - |
 
 ## Memory per worker

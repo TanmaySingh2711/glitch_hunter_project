@@ -140,8 +140,8 @@ flowchart TD
     end
     subgraph Server["app.py (Flask + Flask-SocketIO)"]
         API["Web API and live events"]
-        SVC["dashboard_service.py<br/>one game thread: start, stop, reset"]
-        BACK["dashboard_backend.py<br/>brain + game + video stream"]
+        SVC["dashboard/service.py<br/>one game thread: start, stop, reset"]
+        BACK["dashboard/backend.py<br/>brain + game + video stream"]
     end
     subgraph Game["Game and agent"]
         ENV["custom_mario_env.py<br/>the game as an environment + detectors"]
@@ -163,7 +163,7 @@ flowchart TD
 
 | Part | Files | Job |
 |---|---|---|
-| Dashboard | `app.py`, `dashboard_service.py`, `dashboard_backend.py`, `dashboard_facts.py`, `web/` | Serves the page, streams the game, pauses on bugs, serves the reports |
+| Dashboard | `app.py`, `dashboard/service.py`, `dashboard/backend.py`, `dashboard/facts.py`, `dashboard/web/` | Serves the page, streams the game, pauses on bugs, serves the reports |
 | Game and agent | `custom_mario_env.py`, `agent_logic.py`, `rewards/` | Runs the game one frame at a time, applies the brain's moves, runs the detectors |
 | Exploration | `exploration/` | Tracks where Mario has been and which places he can reach; holds every tuned setting (`config.py`) |
 | Evaluation | `evaluation/` | Measures how often a brain finishes the level |
@@ -210,13 +210,17 @@ glitch_hunter_project/
 ├── setup.bat, setup.sh         # one-click setup (Windows / Linux and macOS)
 ├── run_dashboard.bat           # Windows: double-click to start the dashboard
 ├── app.py                      # the dashboard server (start here)
-├── dashboard_service.py        # the single game thread: start, stop, reset
-├── dashboard_backend.py        # loads the brain, runs the game, streams video
-├── dashboard_facts.py          # the numbers shown on the Overview tab
 ├── custom_mario_env.py         # the game as an environment, plus detectors
 ├── agent_logic.py              # reward wrapper used in training
-├── game_window.py, desktop.py  # game-window and Windows desktop helpers
 ├── train_agent.py              # training script (optional)
+│
+├── dashboard/                  # everything behind the dashboard page
+│   ├── service.py              #   the single game thread: start, stop, reset
+│   ├── backend.py              #   loads the brain, runs the game, streams video
+│   ├── facts.py                #   the numbers shown on the Overview tab
+│   ├── game_window.py          #   the game window: centre, show, hide
+│   ├── desktop.py              #   Windows helpers: full speed on battery, Esc to stop
+│   └── web/                    #   the page itself: templates/ and static/
 │
 ├── games/
 │   ├── mario_clean/            # the original game, never changed
@@ -229,18 +233,21 @@ glitch_hunter_project/
 ├── training/                   # training callbacks and checkpoint helpers
 ├── common/                     # logging and safe file writes
 ├── tools/                      # command-line tools (see tools/README.md)
-├── web/                        # the dashboard page: templates/ and static/
 ├── tests/                      # automated tests
 ├── docs/                       # documentation and README images
-├── generated/                  # created while running, not in git:
-│                               #   incidents/, run_reports/, logs/, caches
-│                               #   (Python's bytecode cache goes here too)
 │
 ├── glitch_hunter_main_brain.zip           # the trained brain the dashboard uses
 ├── glitch_hunter_main_brain_coverage.npz  # its saved exploration map
+├── exploration_data/           # the reachable-area mask (in git) and training data
+├── checkpoints_qa/             # the final brain's approval record (in git) and evidence
 ├── artifacts.json              # SHA-256 hashes of the protected files
 ├── requirements.txt            # dependencies for pip
-└── pyproject.toml, uv.lock     # dependencies for uv, and tool settings
+├── pyproject.toml, uv.lock     # dependencies for uv, and tool settings
+│
+├── generated/                  # created while running, not in git: incidents/,
+│                               #   run_reports/, logs/, and every cache
+│                               #   (Python's bytecode too)
+└── venv_gpu/                   # the Python environment setup creates, not in git
 ```
 
 ---
@@ -319,7 +326,10 @@ pip install torch==2.14.0                                                      #
 # 5. Install everything else
 pip install -r requirements.txt
 
-# 6. Linux only
+# 6. Keep Python's bytecode in generated/, not next to the source
+python tools/pycache_hook.py
+
+# 7. Linux only
 sudo apt-get install -y libgl1
 ```
 
@@ -329,7 +339,7 @@ without it.
 
 If you use [uv](https://docs.astral.sh/uv/), `uv sync --active` inside the
 activated `venv_gpu` installs the exact versions from `uv.lock` (with the GPU
-build of PyTorch) in one command.
+build of PyTorch) in one command; then run step 6.
 
 ### The brain files
 
@@ -618,7 +628,7 @@ meet several and still finish.
 to a copy of the bugged game. After that, every bug's spot behaved exactly
 like the clean game (`tests/test_fix_hint.py`).
 
-**Code checks.** 912 automated tests. The full check
+**Code checks.** 948 automated tests. The full check
 (`python tools/check.py --full`) requires at least 90% test coverage.
 
 ---
@@ -725,8 +735,8 @@ Some things in this repo are **not** covered by it:
 |---|---|
 | `games/mario_clean/`, `games/mario_bugged/` | The Mario clone by Justin Meister. It was published without an open-source license, and its author describes it as meant for non-commercial, educational use. Do not use it commercially |
 | Game graphics, music and sounds | Nintendo's property (*Super Mario Bros.*). They also appear in the screenshots and reports. This project is not connected to or endorsed by Nintendo |
-| `web/static/vendor/socket.io.min.js` | The Socket.IO client, under its own MIT license |
-| `web/static/vendor/fonts/` | The Press Start 2P font, under the SIL Open Font License 1.1 (`OFL.txt` beside it) |
+| `dashboard/web/static/vendor/socket.io.min.js` | The Socket.IO client, under its own MIT license |
+| `dashboard/web/static/vendor/fonts/` | The Press Start 2P font, under the SIL Open Font License 1.1 (`OFL.txt` beside it) |
 
 Full details: [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
 

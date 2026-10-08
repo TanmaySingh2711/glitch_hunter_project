@@ -11,8 +11,8 @@ pre-commit install          # optional: lint + type-check on every commit
 
 (`uv sync --active` installs the same versions from `pyproject.toml`'s `dev` group.)
 
-Working on the dashboard page: edits to `web/templates/index.html`,
-`web/static/css/style.css` and `web/static/js/main.js` show on a browser refresh while
+Working on the dashboard page: edits to `dashboard/web/templates/index.html`,
+`dashboard/web/static/css/style.css` and `dashboard/web/static/js/main.js` show on a browser refresh while
 the dashboard keeps running (`app.py` re-reads the template and versions the
 CSS and JavaScript by their file times). A change to Python code still needs a
 restart of the dashboard.
@@ -27,12 +27,15 @@ python tools/check.py --full # before a merge or a release: + slow tests, 90% co
 Everything the project writes as it runs lands in `generated/` (git-ignored):
 the dashboard's evidence and run reports, the tools' outputs, the training
 log, and the ruff, mypy, pytest and coverage caches. The project writes no
-`__pycache__` folders: entry points set `sys.pycache_prefix` to
-`generated/cache/pycache` before their first project import (see
-`common/__init__.py`), and a new entry point should do the same.
-Running bare `pytest` leaves one `tests/__pycache__/conftest...pyc` (pytest
-compiles `conftest.py` before it can run); `python tools/check.py` sets
-`PYTHONPYCACHEPREFIX` for it, so it leaves none.
+`__pycache__` folders. In `venv_gpu`, a start-up line installed by
+`tools/pycache_hook.py` (the setup scripts run it) sends every Python's
+bytecode to `generated/cache/pycache` before anything is imported, however
+Python was started: a tool, bare `pytest`, an editor's Run button. Entry points
+also set `sys.pycache_prefix` themselves before their first project import
+(`common/__init__.py`), for a Python without the hook such as CI's; a new
+entry point should do the same, pointing at the project root's `generated/`.
+A stray `__pycache__/` in the project means the hook is missing: run
+`python tools/pycache_hook.py --check`.
 
 CI (`.github/workflows/ci.yml`) runs the same gates on every push, on Linux,
 Windows and macOS, with an 86% coverage floor on the fast tests. It also runs the

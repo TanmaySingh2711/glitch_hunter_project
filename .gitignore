@@ -26,17 +26,12 @@ venv_gpu/
 generated/
 
 # ─── PYTHON / TOOL CACHES ───
-# The project writes no bytecode (common/__init__.py) and keeps the tools'
-# caches in generated/; these guard against a tool run from elsewhere.
+# Bytecode goes to generated/cache/pycache (tools/pycache_hook.py in the venv,
+# common/__init__.py elsewhere), and pyproject.toml sends the ruff, mypy,
+# pytest and coverage caches to generated/ too. Only a Python started without
+# the hook can still write __pycache__/ next to the source.
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-
-# pytest-cov: `.coverage` locally (tools/check.py --full), `coverage.xml`
-# in CI (--cov-report=xml).
-.coverage
+# CI's coverage report (--cov-report=xml), written to the working directory.
 coverage.xml
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -99,13 +94,10 @@ glitch_hunter_qa_coverage.npz
 # SHA-256s are in artifacts.json.
 
 # ─── EDITORS & OS ───
-# CI runs on Windows and Linux and CONTRIBUTING.md invites contributors, so
-# the common per-machine droppings stay listed.
+# What the common editors and the Windows and macOS file managers drop into
+# a folder (CONTRIBUTING.md invites contributors).
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 .DS_Store
 Thumbs.db
 Desktop.ini
@@ -114,7 +106,7 @@ Desktop.ini
 # NOT IGNORED, ON PURPOSE - listed here so nobody "helpfully" adds them:
 #   uv.lock                     - the lockfile; committing it is what makes
 #                                 `uv sync` reproducible for your friend.
-#   web/static/vendor/          - the vendored socket.io client. It is a
+#   dashboard/web/static/vendor/          - the vendored socket.io client. It is a
 #                                 dependency we deliberately ship so the
 #                                 dashboard works with no internet.
 #   glitch_hunter_main_brain.zip, glitch_hunter_main_brain_coverage.npz,

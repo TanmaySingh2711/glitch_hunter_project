@@ -52,6 +52,8 @@ if not exist "venv_gpu\Scripts\python.exe" (
     %PY% -m venv venv_gpu || goto :fail
 )
 set "VPY=venv_gpu\Scripts\python.exe"
+rem Bytecode caches go to generated\, never next to the source (tools\pycache_hook.py).
+"%VPY%" tools\pycache_hook.py >nul || goto :fail
 "%VPY%" -m pip install --quiet --upgrade pip || goto :fail
 
 echo  [3/5] Installing PyTorch (the biggest download, please wait) ...

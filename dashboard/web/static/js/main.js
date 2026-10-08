@@ -753,18 +753,9 @@ document.addEventListener('DOMContentLoaded', () => {
             box.replaceChildren(
                 stat('Training steps', o2 && o2.timesteps ? num(o2.timesteps) : '-', o1 ? `in two stages: ${num(o1.timesteps)} to learn to finish, then exploring` : null, { pending: !o2 }),
                 stat('Level explored', covPct || '-', 'of every place Mario can reach', { pending: !covPct }),
-                stat('Finishes the level', o2 ? pct(o2.completion_rate) : '-', o2 ? `of ${num(o2.episodes)} test runs (was ${pct(o2.baseline_completion_rate)})` : null, { pending: !o2 }),
                 stat('Rules checked', nDet ? String(nDet) : '-', 'on every frame of the game', { pending: !nDet }),
-                stat('Planted bugs caught', nBugs ? `${caught} of ${nBugs}` : '-', 'with saved evidence', { ok: nBugs > 0 && caught === nBugs }),
             );
         }
-
-        const cat = $('bug-catalogue');
-        cat.replaceChildren(...o3.benchmark_bugs.map((b) => {
-            const d = el('div', 'bug-catalogue__item');
-            d.append(el('b', null, `${b.number}. ${b.name}`), el('span', null, b.summary));
-            return d;
-        }));
 
         const count = $('tab-history-count');
         count.hidden = !ev.incidents;

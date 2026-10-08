@@ -7,7 +7,7 @@
                                          everywhere; never a real bug report)
 
 Every socket handler only POSTS a command to the one game thread
-(dashboard_service.GameWindowService); none of them touches the pygame
+(dashboard.service.GameWindowService); none of them touches the pygame
 window or the env itself - see THE GAME WINDOW HAS ONE OWNER below.
 
 Incident evidence (Objective 3) is served read-only under /api/incidents and
@@ -30,7 +30,7 @@ import sys
 # terminal (e.g. redirected to a log file, or launched from another tool) -
 # output just sits in the buffer until it fills or the process exits.
 # Reconfiguring to line-buffering here means every line (this file's own,
-# plus everything it imports - dashboard_backend's [STREAM FPS] line, the
+# plus everything it imports - dashboard.backend's [STREAM FPS] line, the
 # startup pre-load messages below) shows up immediately, which matters for
 # actually being able to watch this server's real-time behavior rather
 # than only seeing output in one batch on exit.
@@ -72,13 +72,13 @@ from flask import Flask, Response, abort, render_template, request, send_file
 from flask_socketio import SocketIO
 
 import common  # noqa: F401 - first of the project: no __pycache__ (common/__init__.py)
-import dashboard_facts
 from common.logging_setup import configure_logging
+from dashboard import facts
 
-# dashboard_backend pulls in custom_mario_env, which sets SDL_AUDIODRIVER
+# dashboard.backend pulls in custom_mario_env, which sets SDL_AUDIODRIVER
 # before pygame loads - so it has to be imported before pygame is used anywhere.
-from dashboard_backend import DashboardBackend, DashboardConfig
-from dashboard_service import THREAD_NAME, GameWindowService
+from dashboard.backend import DashboardBackend, DashboardConfig
+from dashboard.service import THREAD_NAME, GameWindowService
 from exploration import config
 from reporting.pipeline import DeleteRefused
 from reporting.run_report import FILES as RUN_FILES
@@ -87,10 +87,10 @@ from reporting.store import StoreError
 
 log = logging.getLogger(__name__)
 
-# The page lives in web/: web/templates/index.html and web/static/ (still
+# The page lives in dashboard/web/: templates/index.html and dashboard/web/static/ (still
 # served at /static/...).
-app = Flask(__name__, template_folder="web/templates", static_folder="web/static")
-# The page's HTML is re-read whenever web/templates/index.html changes, so an
+app = Flask(__name__, template_folder="dashboard/web/templates", static_folder="dashboard/web/static")
+# The page's HTML is re-read whenever dashboard/web/templates/index.html changes, so an
 # edit to the page shows on a browser refresh, with no server restart.
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
@@ -132,7 +132,7 @@ DEFAULT_PORT = 5000
 # Windows a window belongs to - and dies with - the thread that created it:
 # the popup vanished right after "Start Testing" returned, and its X button
 # was never seen. Every window/env operation now happens on ONE long-lived
-# game thread (dashboard_service.py); the handlers below only post commands
+# game thread (dashboard/service.py); the handlers below only post commands
 # to it. That thread is also the single frame loop - there is no way to start
 # a second one, however fast Start is clicked.
 backend = DashboardBackend()
@@ -177,9 +177,9 @@ def api_project() -> dict[str, Any]:
     """The Overview page's facts: the objectives' measured results, the
     loaded brain, the detectors, the declared benchmark bugs, the evidence on
     disk and the size of the codebase - all read from the project's own
-    files (dashboard_facts.py), never typed in."""
+    files (dashboard/facts.py), never typed in."""
     pipeline, runs = backend.pipeline, backend.run_reports
-    return dashboard_facts.project_facts(
+    return facts.project_facts(
         incidents=pipeline.summaries() if pipeline is not None else [],
         runs=runs.summaries() if runs is not None else [], brain=backend.brain_facts())
 
@@ -561,17 +561,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                     help="skip the replay-based reproduction of each incident")
     ap.add_argument("--desktop", action="store_true",
                     help="what run_dashboard.bat uses: full speed on battery too "
-                         "(desktop.py), restored when the dashboard stops")
+                         "(dashboard/desktop.py), restored when the dashboard stops")
     return ap.parse_args(argv)
 
 
 def _desktop_mode() -> None:
-    """run_dashboard.bat's speed settings (desktop.py): this process is never
+    """run_dashboard.bat's speed settings (dashboard/desktop.py): this process is never
     throttled, and the laptop's power mode is Best performance while the
     dashboard runs - put back on exit, Ctrl+C or the console window's X."""
     import atexit
 
-    import desktop
+    from dashboard import desktop
     applied = desktop.boost_this_process()
     if applied:
         log.info("[POWER] this process: %s", ", ".join(applied))
@@ -612,7 +612,7 @@ def main(argv: list[str] | None = None) -> None:
     log.info("Model loaded. Ready for connections.")
     # The Overview page's test count: pytest's collection, in the background
     # at low priority, never on the game thread.
-    dashboard_facts.TESTS.start()
+    facts.TESTS.start()
 
     if host != LOOPBACK:
         log.warning("Listening on %s - reachable by other devices on this network, "

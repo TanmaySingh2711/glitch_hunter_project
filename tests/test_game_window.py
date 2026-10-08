@@ -1,4 +1,4 @@
-"""game_window.py's show / hide / minimise calls, through recording fakes.
+"""dashboard/game_window.py's show / hide / minimise calls, through recording fakes.
 
 The suite runs headless (SDL's dummy driver has no OS window), so the real
 calls are exercised against stand-ins for the Win32 handle, user32 and the
@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-import game_window
+from dashboard import game_window
 
 
 class FakeUser32:

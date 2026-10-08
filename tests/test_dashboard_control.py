@@ -20,8 +20,8 @@ import numpy as np
 import pygame as pg
 import pytest
 
-import dashboard_service as ds
-import game_window
+from dashboard import game_window
+from dashboard import service as ds
 
 
 class FakeBackend:

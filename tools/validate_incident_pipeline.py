@@ -2,8 +2,8 @@
 
     python tools/validate_incident_pipeline.py            (~30 s, headless)
 
-Runs the dashboard's own game thread (dashboard_service), backend
-(dashboard_backend) and web routes (app.py) with the approved Objective-2
+Runs the dashboard's own game thread (dashboard.service), backend
+(dashboard.backend) and web routes (app.py) with the approved Objective-2
 brain playing the CLEAN game, headless. Two SYNTHETIC probes stand in for
 bugs - the game itself is untouched, and every incident they produce is
 labelled synthetic - and every stage of Objective 3 is asserted:
@@ -31,7 +31,7 @@ import zipfile
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.pycache_prefix = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated", "cache", "pycache")  # bytecode goes to generated/ (common/__init__.py)
+sys.pycache_prefix = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "generated", "cache", "pycache")  # bytecode goes to generated/ (common/__init__.py)
 
 from common.cli import prepare_tool
 
@@ -91,8 +91,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     import app
-    import dashboard_backend as db
-    from dashboard_service import GameWindowService
+    from dashboard import backend as db
+    from dashboard.service import GameWindowService
     from reporting.schema import utc_now
     out = args.out or os.path.join(ROOT, config.INCIDENTS_DIR, "_validation",
                                    f"{utc_now():%Y%m%d-%H%M%S}")
@@ -209,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     # ── 5. the first site again, in a later episode: counted, stops again ─
     print("stage 5: a repeat sighting")
     svc.start_testing()
-    # The clean game stops when a run ends (dashboard_service RUN END); START
+    # The clean game stops when a run ends (dashboard.service RUN END); START
     # then plays the next run - which is where the first site is met again.
     deadline = time.monotonic() + args.timeout * 2
     runs_ended = 0

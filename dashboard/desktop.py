@@ -1,10 +1,10 @@
 """Desktop helpers for run_dashboard.bat: speed on battery, and centred windows.
 
-    python desktop.py center-console     centre the terminal this runs in
-    python desktop.py open-dashboard     wait for the dashboard, open it in the
-                                         default browser, centre that window
-    python desktop.py restore-power-mode put back a power mode the dashboard
-                                         changed (started by the dashboard itself)
+    python -m dashboard.desktop center-console     centre the terminal this runs in
+    python -m dashboard.desktop open-dashboard     wait for the dashboard, open it in
+                                                   the default browser, centre that window
+    python -m dashboard.desktop restore-power-mode put back a power mode the dashboard
+                                                   changed (started by the dashboard itself)
 
 app.py --desktop (what run_dashboard.bat starts) also calls boost_this_process()
 and runs a PowerModeGuard for as long as the dashboard runs.
@@ -31,7 +31,7 @@ user watches the browser, so it is exactly such a process. Hence two fixes:
     .dashboard_power.json until then, so even a crash cannot lose them.
 
 Everything here is best-effort and Windows-only (the Windows bodies sit
-inside `if sys.platform == 'win32':` blocks, as in game_window.py, so mypy
+inside `if sys.platform == 'win32':` blocks, as in dashboard/game_window.py, so mypy
 checks them only for Windows): elsewhere, or when a call is refused, it does
 nothing and the dashboard runs exactly as before.
 """
@@ -49,18 +49,18 @@ import webbrowser
 from collections.abc import Callable
 from typing import Any
 
-import game_window
+from dashboard import game_window
 
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_FILE = os.path.join(PROJECT_ROOT, "generated", ".dashboard_power.json")
 BEST_PERFORMANCE = "ded574b5-45a0-4f42-8737-46345c09c238"
 _OVERLAY_KEY = r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes"
 _OVERLAY_VALUE = {"ac": "ActiveOverlayAcPowerScheme", "dc": "ActiveOverlayDcPowerScheme"}
 GUARD_PERIOD_S = 3.0          # how soon a plug/unplug is noticed while running
 RESTORE_PERIOD_S = 15.0       # the background restorer's check interval
-PAGE_TITLE = "The Glitch Hunter"          # web/templates/index.html <title>
+PAGE_TITLE = "The Glitch Hunter"          # dashboard/web/templates/index.html <title>
 # A browser window's title starts with the page's title. Matching only these
 # processes, and only a title that STARTS with PAGE_TITLE, keeps other windows
 # that merely mention it - an editor with this project open - from moving.
@@ -304,7 +304,7 @@ def _spawn_restorer() -> None:
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     try:
         subprocess.Popen([pyw if os.path.isfile(pyw) else exe,  # noqa: S603 (fixed argv)
-                          os.path.abspath(__file__), "restore-power-mode"],
+                          "-m", "dashboard.desktop", "restore-power-mode"],
                          cwd=PROJECT_ROOT, close_fds=True, creationflags=flags)
     except OSError:
         log.debug("could not start the power-mode restorer", exc_info=True)

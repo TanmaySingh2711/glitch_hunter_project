@@ -7,19 +7,24 @@ project's own work is covered by the MIT license below.
   COVERED by the MIT license (original work in this project):
       every file in this repository EXCEPT the ones listed under NOT
       COVERED - the Python modules at the top level and in common/,
-      evaluation/, exploration/, reporting/, rewards/, training/, tools/
-      and tests/; web/ (except web/static/vendor/); docs/
-      and the other documentation and configuration files; and the
-      trained model weights:
-      mario_brain_checkpoint.zip          (the 6M brain, in this repository)
-      glitch_hunter_final_brain_16M.zip   (the final 16M brain, published
-                                           as a GitHub Release asset)
+      dashboard/, evaluation/, exploration/, reporting/, rewards/,
+      training/, tools/ and tests/; dashboard/web/ (except
+      dashboard/web/static/vendor/); docs/ and the other documentation and
+      configuration files; and the trained model weights:
+      glitch_hunter_main_brain.zip, glitch_hunter_main_brain_coverage.npz
+                                          (the final 16M brain, in this
+                                           repository and as a GitHub
+                                           Release asset)
+      mario_brain_checkpoint.zip          (the 6M brain, in this
+                                           repository's history)
 
   NOT COVERED — third-party, different terms, see docs/THIRD_PARTY_NOTICES.md:
       games/mario_clean/          (the Super Mario Bros clone and its assets)
       games/mario_bugged/         (a copy of it, for deliberate QA test bugs)
-      web/static/vendor/    (the Socket.IO client - its own MIT license; the
-                             Press Start 2P font - SIL Open Font License 1.1)
+      dashboard/web/static/vendor/
+                                  (the Socket.IO client - its own MIT license;
+                                   the Press Start 2P font - SIL Open Font
+                                   License 1.1)
       the game's graphics wherever they appear, including the screenshots
       and recordings in docs/assets/ and in every incident report
 

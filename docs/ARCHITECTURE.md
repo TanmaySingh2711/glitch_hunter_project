@@ -16,8 +16,8 @@ flowchart TD
         TOOLS["tools/*.py<br/>one-off measurements"]
     end
     subgraph runtime["Runtime"]
-        SVC["dashboard_service.py<br/>the one game thread"]
-        BACK["dashboard_backend.py<br/>env + model + frame stream + live panel"]
+        SVC["dashboard/service.py<br/>the one game thread"]
+        BACK["dashboard/backend.py<br/>env + model + frame stream + live panel"]
         TRN["training/<br/>callbacks, checkpoints, value head"]
     end
     subgraph agent["Agent"]
@@ -91,7 +91,7 @@ else follows from it:
 | training stops | Level 1 fully covered (3,757,990 px), or a safety cap | 6,000,000 steps |
 
 The dashboard ignores the switch and shows a brain under that brain's own
-reward (`dashboard_backend.select_checkpoint`): the main brain
+reward (`dashboard.backend.select_checkpoint`): the main brain
 (`glitch_hunter_main_brain.zip`) when its SHA-256 matches the closure
 record, else a working QA brain, else the 6M brain. It draws each move from
 the brain's own policy (`choose_action`, temperature
@@ -161,7 +161,7 @@ decision, not a refactor.
   same virgin pixel.
 * **One thread owns the game window.** On Windows a window dies with the
   thread that created it, so every window and env call in the dashboard runs
-  on `dashboard_service`'s single game thread.
+  on `dashboard.service`'s single game thread.
 * **One game variant at a time, and the clean one is pinned.** Both
   variants import as `data`; `claim_game_variant` refuses to mix them, and
   the dashboard's switch unloads one completely (`release_game_variant`)
@@ -209,17 +209,18 @@ decision, not a refactor.
 | a reward weight or threshold | `exploration/config.py` (the balance asserts run at wrapper construction) | `pytest tests/test_phase_reward.py tests/test_reward_qa.py` |
 | the QA reward logic | `rewards/qa.py` | `pytest tests/test_reward_*.py tests/test_phase_reward.py` |
 | when a QA episode ends | `exploration/lifecycle.py` | `pytest tests/test_episode_lifecycle.py` |
-| what the dashboard shows | `dashboard_backend.py` (the live panel: `telemetry`, `coverage_now`), `web/static/`, `web/templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py tests/test_dashboard_backend.py` |
-| the Overview page's facts | `dashboard_facts.py` (every number read from the project's own files) | `pytest tests/test_dashboard_facts.py` |
+| what the dashboard shows | `dashboard/backend.py` (the live panel: `telemetry`, `coverage_now`), `dashboard/web/static/`, `dashboard/web/templates/` | `pytest tests/test_dashboard_control.py tests/test_concurrency.py tests/test_dashboard_incidents.py tests/test_dashboard_backend.py` |
+| the Overview page's facts | `dashboard/facts.py` (every number read from the project's own files) | `pytest tests/test_dashboard_facts.py` |
 | incidents, reports, replay | `reporting/` | `pytest tests/test_incident_*.py` then `python tools/validate_incident_pipeline.py` |
-| the clean game's run report | `reporting/run_report.py`, `dashboard_backend._finish_run` | `pytest tests/test_run_report.py tests/test_dashboard_backend.py` |
+| the clean game's run report | `reporting/run_report.py`, `dashboard.backend._finish_run` | `pytest tests/test_run_report.py tests/test_dashboard_backend.py` |
 | deleting saved evidence (Bug History's Delete and Clear history) | `app.py` (DELETING), `reporting/pipeline.IncidentPipeline.delete`, `reporting/store.IncidentStore.delete`, `reporting/run_report.RunReports.delete`, `common/fileio.retire_dir` | `pytest tests/test_history_delete.py` |
 | a report's "Where to fix it" | `reporting/fix_hint.py` (read from the incident record and the game's source) | `pytest tests/test_fix_hint.py` (applies the suggested edits to a copy of the bugged game via `tests/fix_probe.py`) |
-| how the dashboard's brain picks moves (a new route every run) | `dashboard_backend.choose_action` / `route_temperature`, `config.DASHBOARD_POLICY_TEMPERATURE`, `DASHBOARD_FIXED_ROUTE_RUNS`, `DASHBOARD_STUCK_STEPS`, `StuckEscape`, `pit_traps`, `pit_trap_ahead`, `DASHBOARD_ESCAPE_*`, `PIT_CAUTION_PX`, `CLIMB_HOP_HOLD` | `pytest tests/test_dashboard_backend.py tests/test_dashboard_e2e.py` |
+| how the dashboard's brain picks moves (a new route every run) | `dashboard.backend.choose_action` / `route_temperature`, `config.DASHBOARD_POLICY_TEMPERATURE`, `DASHBOARD_FIXED_ROUTE_RUNS`, `DASHBOARD_STUCK_STEPS`, `StuckEscape`, `pit_traps`, `pit_trap_ahead`, `DASHBOARD_ESCAPE_*`, `PIT_CAUTION_PX`, `CLIMB_HOP_HOLD` | `pytest tests/test_dashboard_backend.py tests/test_dashboard_e2e.py` |
 | the one-click setup | `setup.bat`, `setup.sh` (checked on clean machines by CI's *One-click setup* job) | `setup.bat norun` / `bash setup.sh norun` |
+| no `__pycache__/` next to the source, however Python is started | `tools/pycache_hook.py` (a `.pth` start-up line in `venv_gpu`, installed by both setup scripts); `common/__init__.py` for a Python without it | `pytest tests/test_pycache_hook.py` |
 | a library that will not load (Windows blocking PyTorch, a missing package) gets a plain answer | `tools/check_environment.py`, run by `run_dashboard.bat` after an error and by both setup scripts | `pytest tests/test_check_environment.py` |
-| `run_dashboard.bat`: speed on battery, centred windows | `desktop.py`, `game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |
-| Esc stops the dashboard (in its console window, or on the page: Esc then Yes), like Ctrl+C | `desktop.py` (`watch_keys`), `app.py` (`/api/stop`), `web/static/js/main.js` | `pytest tests/test_dashboard_stop.py` |
+| `run_dashboard.bat`: speed on battery, centred windows | `dashboard/desktop.py`, `dashboard/game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |
+| Esc stops the dashboard (in its console window, or on the page: Esc then Yes), like Ctrl+C | `dashboard/desktop.py` (`watch_keys`), `app.py` (`/api/stop`), `dashboard/web/static/js/main.js` | `pytest tests/test_dashboard_stop.py` |
 | the game itself (deliberate bugs) | `games/mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |
 | anything | - | `python tools/check.py` |

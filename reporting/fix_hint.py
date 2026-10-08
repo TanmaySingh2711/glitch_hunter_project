@@ -46,9 +46,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from reporting.collision_invariants import Rect, intersection
 from reporting.variants import PROJECT_ROOT, game_dir
-
-Rect = tuple[int, int, int, int]
 
 LEVEL_FILE = ("data", "states", "level1.py")
 PLAYER_FILE = ("data", "components", "mario.py")
@@ -348,12 +347,6 @@ def _rect(v: Any) -> Rect | None:
     return (int(v[0]), int(v[1]), int(v[2]), int(v[3]))
 
 
-def _intersection(a: Rect, b: Rect) -> Rect | None:
-    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
-    x1, y1 = min(a[0] + a[2], b[0] + b[2]), min(a[1] + a[3], b[1] + b[3])
-    return (x0, y0, x1 - x0, y1 - y0) if x1 > x0 and y1 > y0 else None
-
-
 def _covered(part: Rect, by: Sequence[Rect]) -> bool:
     """True when every pixel of `part` lies in one of `by` (exact, on the
     grid of their edges)."""
@@ -411,13 +404,13 @@ def _clip(record: Mapping[str, Any], m: Mapping[str, Any], variant: str) -> dict
         return None
     name, entered = _NAME[solid], str(m.get("entered_from", "unknown"))
     check_first = "check_mario_y_collisions" if _vertical_first(entered) else "check_mario_x_collisions"
-    inside = _intersection(mario, drawn) or drawn
+    inside = intersection(mario, drawn) or drawn
     evidence = [f"Drawn {name}: {_fmt(drawn)}.",
                 (f"Mario's collider was {m.get('depth_x')} x {m.get('depth_y')} px inside it "
                 f"(entered from the {entered}).")]
 
     if solid in _DESIGNED:
-        colliders = [r for g, r in _geometry(record, [solid]) if _intersection(r, drawn)]
+        colliders = [r for g, r in _geometry(record, [solid]) if intersection(r, drawn)]
         if not colliders:
             fn = _setup_function(level, _GROUP[solid])
             places = [_place(level, fn.start, fn.start, f"builds every "
@@ -429,8 +422,8 @@ def _clip(record: Mapping[str, Any], m: Mapping[str, Any], variant: str) -> dict
                     "suggestion": f"Add a collider with the drawn rectangle ({_fmt(drawn)}).",
                     "basis": BASIS}
         if not _covered(inside, colliders):
-            col = max(colliders, key=lambda r: (_intersection(r, drawn) or (0, 0, 0, 0))[2]
-                      * (_intersection(r, drawn) or (0, 0, 0, 0))[3])
+            col = max(colliders, key=lambda r: (intersection(r, drawn) or (0, 0, 0, 0))[2]
+                      * (intersection(r, drawn) or (0, 0, 0, 0))[3])
             diffs = _differences(col, drawn)
             places = []
             builders = (_builders(level, col[0], col[1])
@@ -493,7 +486,7 @@ def _invisible(record: Mapping[str, Any], m: Mapping[str, Any], variant: str) ->
     if part is None or level is None:
         return None
     hits = [(g, r) for g, r in _geometry(record, _DESIGNED)
-            if _intersection((part[0] - 1, part[1] - 1, part[2] + 2, part[3] + 2), r)]
+            if intersection((part[0] - 1, part[1] - 1, part[2] + 2, part[3] + 2), r)]
     evidence = [(f"Mario was stopped ({m.get('contact')} contact) by a collider at "
                 f"{_fmt(part)}, where nothing is drawn.")]
     if not hits:

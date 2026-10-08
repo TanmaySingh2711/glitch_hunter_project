@@ -18,7 +18,7 @@ kept narrow.
   browser.
 * **No debug server.** `debug=False` always - the Werkzeug debugger is a
   remote code execution console by design.
-* **Offline.** The Socket.IO client and the pixel font are vendored (`web/static/vendor/`); the page
+* **Offline.** The Socket.IO client and the pixel font are vendored (`dashboard/web/static/vendor/`); the page
   loads nothing from the internet.
 * **Incident files are served from an allow-list, not from paths.** The
   report and evidence routes (`/incidents/<id>/<file>`, `/api/incidents/...`)
@@ -34,7 +34,7 @@ kept narrow.
   clean-run report and file names from a fixed list
   (`reporting/run_report.RunReports.path`); `tests/test_run_report.py`
   checks the refusals. `GET /api/runs` and `/api/project` only read: the saved
-  reports' summaries, and the project's own records (`dashboard_facts.py`).
+  reports' summaries, and the project's own records (`dashboard/facts.py`).
 * **Only four requests change what is saved, and all are `DELETE`.**
   `/api/incidents/<id>`, `/api/incidents`, `/api/runs/<id>` and `/api/runs`
   are the Bug History page's Delete and Clear history. They take the same
@@ -62,7 +62,7 @@ kept narrow.
 ## What run_dashboard.bat changes on this computer
 
 `app.py --desktop` (what `run_dashboard.bat` starts) keeps the dashboard at
-full speed on battery (`desktop.py`). It needs no administrator rights and
+full speed on battery (`dashboard/desktop.py`). It needs no administrator rights and
 changes only two things. Its own process opts out of Windows' power
 throttling. While the dashboard runs, the Windows power mode is set to *Best
 performance* - when it starts and whenever the laptop is plugged in or
@@ -78,7 +78,9 @@ that then exits. Until then the original values are kept in
 
 They only work inside the project folder: they create `venv_gpu/` there and
 install the pinned libraries into it, from PyPI and PyTorch's own index, over
-HTTPS. The one change outside the folder: on Windows, if Python 3.12 is
+HTTPS. Into `venv_gpu` they also write one start-up line,
+`glitch_hunter_pycache.pth` (`tools/pycache_hook.py`), which only tells that
+venv's Python to keep its bytecode in `generated/`. The one change outside the folder: on Windows, if Python 3.12 is
 missing, `setup.bat` installs it for the current user with `winget`
 (Microsoft's package manager, package `Python.Python.3.12`). No administrator
 rights are needed. If the brain files are missing they are fetched with

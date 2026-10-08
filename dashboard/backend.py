@@ -3,7 +3,7 @@
 Split out of agent_logic.py, which is now only the reward wrapper. This is
 the RUNTIME half - it loads the approved brain, builds the same observation
 chain training uses, and turns every agent step into a JPEG frame plus a log
-line for the browser. dashboard_service.GameWindowService drives it from its
+line for the browser. dashboard.service.GameWindowService drives it from its
 single game thread; app.py never touches it directly.
 
 Objective 3: the env runs with evidence on, and every detector verdict it
@@ -105,7 +105,7 @@ _coverage_banked = 0
 # in the middle of one.
 #
 # The dashboard itself no longer relies on it: every window and env call now
-# runs on dashboard_service's single game thread (the only thread Windows
+# runs on dashboard.service's single game thread (the only thread Windows
 # lets drive the window), so there is nothing left to race. It stays as a
 # guard for the module-level helpers, which remain callable from anywhere.
 # ═══════════════════════════════════════════════════════════════════════
@@ -359,7 +359,7 @@ def close_agent_window() -> None:
 
 
 class DashboardBackend:
-    """The real work behind dashboard_service.GameWindowService.
+    """The real work behind dashboard.service.GameWindowService.
 
     Every method runs on the service's one game thread - the thread that
     creates the window, and so the only one Windows lets drive it. env_lock

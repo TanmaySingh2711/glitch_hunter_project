@@ -14,7 +14,7 @@ both are pinned here:
 A third came later: the handler threads also OWNED the pygame window, and
 Windows destroys a window with its creating thread. All three are now closed
 by one design - a single game thread owns the window and is the only frame
-loop (dashboard_service.py, tested in test_dashboard_control.py).
+loop (dashboard/service.py, tested in test_dashboard_control.py).
 
 These run without a live server - they exercise the primitives directly.
 """
@@ -22,18 +22,18 @@ import threading
 
 import pytest
 
-import dashboard_backend
+from dashboard import backend
 
 
 def test_env_lock_is_reentrant():
     """open_agent_window() takes env_lock and then calls into helpers that
     may take it again. A plain Lock would self-deadlock on the second
     acquire; it has to be an RLock."""
-    assert isinstance(dashboard_backend.env_lock, type(threading.RLock()))
-    with dashboard_backend.env_lock:
-        acquired = dashboard_backend.env_lock.acquire(blocking=False)
+    assert isinstance(backend.env_lock, type(threading.RLock()))
+    with backend.env_lock:
+        acquired = backend.env_lock.acquire(blocking=False)
         assert acquired, "env_lock must be reentrant"
-        dashboard_backend.env_lock.release()
+        backend.env_lock.release()
 
 
 def test_close_window_waits_for_an_in_flight_step(env):
@@ -46,7 +46,7 @@ def test_close_window_waits_for_an_in_flight_step(env):
     release = threading.Event()
 
     def fake_frame_loop():
-        with dashboard_backend.env_lock:
+        with backend.env_lock:
             holding.set()
             order.append('step-start')
             release.wait(timeout=5)
@@ -59,7 +59,7 @@ def test_close_window_waits_for_an_in_flight_step(env):
     closer_done = threading.Event()
 
     def closer():
-        dashboard_backend.close_agent_window()
+        backend.close_agent_window()
         order.append('closed')
         closer_done.set()
 
@@ -86,12 +86,12 @@ def test_app_handlers_never_touch_the_window_themselves():
     """Every socket handler runs on its own short-lived thread, and a window
     created or driven from one of those dies with it (Windows destroys a
     window when its creating thread exits - measured). So app.py must only
-    post commands to the game thread (dashboard_service.py); the frame loop,
+    post commands to the game thread (dashboard/service.py); the frame loop,
     the pre-load and every window call live there. The behaviour - one frame
     loop, clicks landing between steps - is tested in test_dashboard_control.
     """
     import pathlib
-    src = pathlib.Path(dashboard_backend.__file__).with_name('app.py').read_text(
+    src = pathlib.Path(backend.__file__).parent.parent.joinpath('app.py').read_text(
         encoding='utf-8')
     code = chr(10).join(line for line in src.splitlines()
                         if not line.lstrip().startswith('#'))

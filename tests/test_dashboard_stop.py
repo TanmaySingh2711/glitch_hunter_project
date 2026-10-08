@@ -57,8 +57,8 @@ def test_the_real_interrupt_is_the_one_ctrl_c_makes(monkeypatch):
 
 
 def test_the_page_asks_before_it_stops():
-    html = read("web", "templates", "index.html")
-    js = read("web", "static", "js", "main.js")
+    html = read("dashboard", "web", "templates", "index.html")
+    js = read("dashboard", "web", "static", "js", "main.js")
     assert 'id="stop-dialog"' in html and "Stop the dashboard?" in html
     assert 'id="stop-dialog-no" class="btn btn--secondary" type="button" data-close autofocus' in html
     assert "e.key !== 'Escape'" in js and "stopDialog.showModal()" in js
@@ -69,7 +69,7 @@ def test_the_page_asks_before_it_stops():
 
 # ── Esc in the console window ─────────────────────────────────────────────
 def test_esc_in_the_console_stops_it_and_other_keys_do_not():
-    import desktop
+    from dashboard import desktop
     keys = iter(["a", "\r", "x", desktop.ESC, "never read"])
     pending = {"n": 4}
     stopped = []
@@ -86,14 +86,14 @@ def test_esc_in_the_console_stops_it_and_other_keys_do_not():
 
 
 def test_the_watcher_waits_while_no_key_is_pressed_and_ends_with_the_dashboard():
-    import desktop
+    from dashboard import desktop
     polls = iter([True, True, False])
     desktop.watch_keys(lambda: False, lambda: "", lambda: pytest.fail("no key was pressed"),
                        alive=lambda: next(polls), poll_s=0)
 
 
 def test_no_console_means_no_watcher(monkeypatch):
-    import desktop
+    from dashboard import desktop
     monkeypatch.setattr(desktop.sys, "stdin", None)
     assert desktop.install_escape_to_stop(lambda: None) is False
 

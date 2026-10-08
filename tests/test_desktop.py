@@ -1,4 +1,4 @@
-"""desktop.py: run_dashboard.bat's speed on battery and its centred windows.
+"""dashboard/desktop.py: run_dashboard.bat's speed on battery and its centred windows.
 
 The power-mode guard is driven through fakes for the power source, the
 current mode and the setter, so these tests never change this machine's
@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-import desktop
+from dashboard import desktop
 
 ORIGINAL_AC, ORIGINAL_DC = "00000000-0000-0000-0000-000000000000", "961cc777-battery-saver"
 
@@ -275,5 +275,19 @@ def test_the_restorer_is_started_detached(monkeypatch):
     monkeypatch.setattr(desktop.subprocess, "Popen", lambda args, **kw: started.append((args, kw)))
     desktop._spawn_restorer()
     (args, kw), = started
-    assert args[-2:] == [desktop.os.path.abspath(desktop.__file__), "restore-power-mode"]
+    assert args[1:] == ["-m", "dashboard.desktop", "restore-power-mode"]
     assert kw["cwd"] == desktop.PROJECT_ROOT
+
+
+def test_the_module_runs_the_way_run_dashboard_bat_and_the_restorer_start_it():
+    """`python -m dashboard.desktop ...` from the project root: as a module,
+    so its `from dashboard import game_window` resolves."""
+    import subprocess
+    import sys
+    out = subprocess.run([sys.executable, "-m", "dashboard.desktop"], cwd=desktop.PROJECT_ROOT,
+                         capture_output=True, text=True, timeout=60, check=False)
+    assert out.returncode == 2 and "center-console" in out.stderr, out.stderr
+    with open(desktop.os.path.join(desktop.PROJECT_ROOT, "run_dashboard.bat"), encoding="utf-8") as fh:
+        bat = fh.read()
+    assert "python.exe -m dashboard.desktop center-console" in bat
+    assert "pythonw.exe -m dashboard.desktop open-dashboard" in bat

@@ -117,9 +117,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
-                     "dashboard_backend", "dashboard_facts", "dashboard_service", "evaluation",
-                     "exploration", "game_window", "reporting", "rewards", "train_agent",
+known-first-party = ["agent_logic", "app", "common", "custom_mario_env", "dashboard",
+                     "evaluation", "exploration", "reporting", "rewards", "train_agent",
                      "training"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -140,9 +139,8 @@ known-first-party = ["agent_logic", "app", "common", "custom_mario_env",
 [tool.mypy]
 python_version = "3.12"
 cache_dir = "generated/cache/mypy"
-files = ["agent_logic.py", "app.py", "custom_mario_env.py", "dashboard_backend.py",
-         "dashboard_service.py", "desktop.py", "game_window.py", "train_agent.py",
-         "common", "evaluation", "exploration", "reporting", "rewards", "training", "tools"]
+files = ["agent_logic.py", "app.py", "custom_mario_env.py", "train_agent.py",
+         "common", "dashboard", "evaluation", "exploration", "reporting", "rewards", "training", "tools"]
 exclude = ["^games/", "^venv_gpu/",
            "^tools/objective2_evidence/"]   # preserved anomaly reproductions, kept as recorded
 strict = true

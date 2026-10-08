@@ -29,7 +29,7 @@ from reporting.variants import BUG_MANIFEST_NAME
 
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # evaluation.completion.BASELINE_PATH, not imported from there: that module
 # loads pygame, and app.py imports this module before custom_mario_env has set
 # pygame's environment up - so nothing here may load pygame at import time
@@ -138,10 +138,13 @@ def _git(*args: str) -> str | None:
 
 
 def _python_files() -> list[str]:
-    """The project's own Python files (the vendored game copies are not)."""
-    listed = _git("ls-files", "*.py")
+    """The project's own Python files as they are in the working copy (the
+    vendored game copies are not): tracked or new, but not ignored, and not a
+    tracked file since deleted or moved."""
+    listed = _git("ls-files", "--cached", "--others", "--exclude-standard", "--", "*.py")
     if listed is not None:
-        names = [n.strip() for n in listed.splitlines() if n.strip()]
+        names = sorted({n.strip() for n in listed.splitlines() if n.strip()
+                        and os.path.isfile(os.path.join(PROJECT_ROOT, n.strip()))})
     else:                                 # not a git checkout: walk the tree
         skip = {"venv_gpu", ".venv", ".git", "__pycache__", ".mypy_cache", ".ruff_cache",
                 ".pytest_cache", *GAME_DIRS}

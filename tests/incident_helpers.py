@@ -91,7 +91,7 @@ def context(det, frames=8, tree=FAKE_TREE, session_id="S-TEST"):
 
 class FakeBrain:
     """Stands in for the loaded PPO model where the dashboard chooses actions
-    (dashboard_backend.choose_action): its policy puts all the weight on one
+    (dashboard.backend.choose_action): its policy puts all the weight on one
     action, so every draw - at any temperature - is that action."""
 
     class _Policy:

@@ -26,5 +26,5 @@
 
 # Generated / vendored: collapsed in diffs and excluded from language stats.
 uv.lock                   linguist-generated=true -diff
-web/static/vendor/**      linguist-vendored=true
+dashboard/web/static/vendor/**      linguist-vendored=true
 games/**                  linguist-vendored=true

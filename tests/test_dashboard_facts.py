@@ -1,4 +1,4 @@
-"""dashboard_facts.py: the numbers the dashboard's Overview shows.
+"""dashboard/facts.py: the numbers the dashboard's Overview shows.
 
 Every one must come from the project's own files, and anything that cannot
 be read must come back as None or empty - never a guess.
@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-import dashboard_facts as df
+from dashboard import facts as df
 from exploration import config
 from reporting.evidence import TITLES
 
@@ -22,7 +22,7 @@ def test_the_baseline_path_is_the_evaluation_modules_own():
 def test_importing_it_does_not_load_pygame():
     # app.py imports this module before custom_mario_env has set pygame up.
     out = subprocess.run([sys.executable, "-c",
-                          "import sys, dashboard_facts; print('pygame' in sys.modules)"],
+                          "import sys, dashboard.facts; print('pygame' in sys.modules)"],
                          cwd=df.PROJECT_ROOT, capture_output=True, text=True, timeout=60,
                          check=True)
     assert out.stdout.strip() == "False"
@@ -95,14 +95,14 @@ def test_the_code_census_counts_the_projects_python_not_the_game(monkeypatch):
     assert census["test_files"] > 0
     files = df._python_files()
     assert not [f for f in files if f.split("/", 1)[0] in df.GAME_DIRS]
-    assert "dashboard_backend.py" in files
+    assert "dashboard/backend.py" in files
 
 
 def test_the_census_walks_the_tree_without_git(monkeypatch):
     monkeypatch.setattr(df, "_git", lambda *a: None)
     monkeypatch.setattr(df, "_census", None)
     files = df._python_files()
-    assert "dashboard_backend.py" in files and "tests/test_dashboard_facts.py" in files
+    assert "dashboard/backend.py" in files and "tests/test_dashboard_facts.py" in files
     assert not [f for f in files if f.split("/", 1)[0] in df.GAME_DIRS or "venv" in f]
     assert df.code_census()["commits"] is None
 

@@ -94,7 +94,7 @@ Session = Generator[dict[str, Any], None, None]
 
 
 class Backend(Protocol):
-    """What the service drives (dashboard_backend.DashboardBackend in the
+    """What the service drives (dashboard.backend.DashboardBackend in the
     app, a recording fake in tests/test_dashboard_control.py)."""
 
     def preload(self) -> None: ...

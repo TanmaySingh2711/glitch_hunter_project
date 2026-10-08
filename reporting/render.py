@@ -24,7 +24,7 @@ from exploration import config
 from reporting.evidence import decode_png, read_context_zip
 from reporting.fix_hint import fix_hint, fix_text
 
-STREAM_SIZE = (480, 360)          # the dashboard stream's frame size (dashboard_backend)
+STREAM_SIZE = (480, 360)          # the dashboard stream's frame size (dashboard.backend)
 _FRAME_MS = 1000.0 / 60.0
 TRACE_ROWS_IN_REPORT = 24         # six agent steps of per-frame detail before the trigger
 

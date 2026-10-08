@@ -40,7 +40,6 @@ INCIDENT_ID_RE = re.compile(r"INC-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}")
 # Every file a bundle may hold. Reports re-rendered later get a version
 # suffix (report.v2.pdf) instead of replacing the original.
 RAW_ARTIFACTS = ("incident.json", "trigger.png", "context_frames.zip", "trajectory.json")
-DERIVED_ARTIFACTS = ("context.gif", "report.md", "report.pdf", "reproduction.json")
 _VERSION = r"(\.v(?:[2-9]|[1-9][0-9]+))?"
 ARTIFACT_NAME_RE = re.compile(
     r"(incident\.json|trigger\.png|context_frames\.zip|trajectory\.json|manifest\.json"
@@ -50,7 +49,6 @@ SEVERITIES = ("critical", "high", "medium", "low", "none", "unclassified")
 CONFIDENCE_LEVELS = ("high", "medium", "low", "not_applicable")
 REPRODUCTION_STATUSES = ("not_attempted", "pending", "reproduced", "reproduced_state_only",
                          "not_reproduced", "diverged", "not_possible", "timeout", "error")
-RENDER_STATUSES = ("pending", "done", "failed", "skipped")
 
 
 def utc_now() -> datetime.datetime:
