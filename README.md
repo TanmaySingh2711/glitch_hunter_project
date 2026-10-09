@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/bug-found.png" alt="The dashboard stopped on a stair-clipping bug it just found" width="900">
+  <img src="docs/assets/ui-bug-found.png" alt="The dashboard stopped on an impossible-jump bug it just found" width="900">
 </p>
 
 There is no hosted demo. The project runs on your own computer, and the setup is one click (see [Installation](#installation)).
@@ -660,15 +660,6 @@ The dashboard has four tabs. Here is each one.
 **Bug History.** Every saved bug and every clean-run report, with their files, a Delete button for each and a Clear history button.
 
 <p align="center"><img src="docs/assets/ui-bug-history.png" alt="The Bug History tab" width="900"></p>
-
-**Another bug, with its evidence.** A stair-clipping bug on the bugged game, as the dashboard showed it.
-
-<p align="center"><img src="docs/assets/bug-found.png" alt="Testing stopped on a detected stair-clipping bug" width="900"></p>
-
-**A GIF the pipeline saved for the same bug.** Mario lands and sinks into the
-stair column. The last frame is the exact frame the bug was detected.
-
-<p align="center"><img src="docs/assets/bug-stair-clip.gif" alt="GIF of the stair-clipping bug" width="480"></p>
 
 ---
 
