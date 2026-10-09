@@ -635,14 +635,33 @@ like the clean game (`tests/test_fix_hint.py`).
 
 ## Screenshots
 
-**Testing the clean game.** The Live status panel says what the agent is
-doing. The Bug Tracker stays empty, as it should.
+The dashboard has four tabs. Here is each one.
 
-<p align="center"><img src="docs/assets/dashboard.png" alt="Dashboard testing the clean game" width="900"></p>
+**Overview.** What the agent is, how it works in four steps, and the project's measured numbers.
 
-**Stopped on a bug** (stair clipping, on the bugged game). The game screen
-holds the frame the bug was found on; the card on the right says where to fix
-it.
+<p align="center"><img src="docs/assets/ui-overview.png" alt="The Overview tab" width="900"></p>
+
+**Live Testing, ready.** Choose the clean or the bugged game, then press Start Testing. The five steps on the right light up as each one really happens.
+
+<p align="center"><img src="docs/assets/ui-live-testing-ready.png" alt="Live Testing before a test starts" width="900"></p>
+
+**Testing the clean game.** The Live status panel says what the agent is doing and how far it is to the castle. The Bug Tracker stays empty, as it should.
+
+<p align="center"><img src="docs/assets/ui-live-testing-running.png" alt="Live Testing while the agent plays the clean game" width="900"></p>
+
+**Stopped on a bug** (an impossible jump, on the bugged game). The game screen holds the frame the bug was found on; the card on the right says what happened, how sure the check is, where to fix it, and offers the PDF and Markdown reports, the trigger frame, the GIF and a ZIP of everything.
+
+<p align="center"><img src="docs/assets/ui-bug-found.png" alt="Testing stopped on a detected impossible-jump bug" width="900"></p>
+
+**How It Works.** Flowcharts of how the agent was built, how it tests each game, what is on the dashboard, and what you do from start to end.
+
+<p align="center"><img src="docs/assets/ui-how-it-works.png" alt="The How It Works tab" width="900"></p>
+
+**Bug History.** Every saved bug and every clean-run report, with their files, a Delete button for each and a Clear history button.
+
+<p align="center"><img src="docs/assets/ui-bug-history.png" alt="The Bug History tab" width="900"></p>
+
+**Another bug, with its evidence.** A stair-clipping bug on the bugged game, as the dashboard showed it.
 
 <p align="center"><img src="docs/assets/bug-found.png" alt="Testing stopped on a detected stair-clipping bug" width="900"></p>
 

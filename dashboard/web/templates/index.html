@@ -195,8 +195,8 @@
         <div class="page">
             <p class="eyebrow">How it works</p>
             <h1 class="page__title">How Glitch Hunter works</h1>
-            <p class="page__lead">Five short charts: how the agent was built, how it tests each game, what is on this dashboard,
-                what you do from start to end, and which bugs were planted in the bugged game.</p>
+            <p class="page__lead">Four short charts: how the agent was built, how it tests each game, what is on this dashboard,
+                and what you do from start to end. Then what the clean game and the bugged game are.</p>
 
             <h2 class="section-title"><span class="section-title__num">1</span>How the agent was built</h2>
             <div class="chart">
@@ -252,16 +252,35 @@
             </div>
 
             <h2 class="section-title"><span class="section-title__num">3</span>What is on the dashboard</h2>
-            <div class="parts">
-                <div class="part"><p class="part__where">Top bar</p><h3>Status and connection</h3><p>The status label says what the dashboard is doing right now (Ready, Testing, Bug found, No bugs found, Paused). The dot beside it shows the link to the server.</p></div>
-                <div class="part"><p class="part__where">Tab</p><h3>Overview</h3><p>What the agent does, in four steps, and the agent's measured numbers.</p></div>
-                <div class="part"><p class="part__where">Live Testing</p><h3>1. Choose the game</h3><p>Clean game: the original, where no bug should be found. Bugged game: a copy with planted bugs.</p></div>
-                <div class="part"><p class="part__where">Live Testing</p><h3>2. Run the test</h3><ul><li><b>Start testing</b>: start, resume, or play the next run</li><li><b>Pause</b>: stop at once, nothing is lost</li><li><b>Reset</b>: clear the page and start a new session</li><li><b>i</b>: the agent's 10 button moves</li></ul></div>
-                <div class="part"><p class="part__where">Live Testing</p><h3>Game screen</h3><p>The game as the agent plays it. Its corner says LIVE, PAUSED, BUG FOUND or LEVEL COMPLETE; when testing stops, the screen holds that frame.</p></div>
-                <div class="part"><p class="part__where">Live Testing</p><h3>Live status</h3><p>Five steps, from agent ready to report ready, then the current move, steps taken, level progress and the bugs found so far.</p></div>
-                <div class="part"><p class="part__where">Live Testing</p><h3>Bug found / Level complete card</h3><p>The result, the moment testing stops: the bug, its place, how sure the check is, where to fix it, and every file. Or the clean run's report.</p></div>
-                <div class="part"><p class="part__where">Live Testing</p><h3>Bug Tracker and log</h3><p>Every bug found in this session (a repeat raises its Seen count) and each clean-run report. The log terminal lists every move and reward.</p></div>
-                <div class="part"><p class="part__where">Tab</p><h3>Bug History</h3><p>Everything saved on disk: bug incidents and clean-run reports, each with its files, a Delete button and a Clear history button.</p></div>
+            <div class="chart">
+                <div class="chart__flow">
+                    <div class="chart__node chart__node--start"><h3>Top bar: status and connection</h3><p>On every tab. The status label says what the dashboard is doing right now (Ready, Testing, Bug found, No bugs found, Paused). The dot beside it shows the link to the server.</p></div>
+                    <div class="chart__arrow" aria-hidden="true"></div>
+                    <div class="chart__split">
+                        <div class="chart__lane">
+                            <p class="chart__lane-title">Live Testing tab, top to bottom</p>
+                            <div class="chart__node"><h3>1. Choose the game</h3><p>Clean game: the original, where no bug should be found. Bugged game: a copy with planted bugs.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>2. Run the test</h3><ul><li><b>Start testing</b>: start, resume, or play the next run</li><li><b>Pause</b>: stop at once, nothing is lost</li><li><b>Reset</b>: clear the page and start a new session</li><li><b>i</b>: the agent's 10 button moves</li></ul></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Game screen</h3><p>The game as the agent plays it. Its corner says LIVE, PAUSED, BUG FOUND or LEVEL COMPLETE; when testing stops, the screen holds that frame.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Live status</h3><p>Five steps, from agent ready to report ready, then the current move, steps taken, level progress and the bugs found so far.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node chart__node--ok"><h3>Bug found / Level complete card</h3><p>The result, the moment testing stops: the bug, its place, how sure the check is, where to fix it, and every file. Or the clean run's report.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>Bug Tracker and log</h3><p>Every bug found in this session (a repeat raises its Seen count) and each clean-run report. The log terminal lists every move and reward.</p></div>
+                        </div>
+                        <div class="chart__lane">
+                            <p class="chart__lane-title">The other three tabs</p>
+                            <div class="chart__node"><h3>Overview</h3><p>What the agent does, in four steps, and the agent's measured numbers.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node"><h3>How It Works</h3><p>These charts: how the agent was built, how it tests each game, what is on the dashboard, and your flow from start to end.</p></div>
+                            <div class="chart__arrow" aria-hidden="true"></div>
+                            <div class="chart__node chart__node--key"><h3>Bug History</h3><p>Everything saved on disk: bug incidents and clean-run reports, each with its files, a Delete button and a Clear history button. A result from Live Testing is saved here.</p></div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <h3 class="section-title">What the status colours mean</h3>
             <ul class="legend">
