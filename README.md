@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/TanmaySingh2711/glitch_hunter_project/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/TanmaySingh2711/glitch_hunter_project/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-blue">
-  <img alt="License: MIT for project code" src="https://img.shields.io/badge/license-MIT%20(project%20code)-green">
+  <img alt="License: all rights reserved" src="https://img.shields.io/badge/license-all%20rights%20reserved-red">
 </p>
 
 <p align="center">
@@ -716,17 +716,18 @@ the step to take (usually running `setup.bat` again).
 
 ## Contributing
 
-Contributions are welcome.
+This project is not open for outside use or contributions (see
+[License](#license)). The steps below are the author's own workflow, kept so
+the checks are reproducible.
 
-1. Fork the repository.
-2. Create a branch: `git checkout -b my-change`
-3. Make your change.
-4. Install the developer tools and run the checks:
+1. Create a branch: `git checkout -b my-change`
+2. Make your change.
+3. Install the developer tools and run the checks:
    ```bash
    pip install pytest==9.1.1 pytest-cov==7.1.0 ruff==0.16.6 mypy==2.3.1 pre-commit==4.6.2
    python tools/check.py
    ```
-5. Commit, push, and open a pull request.
+4. Commit your change.
 
 Two rules to know: never edit `games/mario_clean/`, and do not commit
 anything from `generated/`. The rest is in
@@ -736,10 +737,12 @@ anything from `generated/`. The rest is in
 
 ## License
 
-The project's own code, docs and trained brain files are under the **MIT
-License**. See [LICENSE](LICENSE).
+**All rights reserved.** The project's own code, docs and trained brain
+files may not be used, copied, modified or distributed without the author's
+written permission. Reading the source on GitHub grants no right to use it.
+See [LICENSE](LICENSE).
 
-Some things in this repo are **not** covered by it:
+Some things in this repo are **not** covered by it, and are someone else's work:
 
 | Part | Terms |
 |---|---|

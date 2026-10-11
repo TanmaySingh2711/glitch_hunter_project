@@ -1,7 +1,8 @@
 # Third-Party Notices
 
 The `games/mario_clean/` and `games/mario_bugged/` directories are **not** original work of
-this project and are **not** covered by the MIT license in `LICENSE`.
+this project and are **not** covered by the "all rights reserved" notice in `LICENSE`
+(which claims only the project's own work).
 
 ---
 

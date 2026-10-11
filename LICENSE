@@ -1,58 +1,49 @@
-═══════════════════════════════════════════════════════════════════════
-SCOPE — please read this first
+Glitch Hunter - All Rights Reserved
 
-This repository contains code from several sources, and only this
-project's own work is covered by the MIT license below.
+Copyright (c) 2026 Tanmay Singh. All rights reserved.
 
-  COVERED by the MIT license (original work in this project):
-      every file in this repository EXCEPT the ones listed under NOT
-      COVERED - the Python modules at the top level and in common/,
-      dashboard/, evaluation/, exploration/, reporting/, rewards/,
-      training/, tools/ and tests/; dashboard/web/ (except
-      dashboard/web/static/vendor/); docs/ and the other documentation and
-      configuration files; and the trained model weights:
-      glitch_hunter_main_brain.zip, glitch_hunter_main_brain_coverage.npz
-                                          (the final 16M brain, in this
-                                           repository and as a GitHub
-                                           Release asset)
-      mario_brain_checkpoint.zip          (the 6M brain, in this
-                                           repository's history)
+This is NOT open-source software. No license is granted.
 
-  NOT COVERED — third-party, different terms, see docs/THIRD_PARTY_NOTICES.md:
-      games/mario_clean/          (the Super Mario Bros clone and its assets)
-      games/mario_bugged/         (a copy of it, for deliberate QA test bugs)
-      dashboard/web/static/vendor/
-                                  (the Socket.IO client - its own MIT license;
-                                   the Press Start 2P font - SIL Open Font
-                                   License 1.1)
-      the game's graphics wherever they appear, including the screenshots
-      and recordings in docs/assets/ and in every incident report
+Without the prior written permission of the copyright holder, you may not
+use, run, copy, modify, merge, publish, distribute, sublicense, sell, train
+models on, or create derivative works from this software, its documentation,
+or its trained model files, in whole or in part, for any purpose, whether
+commercial or not.
 
-The games/mario_clean/ and games/mario_bugged/ directories are someone else's work
-(two copies of one game) and its upstream project
-carries no open-source license at all. Do not assume the MIT terms below
-apply to it. docs/THIRD_PARTY_NOTICES.md explains what is and isn't permitted.
-═══════════════════════════════════════════════════════════════════════
+Viewing the source code in this repository, as GitHub's terms of service
+allow for a public repository, grants no right to do any of the above.
 
-
-MIT License
-
-Copyright (c) 2026 Tanmay Singh
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+To ask for permission, contact the copyright holder: Tanmay Singh.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+-----------------------------------------------------------------------
+WHAT THIS COVERS, AND WHAT IT DOES NOT
+
+Covered (original work in this project): the Python modules at the top level
+and in common/, dashboard/, evaluation/, exploration/, reporting/, rewards/,
+training/, tools/ and tests/; dashboard/web/ (except dashboard/web/static/
+vendor/); docs/ and the other documentation and configuration files; and the
+trained model files glitch_hunter_main_brain.zip and
+glitch_hunter_main_brain_coverage.npz.
+
+Not covered - someone else's work, under its own terms (see
+docs/THIRD_PARTY_NOTICES.md):
+  games/mario_clean/ and games/mario_bugged/   the Super Mario Bros clone
+                          and its assets (upstream carries no license)
+  dashboard/web/static/vendor/   the Socket.IO client (MIT) and the
+                          Press Start 2P font (SIL Open Font License 1.1)
+  the game's graphics, music and sounds wherever they appear, including the
+  screenshots in docs/assets/ and in every incident report (Nintendo)
+
+Nothing here gives you any right to those parts. The line above only says
+that this notice does not claim them.
+
+Versions of this project that were published earlier under the MIT License
+remain available under those terms to those who already received them; this
+notice applies to this version and to every later one.
