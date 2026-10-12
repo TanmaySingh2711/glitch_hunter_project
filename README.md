@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/ui-bug-found.png" alt="The dashboard stopped on an impossible-jump bug it just found" width="900">
+  <img src="docs/assets/ui-overview.png" alt="The Glitch Hunter dashboard: the Overview tab" width="900">
 </p>
 
 There is no hosted demo. The project runs on your own computer, and the setup is one click (see [Installation](#installation)).
