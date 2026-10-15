@@ -39,6 +39,7 @@ There is no hosted demo. The project runs on your own computer, and the setup is
 - [Model Details](#model-details)
 - [Results](#results)
 - [Screenshots](#screenshots)
+- [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
 - [More Documentation](#more-documentation)
 - [Contributing](#contributing)
@@ -294,10 +295,13 @@ What the script does:
 
 1. Finds Python 3.12. On Windows it installs it with `winget` if missing. On
    Linux and macOS it tells you the command to install it.
-2. Creates an environment called `venv_gpu` inside the project folder.
+2. Creates an environment called `venv_gpu` inside the project folder, and
+   tells it to keep Python's bytecode in `generated/` (`tools/pycache_hook.py`).
 3. Installs PyTorch (the CPU build) and the other libraries.
 4. Checks that the brain files are there, and downloads them if not.
-5. Starts the dashboard.
+5. Checks that every library loads, and if one does not, says in plain words
+   what to do (`tools/check_environment.py`).
+6. Starts the dashboard.
 
 Running it again only adds what is missing. Two optional words can follow the
 script name: `gpu` installs the NVIDIA build of PyTorch (for training), and
@@ -429,7 +433,8 @@ The page has four tabs: **Overview**, **Live Testing**, **How It Works** and
 4. Open the **PDF report**, **Markdown** report, **Trigger frame**, **GIF**,
    **Download all (.zip)** or **Full details**. A file still being written
    shows with a spinner (for example *PDF report…*) and fills in by itself.
-5. Click **Resume testing** to continue from the same moment.
+5. Click **Resume testing** to continue from the same moment. **Pause** stops
+   testing at any time; nothing is lost.
 
 What to expect:
 
@@ -674,6 +679,8 @@ App & browser control > Smart App Control settings > Off**. Windows may not
 let you turn it back on later without resetting the PC. A reinstall does not
 help. The same message appears for any other library that will not load, with
 the step to take (usually running `setup.bat` again).
+
+---
 
 ## Limitations
 
