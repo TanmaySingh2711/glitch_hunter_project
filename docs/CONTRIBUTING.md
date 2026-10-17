@@ -43,7 +43,11 @@ one-click setup (`setup.bat norun`, `bash setup.sh norun`) on clean Windows,
 Linux and macOS machines and checks that the dashboard then starts with the
 approved 16M brain; on Linux it then drives the dashboard in a real browser
 (`tests/test_dashboard_e2e.py`, which skips when Playwright is not
-installed). If you change a dependency pin, change it in `setup.bat` and
+installed, except in that CI step, where `GLITCH_HUNTER_E2E=1` makes a
+missing Playwright a failure). CI never passes by skipping: it type-checks
+for both Linux and Windows (`mypy --platform win32`), prints the reason for
+every skipped test (`-rs`), and `tests/conftest.py` stops the run when the
+final brain's four tracked files are missing from the checkout. If you change a dependency pin, change it in `setup.bat` and
 `setup.sh` too.
 
 ## Code conventions
@@ -87,7 +91,9 @@ installed). If you change a dependency pin, change it in `setup.bat` and
 * Mark anything that takes more than a few seconds `@pytest.mark.slow`.
 * A test that needs a git-ignored artifact (most of `exploration_data/` and
   `checkpoints_qa/`, `mario_brain_checkpoint.zip`) must `pytest.skip` with the reason when it is
-  absent, so CI and fresh clones stay green.
+  absent, so CI and fresh clones stay green. Only git-ignored files may be
+  skipped for: a file that is in git must be there, and in CI its absence
+  fails the run.
 
 ## Commits
 

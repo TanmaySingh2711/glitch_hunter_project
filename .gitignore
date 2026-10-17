@@ -95,7 +95,7 @@ glitch_hunter_qa_coverage.npz
 
 # ─── EDITORS & OS ───
 # What the common editors and the Windows and macOS file managers drop into
-# a folder (CONTRIBUTING.md invites contributors).
+# a folder; none of it belongs in the repository.
 .vscode/
 .idea/
 .DS_Store

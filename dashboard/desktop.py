@@ -350,7 +350,7 @@ def install_console_close_handler(on_close: Callable[[], None]) -> None:
         ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, True)
 
 
-ESC = ""
+ESC = "\x1b"
 
 
 def watch_keys(kbhit: Callable[[], bool], getwch: Callable[[], str],

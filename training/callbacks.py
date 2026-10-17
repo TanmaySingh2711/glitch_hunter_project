@@ -880,7 +880,6 @@ class RewardTelemetryCallback(BaseCallback):
     the session's own id, so two runs in one file stay apart.
     """
 
-    KINDS = ('session', 'episode', 'interval')
     # Above this, the residual is no longer float noise and someone must look.
     RESIDUAL_TOLERANCE = 1e-3
 

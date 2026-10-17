@@ -25,11 +25,10 @@ repos:
         exclude: ^(games|dashboard/web/static/vendor)/|\.json$
       - id: trailing-whitespace
         exclude: ^(games|dashboard/web/static/vendor)/
-      # The master checkpoint is the one large binary tracked on purpose
-      # (see .gitignore); anything else this size is a mistake.
+      # Anything this size being added is a mistake: the final brain files
+      # are already committed and frozen (see .gitignore).
       - id: check-added-large-files
         args: [--maxkb=1024]
-        exclude: ^mario_brain_checkpoint\.zip$
 
   - repo: local
     hooks:

@@ -138,7 +138,7 @@ Each one has its own write-up: [Objective 1](docs/OBJECTIVE1.md),
 | Data | NumPy 2.5.2, cloudpickle 3.1.2, JSON files |
 | Images | OpenCV 5.0 (frames, screenshots), Pillow 12.3 (GIFs) |
 | Reports | fpdf2 2.8.8 (PDF), Markdown |
-| Backend | Flask 3.1.3, Flask-SocketIO 5.6.1 |
+| Backend | Flask 3.1.3 (on Werkzeug 3.1.9), Flask-SocketIO 5.6.1 |
 | Frontend | HTML, CSS, plain JavaScript, Socket.IO client and the Press Start 2P pixel font (both bundled in the repo) |
 | Packaging | pip (`requirements.txt`) or uv (`pyproject.toml`, `uv.lock`) |
 | Code quality | pytest, pytest-cov, Ruff, mypy (strict), pre-commit |

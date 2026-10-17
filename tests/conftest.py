@@ -20,6 +20,32 @@ sys.pycache_prefix = os.path.join(os.path.dirname(os.path.dirname(os.path.abspat
 import common  # noqa: F401 - before any project module: no __pycache__ (common/__init__.py)
 
 _SESSION_ENV = []
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _final_brain_files():
+    """tools/final_brain.FILES - the final brain's four files, which are in
+    git - read from the source, since importing the tool sets up logging."""
+    import ast
+    with open(os.path.join(ROOT, "tools", "final_brain.py"), encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "FILES" for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise RuntimeError("tools/final_brain.py no longer defines FILES")
+
+
+def pytest_sessionstart(session):
+    """CI must not pass by skipping. Tests that need the final brain skip when
+    it is absent (a checkout without it is legitimate on a laptop), but CI
+    checks out the repository, where those four files are tracked: one
+    missing there means a broken checkout, so the run fails instead."""
+    if not os.environ.get("CI"):
+        return
+    missing = [f for f in _final_brain_files() if not os.path.exists(os.path.join(ROOT, f))]
+    if missing:
+        pytest.exit(f"CI checkout lacks tracked files {missing}; the tests that need them "
+                    "would only skip", returncode=1)
 
 
 @pytest.fixture(scope="session")

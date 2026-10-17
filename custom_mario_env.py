@@ -240,8 +240,6 @@ class CustomMarioEnv(gym.Env[np.ndarray, int]):
         self.end_on_level_complete = False
 
         # Load the Pygame clone safely using absolute paths so SubprocVecEnv workers don't crash
-        self.project_root = PROJECT_ROOT
-
         orig_cwd = os.getcwd()
         os.chdir(self.game_dir)
         sys.path.insert(0, self.game_dir)

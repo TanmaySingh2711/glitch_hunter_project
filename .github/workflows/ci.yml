@@ -62,7 +62,11 @@ jobs:
         run: |
           pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt "mypy==2.3.1"
+      # Both platforms, as tools/check.py does: the Windows-only blocks
+      # (dashboard/desktop.py, dashboard/game_window.py) are type-checked only
+      # when mypy is told the platform is win32.
       - run: mypy
+      - run: mypy --platform win32
 
   test:
     name: Tests (${{ matrix.os }})
@@ -99,8 +103,10 @@ jobs:
       # (tools/check.py --full) and are kept off the per-push path.
       # The floor guards the per-push path: it measured 86.1% (Linux) and 88.0%
       # (Windows) on 2026-09-29, so a change that drops coverage fails here.
+      # -rs prints why each skipped test skipped, so a skip is never silent;
+      # tests/conftest.py fails the run if a file that is in git is missing.
       - name: Run tests
-        run: pytest -m "not slow" --cov --cov-report=term-missing:skip-covered --cov-report=xml --cov-fail-under=86
+        run: pytest -m "not slow" -rs --cov --cov-report=term-missing:skip-covered --cov-report=xml --cov-fail-under=86
       - uses: actions/upload-artifact@v7
         if: always() && matrix.os == 'ubuntu-latest'
         with:
@@ -125,10 +131,12 @@ jobs:
       - name: System libraries (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1
+      # PowerShell, not cmd: GitHub's pwsh step ends with the batch file's own
+      # exit code, so a setup.bat that stops on an error fails the job.
       - name: setup.bat norun
         if: runner.os == 'Windows'
-        shell: cmd
-        run: setup.bat norun
+        shell: pwsh
+        run: .\setup.bat norun
       - name: bash setup.sh norun
         if: runner.os != 'Windows'
         run: bash setup.sh norun
@@ -164,7 +172,9 @@ jobs:
       # testing and the Bug found card must say where and what to fix.
       - name: Dashboard in a browser (Linux)
         if: runner.os == 'Linux'
+        env:
+          GLITCH_HUNTER_E2E: "1"      # Playwright missing = a failure here, never a skip
         run: |
           venv_gpu/bin/python -m pip install --quiet "pytest==9.1.1" "playwright==1.63.0"
           venv_gpu/bin/python -m playwright install --with-deps chromium
-          venv_gpu/bin/python -m pytest tests/test_dashboard_e2e.py -p no:cacheprovider -o addopts="" -v
+          venv_gpu/bin/python -m pytest tests/test_dashboard_e2e.py -p no:cacheprovider -o addopts="" -v -rs

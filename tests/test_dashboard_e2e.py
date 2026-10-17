@@ -7,9 +7,11 @@ benchmark bug to stop testing - then checks the Bug found card shows the bug
 and where and what to fix, and that the page raised no JavaScript error.
 
 Needs Playwright and its Chromium (`pip install playwright` then
-`playwright install chromium`); without them it skips. CI runs it in the
-"Dashboard in a browser" job. GLITCH_HUNTER_PYTHON picks the interpreter that
-runs app.py (default: this one).
+`playwright install chromium`); without them it skips - except where
+GLITCH_HUNTER_E2E=1, as in CI's "Dashboard in a browser" step: this test is
+that step's whole point, so a missing Playwright must fail it rather than pass
+by skipping. GLITCH_HUNTER_PYTHON picks the interpreter that runs app.py
+(default: this one).
 """
 import json
 import os
@@ -20,7 +22,10 @@ import urllib.request
 
 import pytest
 
-sync_api = pytest.importorskip("playwright.sync_api")
+if os.environ.get("GLITCH_HUNTER_E2E") == "1":
+    import playwright.sync_api as sync_api
+else:
+    sync_api = pytest.importorskip("playwright.sync_api")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 5063

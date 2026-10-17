@@ -983,13 +983,15 @@ document.addEventListener('DOMContentLoaded', () => {
         $('stop-dialog-actions').hidden = true;
         $('stop-dialog-title').textContent = 'Stopping…';
         try {
-            await fetch('/api/stop', { method: 'POST' });
+            // fetch() resolves on any HTTP answer, so a refusal (403) is checked too.
+            const res = await fetch('/api/stop', { method: 'POST' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             $('stop-dialog-title').textContent = 'The dashboard has stopped';
             $('stop-dialog-text').textContent = 'You can close this tab.';
             window.close();                      // only works for a tab a script opened
-        } catch (err) {
+        } catch {
             $('stop-dialog-title').textContent = 'Could not stop it';
-            $('stop-dialog-text').textContent = 'The dashboard server did not answer. Press Ctrl+C in its window instead.';
+            $('stop-dialog-text').textContent = 'The dashboard server did not stop. Press Esc (or Ctrl+C) in its window instead.';
             $('stop-dialog-actions').hidden = false;
         }
     });

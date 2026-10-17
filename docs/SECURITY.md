@@ -126,10 +126,14 @@ pip install pip-audit
 pip-audit -r requirements.txt      # set PYTHONUTF8=1 first on Windows
 ```
 
-Last audit (2026-09-25, pip-audit): **no known vulnerabilities** in
-`requirements.txt` (which includes `stable-baselines3`, `fpdf2` and
-`pillow`) or in `torch==2.14.0`. pip-audit checks the version number on
-PyPI; the `+cu126` GPU wheels come from PyTorch's own index.
+Last audit (2026-10-17, pip-audit, every package installed in `venv_gpu`):
+one advisory that affected the dashboard, now fixed. Werkzeug, Flask's own
+server that the dashboard runs on, was at 3.1.8 (PYSEC-2026-4312); it is now
+pinned to 3.1.9 in `requirements.txt`, `pyproject.toml` and `uv.lock`. The
+venv's own setuptools (78.1.0, two advisories) was brought to 84.0.0, the
+version `uv.lock` already had. Nothing else is affected. pip-audit checks the
+version number on PyPI, so it cannot audit the `+cu126` GPU build of torch;
+`torch==2.14.0` itself had no advisories when last checked (2026-09-25).
 
 **torch upgrade (2026-09-25).** The project used to pin torch 2.5.1 (CUDA
 12.1), which has 19 published advisories - among them two ways to run code
