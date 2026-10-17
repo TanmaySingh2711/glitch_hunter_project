@@ -9,7 +9,7 @@
 [project]
 name = "glitch-hunter"
 version = "1.0.0"
-description = "A PPO agent plays a Super Mario Bros clone, streamed live to a web dashboard."
+description = "An agent that plays Super Mario Bros Level 1-1, finds game bugs by itself and writes a report for each one."
 requires-python = "==3.12.*"
 
 dependencies = [

@@ -20,7 +20,10 @@ if not exist "venv_gpu\Scripts\python.exe" (
     exit /b 1
 )
 
-venv_gpu\Scripts\python.exe -m dashboard.desktop center-console
+rem Centring this window and opening the browser both run alongside the
+rem dashboard (start /b shares this window), so nothing waits for them. The
+rem page is served within about a second; the AI loads behind it.
+start "" /b venv_gpu\Scripts\python.exe -m dashboard.desktop center-console
 start "" venv_gpu\Scripts\pythonw.exe -m dashboard.desktop open-dashboard
 venv_gpu\Scripts\python.exe app.py --desktop %*
 rem A normal stop (Esc, Ctrl+C, Stop on the page) closes this window.

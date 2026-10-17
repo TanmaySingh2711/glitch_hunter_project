@@ -241,11 +241,21 @@ def test_a_freshly_loaded_page_resets_the_dashboard_first(app_module, monkeypatc
     client.disconnect()
 
 
-def test_main_preloads_before_listening_and_warns_off_loopback(app_module, monkeypatch, caplog):
+def test_main_serves_at_once_loads_behind_it_and_warns_off_loopback(app_module, monkeypatch,
+                                                                      caplog):
+    # The server no longer waits for the brain: main hands the load to a
+    # background thread (which starts it once the server listens, see
+    # tests/test_dashboard_startup.py) and goes straight to socketio.run.
     import logging
-    order = []
-    monkeypatch.setattr(app_module.service, "start", lambda: order.append("preload"))
-    monkeypatch.setattr(app_module.facts.TESTS, "start", lambda: order.append("tests"))
+    import threading
+    order, loaded = [], threading.Event()
+
+    def load(host, port):
+        order.append(("load", host, port))
+        loaded.set()
+    monkeypatch.setattr(app_module, "_load_when_listening", load)
+    monkeypatch.setattr(app_module.service, "start",
+                        lambda *a, **kw: pytest.fail("main must not wait for the brain"))
     monkeypatch.setattr(app_module.socketio, "run",
                         lambda app, **kw: order.append(("run", kw['host'], kw['port'],
                                                          kw['debug'])))
@@ -253,7 +263,8 @@ def test_main_preloads_before_listening_and_warns_off_loopback(app_module, monke
     monkeypatch.setenv("GLITCH_HUNTER_PORT", "5055")
     with caplog.at_level(logging.INFO):
         app_module.main()
-    assert order == ["preload", "tests", ("run", "0.0.0.0", 5055, False)]
+    assert loaded.wait(5)
+    assert sorted(order, key=str) == [("load", "0.0.0.0", 5055), ("run", "0.0.0.0", 5055, False)]
     assert any("no authentication" in r.getMessage() for r in caplog.records
                if r.levelno == logging.WARNING)
 

@@ -19,13 +19,20 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import cv2
 import gymnasium as gym
 import numpy as np
-import torch
-from stable_baselines3 import PPO
+
+# ─── TORCH LOADS ON THE GAME THREAD, NOT AT IMPORT ───
+# torch and stable_baselines3 take about 4 s to import (measured), and app.py
+# imports this module before it can serve anything. They are imported where
+# the brain is loaded (_ensure_global_env_and_model) and used (choose_action),
+# both on the game thread, so the page is up in about a second while the
+# brain loads behind it.
+if TYPE_CHECKING:
+    from stable_baselines3 import PPO
 
 from agent_logic import ACTION_NAMES, GlitchHunterWrapper
 from common.fileio import sha256_of
@@ -184,6 +191,31 @@ def _dashboard_coverage(mode: str, model_path: str | None = None
     return coverage
 
 
+class _InferenceOnlyOptimizer:
+    """Stands in for the policy's Adam optimizer: the dashboard only plays,
+    it never trains. Building the real Adam is what imports torch._dynamo,
+    about 2.5 s of the brain's load (measured: torch.optim's add_param_group
+    imports it on first use). The saved optimizer state is accepted and
+    dropped; the policy's weights load exactly as before."""
+
+    def __init__(self, params: Any, **_kwargs: Any) -> None:
+        self.param_groups: list[dict[str, Any]] = []
+
+    def load_state_dict(self, state_dict: Any, **_kwargs: Any) -> None:
+        return None
+
+    def state_dict(self) -> dict[str, Any]:
+        return {}
+
+    def zero_grad(self, set_to_none: bool = True) -> None:
+        return None
+
+
+# The approved brain was saved with empty policy_kwargs (SB3's defaults), so
+# the only change is the optimizer class.
+_INFERENCE_POLICY_KWARGS: dict[str, Any] = {"optimizer_class": _InferenceOnlyOptimizer}
+
+
 def _ensure_global_env_and_model() -> tuple[gym.Env[Any, Any], PPO]:
     """Creates the global env + loads the model on first use, and returns
     both. Shared by run_mario_agent() and open_agent_window() so a window can
@@ -206,11 +238,14 @@ def _ensure_global_env_and_model() -> tuple[gym.Env[Any, Any], PPO]:
     _coverage_banked = 0
     env = wrap_observation(GlitchHunterWrapper(base, reward_mode=mode, coverage=_coverage))
 
+    from stable_baselines3 import PPO
+
     # Falls back to an untrained policy so the dashboard still runs (badly)
     # rather than crashing outright when no checkpoint is present.
     if os.path.exists(model_path):
         log.info("[DASHBOARD] %s (%s) on %s", model_path, mode, _config.game_variant)
-        model = PPO.load(model_path, env=env, device="auto")
+        model = PPO.load(model_path, env=env, device="auto",
+                         custom_objects={"policy_kwargs": _INFERENCE_POLICY_KWARGS})
         _brain_path = model_path
     else:
         log.warning("%s not found — running an UNTRAINED policy.", model_path)
@@ -546,6 +581,8 @@ def choose_action(model: PPO, obs: np.ndarray, rng: np.random.Generator,
     probabilities - sharpened by `temperature` (< 1 favours the likelier
     actions) - makes each run a different route the brain itself learned.
     temperature 0 is the old greedy choice."""
+    import torch  # already loaded with the brain; see the note at the imports
+
     with torch.no_grad():
         tensor, _ = model.policy.obs_to_tensor(obs)
         dist: Any = model.policy.get_distribution(tensor).distribution

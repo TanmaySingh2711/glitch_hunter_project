@@ -59,6 +59,7 @@ BEST_PERFORMANCE = "ded574b5-45a0-4f42-8737-46345c09c238"
 _OVERLAY_KEY = r"SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes"
 _OVERLAY_VALUE = {"ac": "ActiveOverlayAcPowerScheme", "dc": "ActiveOverlayDcPowerScheme"}
 GUARD_PERIOD_S = 3.0          # how soon a plug/unplug is noticed while running
+HEALTH_POLL_S = 0.1           # open-dashboard: how often it asks whether the server is up
 RESTORE_PERIOD_S = 15.0       # the background restorer's check interval
 PAGE_TITLE = "The Glitch Hunter"          # dashboard/web/templates/index.html <title>
 # A browser window's title starts with the page's title. Matching only these
@@ -487,7 +488,7 @@ def wait_for_dashboard(url: str, timeout_s: float = 300.0) -> bool:
                     return True
         except OSError:
             pass
-        time.sleep(0.3)
+        time.sleep(HEALTH_POLL_S)
     return False
 
 

@@ -6,7 +6,7 @@ this project and are **not** covered by the "all rights reserved" notice in `LIC
 
 ---
 
-## games/mario_clean/ and games/mario_bugged/ — Super Mario Bros Level 1 (Python/Pygame)
+## games/mario_clean/ and games/mario_bugged/: Super Mario Bros Level 1 (Python/Pygame)
 
 Two copies of the same upstream game. `games/mario_clean/` is the unmodified
 baseline; `games/mario_bugged/` exists so this project can add deliberate test bugs
@@ -32,7 +32,7 @@ statement above is the only permission the author has expressed.
 
 **Therefore:**
 
-- Use this project for **learning, coursework, and personal experimentation** —
+- Use this game code for **learning, coursework, and personal experimentation**;
   that is squarely within what the original author described.
 - **Do not sell it, put it in a product, or use it commercially** in any form.
 - If you want to redistribute or publish this repository beyond
@@ -60,7 +60,7 @@ This project is not affiliated with, endorsed by, or sponsored by Nintendo.
 
 ---
 
-## dashboard/web/static/vendor/socket.io.min.js — Socket.IO client
+## dashboard/web/static/vendor/socket.io.min.js: Socket.IO client
 
 **Version:** 4.7.2 · **Copyright:** (c) 2014-2023 Guillermo Rauch ·
 **License:** MIT
@@ -72,7 +72,7 @@ https://github.com/socketio/socket.io
 
 ---
 
-## dashboard/web/static/vendor/fonts/PressStart2P-Regular.woff2 — Press Start 2P font
+## dashboard/web/static/vendor/fonts/PressStart2P-Regular.woff2: Press Start 2P font
 
 **Copyright:** 2012 The Press Start 2P Project Authors (cody@zone38.net),
 with Reserved Font Name "Press Start 2P" · **License:** SIL Open Font

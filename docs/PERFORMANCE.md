@@ -69,6 +69,39 @@ What remains is the engine's own per-frame churn (sprite groups rebuilt every
 frame), collected in ordinary garbage collections: a sawtooth with no upward
 trend over 30,000 steps.
 
+## Dashboard start-up
+
+From starting `app.py` to the page being served, and to the AI being ready
+for Start (warm start, median of four runs on the development laptop,
+2026-10-17):
+
+| Measurement | before | after |
+|---|---|---|
+| page served (first `/healthz` answer) | ~10 s | ~1.6 s |
+| AI ready (brain and game loaded) | ~10 s | ~5.1 s |
+| slowest `/healthz` answer while the AI loads | - | 0.35 s |
+
+* **The page first, the brain behind it** (`app.py` `main`,
+  `_load_when_listening`). The server used to wait for the brain before it
+  served anything. Now it starts at once; the game thread loads the brain
+  once the server is listening (importing torch holds the interpreter, so a
+  load started earlier delayed the first answer by up to 2 s). The page shows
+  *Loading AI* until `backend_ready`; a Start pressed before that waits in
+  the game thread's queue.
+* **torch imported on the game thread** (`dashboard.backend`). torch and
+  Stable-Baselines3 took 4.3 s of the 7.7 s of imports before the server
+  could start.
+* **No optimizer for a brain that only plays**
+  (`dashboard.backend._InferenceOnlyOptimizer`). Building the policy's Adam
+  optimizer imports `torch._dynamo`, 2.5 s of the brain's load; the
+  dashboard never trains. Loading the brain went from 1.86 s to 0.16 s, with
+  identical weights and identical moves.
+* **`run_dashboard.bat`** centres its window alongside the server instead of
+  before it (0.66 s), and the browser opener checks every 0.1 s instead of
+  0.3 s.
+
+Pinned by `tests/test_dashboard_startup.py`.
+
 ## Re-measuring
 
 ```bash

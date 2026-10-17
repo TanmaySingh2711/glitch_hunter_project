@@ -1,4 +1,4 @@
-# Objective 2 — QA / Glitch-Hunting Agent
+# Objective 2: QA / Glitch-Hunting Agent
 
 Turn the 6M brain into a QA explorer that covers as much of Level 1-1 as it
 can reach while keeping its ability to finish the level. **Closed 2026-09-21.**
@@ -46,7 +46,7 @@ can reach while keeping its ability to finish the level. **Closed 2026-09-21.**
 * **Reward** (`rewards/qa.py`): new testable pixels in EXPLORE, then progress
   in COMPLETE; interaction/locomotion bonuses cut off when discovery dries up.
 * **Lifecycle:** EXPLORE → COMPLETE only on evidence (target met, exhausted
-  windows, nothing reachable ahead) — never on time alone.
+  windows, nothing reachable ahead), never on time alone.
 * **Anchor consolidation:** after each update, KL to a frozen healthy policy is
   measured on fixed anchor states and pulled back if it exceeds 0.08. This is
   what kept the level-finishing skill alive.
@@ -60,7 +60,7 @@ can reach while keeping its ability to finish the level. **Closed 2026-09-21.**
 | Completion collapsed at 6.4M (43.8% → 6.0%) | discount horizon (γ 0.99 ≈ 100 steps) hides the finish | anchor consolidation; resumed from the healthy checkpoint |
 | Reward farming (jumping at ? blocks) | secondary reward never ran out | drought gate, hard cut-off |
 | Wrong denominator (twice) | mask counted unreachable space / flagpole trigger | real-arc mask; flag-trigger corridor; lossless migration |
-| Stuck at tall pipes | 172 px walls need a run-up (standing jump 166 px, running 183 px) | run-up/retreat shaping |
+| Stuck at tall pipes | 172 px walls need a run-up (measured rise: standing jump 166 px, running 183 px) | run-up/retreat shaping |
 | Anomaly counter mostly noise | brick changes, sweep artifacts, pit rule | reclassified at mask build, tolerance kept |
 | Silent resume hazards, launcher config bug | wrong checkpoint / parent-only config | explicit `--resume-from`, dry-run, per-worker config |
 

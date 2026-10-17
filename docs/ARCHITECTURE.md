@@ -162,6 +162,11 @@ decision, not a refactor.
 * **One thread owns the game window.** On Windows a window dies with the
   thread that created it, so every window and env call in the dashboard runs
   on `dashboard.service`'s single game thread.
+* **The page is served before the brain loads.** `app.py` starts the server
+  at once and the game thread loads torch and the brain behind it; the page
+  shows *Loading AI* until `backend_ready`, and commands sent meanwhile wait
+  in the game thread's queue. A failed load still stops the process with an
+  error, so `run_dashboard.bat` can explain it.
 * **One game variant at a time, and the clean one is pinned.** Both
   variants import as `data`; `claim_game_variant` refuses to mix them, and
   the dashboard's switch unloads one completely (`release_game_variant`)

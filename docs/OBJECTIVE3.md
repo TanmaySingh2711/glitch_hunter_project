@@ -1,4 +1,4 @@
-# Objective 3 — Automated Bug Reporting System
+# Objective 3: Automated Bug Reporting System
 
 When the QA agent sees the game break a rule, the moment is frozen, saved as
 evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
@@ -51,7 +51,7 @@ evidence, reported (GIF, Markdown, PDF), replayed, and shown on the dashboard.
   line is the injected code, and with all eleven suggested edits applied to a
   copy of the bugged game, every bug's scenario plays exactly like the clean
   game.
-* **Replay verdicts:** reproduced / reproduced_state_only / not_reproduced / not_possible.
+* **Replay verdicts:** reproduced / reproduced_state_only / not_reproduced / diverged / not_possible.
 * **Duplicates:** same game, detector, kind and site → the same incident, count raised.
 * **Dashboard:** every detection pauses testing; *Resume testing* continues; the Bug
   Tracker shows this session's bugs (Reset, or refreshing the page, empties it;
@@ -109,7 +109,7 @@ diff is pinned by hash; `mario_clean` stays byte-identical to its pin.
 | Dashboard session, 100 runs per game (2026-10-03, with the stuck escape) | clean: 89 reached the castle, 0 stuck; bugged: 74 reached the castle, 0 stuck, 100 met at least two bugs, 15 all six |
 | Bugged game, 40 sampled episodes | caught every clip deeper than 6 px; never fired without the bug |
 | Pipeline validation tool | 37/37 checks |
-| Full quality gate | lint, types, 730 tests, coverage 90.64%, Objective-2 artifacts unchanged |
+| Full quality gate | lint, types, 959 tests, coverage of at least 90%, Objective-2 artifacts unchanged |
 
 ## Problems found and fixed
 

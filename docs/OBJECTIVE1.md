@@ -1,4 +1,4 @@
-# Objective 1 — Autonomous Exploration Agent
+# Objective 1: Autonomous Exploration Agent
 
 A PPO agent that learns to play the Mario Level 1-1 clone on its own and
 finish the level. Its 6M brain is the baseline for everything that follows.

@@ -61,6 +61,8 @@ os.environ.setdefault("SDL_NO_SIGNAL_HANDLERS", "1")
 
 import _thread
 import argparse
+import ipaddress
+import socket
 import threading
 import time
 import zipfile
@@ -69,7 +71,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, render_template, request, send_file
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, emit
 
 import common  # noqa: F401 - first of the project: no __pycache__ (common/__init__.py)
 from common.logging_setup import configure_logging
@@ -158,6 +160,7 @@ def healthz() -> dict[str, Any]:
                       if t.is_alive() and t.name == THREAD_NAME)
     return {
         "status": "ok",
+        "ready": service.ready,
         "testing": service.testing,
         "threads_total": threading.active_count(),
         "frame_loops": frame_loops,
@@ -465,6 +468,10 @@ def handle_connect() -> None:
     # A (re)connecting client starts from "not running", and the dashboard
     # agrees; the session and the window are kept, so Start resumes.
     service.client_connected()
+    if not service.ready:
+        # The page opened while the brain is still loading (see main): it
+        # shows "Loading AI" until 'backend_ready'.
+        emit('backend_loading', {})
 
 
 @socketio.on('disconnect')
@@ -482,8 +489,10 @@ def handle_page_opened() -> bool:
     # game window closes and the Bug Tracker starts empty (every incident
     # stays saved). Answered only once the reset has run, so the page then
     # reads the reset state rather than the old run's banners and reports.
+    # While the brain is still loading, the reset waits in the queue behind
+    # it, so the answer waits for the load too (PRELOAD_WAIT_S at most).
     service.reset()
-    return service.wait_idle()
+    return service.wait_idle(5.0 if service.ready else PRELOAD_WAIT_S)
 
 
 @socketio.on('start_testing')
@@ -585,6 +594,54 @@ def _desktop_mode() -> None:
         log.info("Press Esc in this window to stop the dashboard.")
 
 
+# How long a freshly opened page's reset may wait for the brain to finish
+# loading (a cold start on a slow disk, with room to spare).
+PRELOAD_WAIT_S = 300.0
+# Set when the brain could not be loaded: the process then stops with exit
+# code 1, so run_dashboard.bat explains the cause (tools/check_environment.py).
+_startup_error: BaseException | None = None
+
+
+def _load_when_listening(host: str, port: int, limit_s: float = 10.0) -> None:
+    """Starts the brain's load once the server accepts connections.
+
+    Importing torch holds the interpreter (the GIL) for long stretches:
+    measured, a /healthz sent while it ran waited over 2 s. Starting the load
+    only after the server is listening lets it answer the browser first; the
+    page's requests made during the load are a few small files."""
+    try:
+        everywhere = ipaddress.ip_address(host).is_unspecified   # GLITCH_HUNTER_HOST=0.0.0.0
+    except ValueError:                                          # a host name
+        everywhere = False
+    target = (LOOPBACK if everywhere else host, port)
+    end = time.monotonic() + limit_s
+    while time.monotonic() < end:
+        try:
+            socket.create_connection(target, timeout=0.2).close()
+            break
+        except OSError:
+            time.sleep(0.02)
+    service.start(wait=False)
+    _announce_ready()
+
+
+def _announce_ready() -> None:
+    """Waits for the game thread's pre-load. Then tells every open page, and
+    starts the Overview's test count (pytest's collection, in the background
+    at low priority, never on the game thread). A failed load stops the
+    dashboard, as a failed import did before the load moved behind the page."""
+    global _startup_error
+    error = service.wait_ready()
+    if error is not None:
+        _startup_error = error
+        log.error("Could not load the AI model: %s", error, exc_info=error)
+        _interrupt_main()
+        return
+    log.info("Model loaded. Ready for testing.")
+    socketio.emit('backend_ready', {})
+    facts.TESTS.start()
+
+
 def main(argv: list[str] | None = None) -> None:
     configure_logging()
     args = parse_args([] if argv is None else argv)
@@ -600,19 +657,18 @@ def main(argv: list[str] | None = None) -> None:
     if args.desktop:
         _desktop_mode()
 
-    # ─── PRE-LOAD THE MODEL BEFORE ACCEPTING CONNECTIONS ───
-    # PPO.load() onto the GPU is a real blocking call (1-3+ seconds of pure
-    # CPU/GPU work), so it happens at startup, where a logged message
-    # explains it, rather than on the user's first click. It runs ON THE GAME
-    # THREAD: building the env creates the OS window, and the thread that
-    # creates it is the only one that can ever drive it (see above). The
-    # window is hidden until the first "Start Testing".
-    log.info("Pre-loading the AI model (this can take a few seconds)...")
-    service.start()
-    log.info("Model loaded. Ready for connections.")
-    # The Overview page's test count: pytest's collection, in the background
-    # at low priority, never on the game thread.
-    facts.TESTS.start()
+    # ─── THE PAGE FIRST, THE BRAIN BEHIND IT ───
+    # Loading torch and the brain takes several seconds (measured: about 8 s
+    # warm, over 20 s on a cold start), and the server used to wait for it, so
+    # the browser waited too. Now the server starts at once and the brain
+    # loads ON THE GAME THREAD meanwhile: building the env creates the OS
+    # window, and the thread that creates it is the only one that can ever
+    # drive it (see above). The window stays hidden until the first "Start
+    # Testing". The page shows "Loading AI" until 'backend_ready'; a click
+    # before that waits in the game thread's queue.
+    log.info("Loading the AI model in the background (a few seconds)...")
+    threading.Thread(target=_load_when_listening, args=(host, port),
+                     name="preload-watch", daemon=True).start()
 
     if host != LOOPBACK:
         log.warning("Listening on %s - reachable by other devices on this network, "
@@ -635,4 +691,6 @@ if __name__ == '__main__':
     try:
         main(sys.argv[1:])
     except KeyboardInterrupt:       # Esc or Ctrl+C before the server is up: a normal stop
-        sys.exit(0)
+        sys.exit(0 if _startup_error is None else 1)
+    if _startup_error is not None:  # the server stopped itself: the brain did not load
+        sys.exit(1)

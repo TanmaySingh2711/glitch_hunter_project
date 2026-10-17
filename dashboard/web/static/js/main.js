@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         steps: 0,                // agent steps in this session (0 = fresh session)
         pauseReason: null,
         switching: false,
+        loading: false,          // the server is still loading the brain (backend_loading)
         bugFound: null,          // the incident(s) that stopped testing
         runResult: null,         // how the last clean-game run ended
         status: {},              // the last /api/status (game, brain, ...)
@@ -278,6 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── WHAT STATE IS THE SYSTEM IN? ───
     function phase() {
         if (!state.connected) return state.everConnected ? 'offline' : 'connecting';
+        if (state.loading) return 'loading';
         if (state.switching) return 'switching';
         if (state.bugFound && state.bugFound.length) return 'bug';
         if (state.runResult) {
@@ -295,6 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const PILLS = {
         connecting: ['neutral', 'ring', 'Connecting…'],
         offline: ['warn', 'offline', 'Disconnected'],
+        loading: ['info', 'clock', 'Loading AI'],
         switching: ['info', 'clock', 'Loading game'],
         bug: ['bug', 'bug', 'Bug found'],
         clean: ['ok', 'check', 'No bugs found'],
@@ -327,18 +330,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderControls(p) {
         const labels = {
-            switching: 'Loading game…', testing: 'Testing…', bug: 'Resume testing',
+            loading: 'Loading AI…', switching: 'Loading game…', testing: 'Testing…', bug: 'Resume testing',
             clean: 'Start next run', ended: 'Start next run', complete: 'Start next run', paused: 'Resume testing',
             error: 'Resume testing', capture_failed: 'Resume testing',
         };
         startBtn.textContent = labels[p] || 'Start testing';
-        startBtn.disabled = !state.connected || state.switching || state.testing;
+        startBtn.disabled = !state.connected || state.loading || state.switching || state.testing;
         stopBtn.disabled = !state.connected || !state.testing;
-        resetBtn.disabled = !state.connected || state.switching
+        resetBtn.disabled = !state.connected || state.loading || state.switching
             || !(state.steps > 0 || state.testing || state.bugFound || state.runResult);
         for (const r of gameRadios) {
             r.checked = r.value === state.status.game_variant;
-            r.disabled = !state.connected || state.switching;
+            r.disabled = !state.connected || state.loading || state.switching;
         }
     }
 
@@ -350,7 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
         steps.push({
             title: 'Agent ready',
             sub: s.brain_approved ? 'The final trained agent' : brainOk ? 'Fallback agent' : 'Loading…',
-            st: !state.connected && !state.everConnected ? 'pending' : s.brain_approved ? 'done' : brainOk ? 'warn' : 'pending',
+            st: state.loading ? 'active' : !state.connected && !state.everConnected ? 'pending' : s.brain_approved ? 'done' : brainOk ? 'warn' : 'pending',
         });
         const d = detectorCount();
         const ran = state.steps > 0;
@@ -669,6 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) return;
             const s = await res.json();
             state.status = s;
+            state.loading = s.ready === false;
             state.testing = !!s.testing;
             state.steps = s.steps || 0;
             state.pauseReason = s.pause_reason;
@@ -1274,11 +1278,28 @@ document.addEventListener('DOMContentLoaded', () => {
         // run; only then is its state read, so no old banner, report or bug is
         // shown again.
         render();
+        // The Overview's facts come from files, so they are shown at once,
+        // even while the brain is still loading (then again once it has).
+        refreshFacts();
         socket.emit('page_opened', () => {
             refreshStatus();
             refreshIncidents();
             refreshFacts();
         });
+    });
+
+    // The server is up before the brain is loaded (app.py main): until
+    // 'backend_ready' the page says "Loading AI" and Start waits.
+    socket.on('backend_loading', () => {
+        state.loading = true;
+        render();
+    });
+
+    socket.on('backend_ready', () => {
+        state.loading = false;
+        refreshStatus();
+        refreshIncidents();
+        refreshFacts();
     });
 
     // The legend's state labels carry the same icons as the live ones.

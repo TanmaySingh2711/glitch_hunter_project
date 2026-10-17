@@ -135,11 +135,17 @@ class GameWindowService:
         self.telemetry: dict[str, Any] | None = None
 
     # ── called from any thread ────────────────────────────────────────────
-    def start(self, timeout: float | None = None) -> None:
-        """Starts the game thread and waits for its pre-load. Idempotent."""
+    def start(self, timeout: float | None = None, wait: bool = True) -> None:
+        """Starts the game thread and waits for its pre-load. Idempotent.
+
+        wait=False returns at once (app.py, so the page is served while the
+        brain loads); commands posted meanwhile are queued and handled, in
+        order, once the pre-load is over. wait_ready() tells how it ended."""
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name=THREAD_NAME, daemon=True)
             self._thread.start()
+        if not wait:
+            return
         if not self._ready.wait(timeout):
             raise TimeoutError("the game thread did not finish pre-loading")
         if self._preload_error is not None:
@@ -174,6 +180,16 @@ class GameWindowService:
         self._commands.put(done)
         return done.wait(timeout)
 
+    def wait_ready(self, timeout: float | None = None) -> BaseException | None:
+        """Blocks until the pre-load is over (or `timeout`); its error, or None."""
+        self._ready.wait(timeout)
+        return self._preload_error
+
+    @property
+    def ready(self) -> bool:
+        """The brain and the game are loaded: Start plays at once."""
+        return self._ready.is_set() and self._preload_error is None
+
     @property
     def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -181,7 +197,7 @@ class GameWindowService:
     def status(self) -> dict[str, Any]:
         """The backend's truth, for a browser that (re)connects: running or
         not, why it last paused, and the bug that stopped it, if any."""
-        return {"testing": self.testing, "steps": self.steps,
+        return {"ready": self.ready, "testing": self.testing, "steps": self.steps,
                 "pause_reason": None if self.testing else self.pause_reason,
                 "bug_found": self.bug_found, "run_result": self.run_result,
                 "telemetry": self.telemetry}

@@ -19,8 +19,25 @@ There is no hosted demo. The project runs on your own computer, and the setup is
 
 ---
 
+## Quick Start
+
+```bash
+git clone https://github.com/TanmaySingh2711/glitch_hunter_project.git
+cd glitch_hunter_project
+setup.bat          # Windows (or double-click it)
+bash setup.sh      # Linux / macOS
+```
+
+The setup installs everything and opens the dashboard in your browser. Next
+time, double-click **`run_dashboard.bat`** (Windows) or run `python app.py`.
+In the dashboard, open **Live Testing**, pick **Bugged game** and press
+**Start testing** to watch it find a bug.
+
+---
+
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [Overview](#overview)
 - [The Problem](#the-problem)
 - [Objectives](#objectives)
@@ -401,7 +418,8 @@ The values that tune the agent and the detectors all live in
 ## How to Run
 
 **Windows:** double-click **`run_dashboard.bat`**. A terminal opens, and your
-browser opens the dashboard when it is ready.
+browser opens the dashboard about two seconds later. The AI finishes loading
+a few seconds after that; until then the page says *Loading AI*.
 
 **Any system, from a terminal** (with `venv_gpu` activated):
 
@@ -453,7 +471,8 @@ What to expect:
   takes over with running jumps (and run-ups) until Mario reaches new ground,
   then hands back to the agent. The clean game has one pit Mario could never
   climb out of (between the first staircase's two columns: a 172 px wall on
-  each side, and his highest standing jump is 161 px). For the last 500 px
+  each side, higher than a standing jump rises, and too narrow for a run-up).
+  For the last 500 px
   before it the dashboard walks him up the stairs with short hops and jumps
   him across. A run ends at the castle or in a death. Measured over 100 runs
   per game (2026-10-03): clean game 89 reached the castle, 11 died, none got
@@ -599,6 +618,8 @@ and docs.
 | | Stage 1 brain (6M steps) | Final brain (16M steps) |
 |---|---|---|
 | Finishes the level (500 test runs) | 46.8% (234 / 500) | 56.6% (283 / 500) |
+| Average progress through the level | 0.71 | 0.75 |
+| Always taking its top choice | dies after 185 steps | finishes in 434 steps |
 
 The final brain has covered 84.25% of the reachable level (3,166,235 of
 3,757,990 pixels).
@@ -633,7 +654,7 @@ meet several and still finish.
 to a copy of the bugged game. After that, every bug's spot behaved exactly
 like the clean game (`tests/test_fix_hint.py`).
 
-**Code checks.** 948 automated tests. The full check
+**Code checks.** 959 automated tests. The full check
 (`python tools/check.py --full`) requires at least 90% test coverage.
 
 ---
