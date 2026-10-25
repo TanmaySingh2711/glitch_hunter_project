@@ -141,14 +141,38 @@ def test_a_clean_run_that_dies_ends_without_a_report(injected, monkeypatch, tmp_
     session.close()
 
 
-def test_the_bugged_game_stops_at_the_castle_without_a_clean_run_report(injected, monkeypatch, tmp_path):
-    _backend, session = _session_ending_with(monkeypatch, tmp_path, "mario_bugged",
-                                             {'flag_get': True})
+def test_the_bugged_game_stops_at_the_castle_with_a_final_bug_report(injected, monkeypatch, tmp_path):
+    bug = {"incident_id": "INC-20260925-100000-aaaaaa", "title": "Mario inside a pipe",
+           "category": "clip_into_pipe", "description": "Mario overlapped a pipe",
+           "severity": "high", "confidence": "high", "location": {"x": 200, "y": 400},
+           "episode_agent_step": 2, "occurrences": 1, "reproduction": "reproduced"}
+    real_capture = db._capture_incidents
+    seen = []
+
+    def capture(env, recorder):
+        seen.append(1)
+        if len(seen) == 2:
+            return [{"status": "new", "incident_id": bug["incident_id"], "summary": bug,
+                     "error": None, "first_in_session": True}]
+        return real_capture(env, recorder)
+
+    monkeypatch.setattr(db, "_capture_incidents", capture)
+    backend, session = _session_ending_with(monkeypatch, tmp_path, "mario_bugged",
+                                            {'flag_get': True})
     items = [next(session) for _ in range(3)]
     assert 'run_end' not in items[0] and 'run_end' not in items[1]
     end = items[2]['run_end']
-    assert end['end_reason'] == 'level_complete' and end['report'] is None and end['bugs'] >= 0
-    assert not (tmp_path / "runs").exists() or not any((tmp_path / "runs").iterdir())
+    assert end['end_reason'] == 'level_complete' and end['bugs'] == 1
+    report = end['report']
+    assert report['headline'] == "1 Bug Found" and report['verdict'] == "bugs_found"
+    assert report['bug_list'] == [{"incident_id": bug["incident_id"], "title": bug["title"],
+                                   "severity": "high"}]
+    backend.run_reports.wait()
+    folder = tmp_path / "runs" / report['run_id']
+    for name in ("run.json", "final.png", "finish.gif", "report.md", "report.pdf"):
+        assert (folder / name).is_file(), name
+    md = (folder / "report.md").read_text(encoding="utf-8")
+    assert "Bug 1: Mario inside a pipe" in md and "Mario overlapped a pipe" in md
     session.close()
 
 

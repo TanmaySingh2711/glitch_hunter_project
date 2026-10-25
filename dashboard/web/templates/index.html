@@ -269,7 +269,7 @@
                             <div class="chart__arrow" aria-hidden="true"></div>
                             <div class="chart__node chart__node--ok"><h3>Bug found / Level complete card</h3><p>The result, the moment testing stops: the bug, its place, how sure the check is, where to fix it, and every file. Or the clean run's report.</p></div>
                             <div class="chart__arrow" aria-hidden="true"></div>
-                            <div class="chart__node"><h3>Bug Tracker and log</h3><p>Every bug found in this session (a repeat raises its Seen count) and each clean-run report. The log terminal lists every move and reward.</p></div>
+                            <div class="chart__node"><h3>Bug Tracker and log</h3><p>Every bug found in this session (a repeat raises its Seen count) and each run report ("No Bugs Found" on the clean game, the final bug report on the bugged game). The log terminal lists every move and reward.</p></div>
                         </div>
                         <div class="chart__lane">
                             <p class="chart__lane-title">The other three tabs</p>
@@ -277,7 +277,7 @@
                             <div class="chart__arrow" aria-hidden="true"></div>
                             <div class="chart__node"><h3>How It Works</h3><p>These charts: how the agent was built, how it tests each game, what is on the dashboard, and your flow from start to end.</p></div>
                             <div class="chart__arrow" aria-hidden="true"></div>
-                            <div class="chart__node chart__node--key"><h3>Bug History</h3><p>Everything saved on disk: bug incidents and clean-run reports, each with its files, a Delete button and a Clear history button. A result from Live Testing is saved here.</p></div>
+                            <div class="chart__node chart__node--key"><h3>Bug History</h3><p>Everything saved on disk: bug incidents and run reports (clean-run and final bug reports), each with its files, a Delete button and a Clear history button. A result from Live Testing is saved here.</p></div>
                         </div>
                     </div>
                 </div>
@@ -327,7 +327,7 @@
                         </div>
                     </div>
                     <div class="chart__arrow" aria-hidden="true"></div>
-                    <div class="chart__node chart__node--key"><h3>Bug History</h3><p>Every saved bug and clean-run report. Open any file, Delete one, or Clear history (it asks first).</p></div>
+                    <div class="chart__node chart__node--key"><h3>Bug History</h3><p>Every saved bug and run report. Open any file, Delete one, or Clear history (it asks first).</p></div>
                 </div>
             </div>
 
@@ -357,7 +357,7 @@
         <div class="page">
             <p class="eyebrow">Saved evidence</p>
             <h1 class="page__title">Bug History</h1>
-            <p class="page__lead">Every saved bug and every clean-run report, as they are on disk. Reset only clears the Live Testing view;
+            <p class="page__lead">Every saved bug and every run report (clean-run and final bug reports), as they are on disk. Reset only clears the Live Testing view;
                 a report stays here until you delete it.</p>
             <div id="history-summary" class="stat-grid stat-grid--compact"></div>
 
@@ -368,7 +368,7 @@
             <div id="history-incidents" class="table-wrap"></div>
 
             <div class="section-head">
-                <h2 class="section-title">Clean-run reports</h2>
+                <h2 class="section-title">Run reports</h2>
                 <button id="clear-runs" class="btn btn--danger btn--sm" type="button" hidden>Clear history</button>
             </div>
             <div id="history-runs" class="table-wrap"></div>

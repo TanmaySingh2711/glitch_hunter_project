@@ -540,10 +540,12 @@ def _capture_incidents(env: gym.Env[Any, Any], recorder: SessionRecorder) -> lis
 
 def _finish_run(env: gym.Env[Any, Any], info: dict[str, Any], recorder: SessionRecorder,
                 started: Any, furthest_x: int, bugs: list[dict[str, Any]]) -> dict[str, Any]:
-    """How a clean-game run ended - and, when it reached the castle, its
-    run report (reporting/run_report.py): the "no bugs found" counterpart of
-    an incident. A report that cannot be written is logged, never raised: the
-    run has ended either way."""
+    """How a run ended - and, when it reached the castle, its run report
+    (reporting/run_report.py): on the clean game the "no bugs found"
+    counterpart of an incident, on the bugged game the run's final bug report
+    (every bug of the run in one report, each with its trigger frame). A
+    report that cannot be written is logged, never raised: the run has ended
+    either way."""
     end_reason = str(info.get('episode_end_reason')
                      or classify_end(info, bool(info.get('safety_reset_reason'))))
     out: dict[str, Any] = {'end_reason': end_reason, 'report': None}
@@ -558,11 +560,27 @@ def _finish_run(env: gym.Env[Any, Any], info: dict[str, Any], recorder: SessionR
             furthest_x=furthest_x, bugs=bugs, reward_mode=_reward_mode, provenance=_provenance)
         size = tuple(getattr(base.c_module, 'SCREEN_SIZE', (800, 600)))
         out['report'] = _run_reports.write(record, base.render_scaled((int(size[0]), int(size[1]))),
-                                           recorder.recent_frames())
+                                           recorder.recent_frames(), bug_frames=_bug_frames(bugs))
         log.info("[RUN] %s: %s after %d agent steps -> %s", record['run_id'],
                  out['report']['headline'], recorder.episode_step, _run_reports.root)
     except Exception:
         log.exception("could not write the run report")
+    return out
+
+
+def _bug_frames(bugs: list[dict[str, Any]]) -> dict[str, bytes]:
+    """Each bug's trigger frame (its incident's trigger.png), for the final
+    bug report. A frame that cannot be read is left out, never raised."""
+    out: dict[str, bytes] = {}
+    if _pipeline is None:
+        return out
+    for bug in bugs:
+        incident_id = str(bug.get('incident_id'))
+        try:
+            with open(_pipeline.store.artifact_path(incident_id, 'trigger.png'), 'rb') as fh:
+                out[incident_id] = fh.read()
+        except Exception:
+            log.debug("no trigger frame for %s", incident_id, exc_info=True)
     return out
 
 
@@ -756,8 +774,8 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
     On the clean game the step that ends an episode also carries 'run_end'
     (why it ended, and the run report when Mario reached the castle), so the
     dashboard can stop there. The bugged game carries one only when Mario
-    reaches the castle (with this run's number of bugs, and no report); after
-    a death it plays on."""
+    reaches the castle (with this run's number of bugs, and its final bug
+    report); after a death it plays on."""
     env, model = _ensure_global_env_and_model()
     obs = _reset_obs(env)
     recorder = SessionRecorder()
@@ -818,9 +836,12 @@ def run_mario_agent() -> Generator[dict[str, Any], None, None]:
             run_end = _finish_run(env, info, recorder, run_started, furthest_x,
                                   list(run_bugs.values()))
         elif done and _bugged_run_completed(info):
-            # The bugged game stops at the castle too (no clean-run report:
-            # its bugs are its incidents); after a death it plays on.
-            run_end = {'end_reason': 'level_complete', 'report': None, 'bugs': len(run_bugs)}
+            # The bugged game stops at the castle too, with the run's final
+            # bug report (every bug of the run; each keeps its own incident
+            # report as well); after a death it plays on.
+            run_end = {**_finish_run(env, info, recorder, run_started, furthest_x,
+                                     list(run_bugs.values())),
+                       'bugs': len(run_bugs)}
 
         # ─── SERVER-SIDE FPS INSTRUMENTATION ───
         # Logs the actual measured frame rate every ~2 seconds, so "is it

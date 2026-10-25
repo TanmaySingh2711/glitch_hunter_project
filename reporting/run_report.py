@@ -1,8 +1,10 @@
-"""The report for a clean-game run that reached the end of the level.
+"""The report for a run that reached the end of the level.
 
 An incident report (reporting/pipeline.py) says "a detector fired here". This
-one says the opposite about a whole run: the agent played the clean baseline
-game from the start of an episode to the castle and no detector fired. Both
+one is about a whole run, from the start of an episode to the castle. On the
+clean baseline game it says no detector fired ("no bugs found"). On the
+bugged game it is the run's final bug report: every bug the run recorded,
+gathered in one report (each one keeps its own incident report too). Both
 are written from measurements only - the run record is the canonical file,
 and the Markdown and PDF are derived from it, like an incident's.
 
@@ -58,14 +60,23 @@ OUTCOMES = {
     "time_limit": "Run ended (step limit)",
 }
 
+NO_BUGS_LIMITATION = (
+    "\"No bugs found\" means no detector fired during this run. It is not proof that the game "
+    "has no bugs: a bug the detectors do not look for, or one this run never reached, would "
+    "not be reported.")
+BUGS_LIMITATION = (
+    "Only bugs a detector looks for, at places this run reached, are listed. Each one also has "
+    "its own incident report, with its GIF, trace and reproduction; this report gathers the "
+    "run's bugs in one place.")
 LIMITATIONS = (
-    ("\"No bugs found\" means no detector fired during this run. It is not proof that the game "
-     "has no bugs: a bug the detectors do not look for, or one this run never reached, would "
-     "not be reported."),
     "The run is one episode played by the trained agent. Another run may take a different path.",
     ("The GIF shows the dashboard's stream frames (480x360, JPEG, one every 4 engine frames); "
      "only final.png is full-resolution and lossless."),
 )
+
+
+def limitations(record: Mapping[str, Any]) -> list[str]:
+    return [BUGS_LIMITATION if record["bugs"]["count"] else NO_BUGS_LIMITATION, *LIMITATIONS]
 
 
 def new_run_id(moment: datetime.datetime) -> str:
@@ -102,14 +113,25 @@ def build_run_record(*, run_id: str, created: datetime.datetime, started: dateti
                         "score": info.get("score"), "coins": info.get("coins"),
                         "time_left": info.get("hud_time", info.get("time_left")),
                         "power": info.get("status")},
-        "bugs": {"count": len(bugs),
-                 "incidents": [{"incident_id": b.get("incident_id"), "title": b.get("title"),
-                                "category": b.get("category")} for b in bugs]},
+        "bugs": {"count": len(bugs), "incidents": [bug_entry(b) for b in bugs]},
         "verdict": "no_bugs_found" if not bugs else "bugs_found",
         "detectors": detector_names(),
         "reward_mode": reward_mode,
         "provenance": dict(provenance),
     }
+
+
+def bug_entry(bug: Mapping[str, Any]) -> dict[str, Any]:
+    """What the run report keeps of one incident summary (pipeline.summary):
+    enough to read every bug of the run in this one report."""
+    loc = bug.get("location") or {}
+    return {"incident_id": bug.get("incident_id"), "title": bug.get("title"),
+            "category": bug.get("category"), "description": bug.get("description"),
+            "severity": bug.get("severity"), "confidence": bug.get("confidence"),
+            "location": {"x": loc.get("x"), "y": loc.get("y")},
+            "episode_agent_step": bug.get("episode_agent_step"),
+            "occurrences": bug.get("occurrences"), "reproduction": bug.get("reproduction"),
+            "fix": bug.get("fix")}
 
 
 def headline(record: Mapping[str, Any]) -> str:
@@ -155,12 +177,38 @@ def overview_rows(record: Mapping[str, Any]) -> list[tuple[str, str]]:
     ]
 
 
+def report_kind(record: Mapping[str, Any]) -> str:
+    """A run with bugs gets the run's final bug report; one without, a run report."""
+    return "Final bug report" if record["bugs"]["count"] else "Run report"
+
+
 def verdict_line(record: Mapping[str, Any]) -> str:
     if record["bugs"]["count"] == 0:
         return (f"The agent played the clean game to the end ({record['outcome']['label'].lower()}) "
                 f"and none of the {len(record['detectors'])} detectors fired.")
     return (f"The run ended ({record['outcome']['label'].lower()}) with "
-            f"{record['bugs']['count']} bug(s) recorded; see their incident reports.")
+            f"{record['bugs']['count']} bug(s) recorded. Every one is listed below; its own "
+            f"incident report has the full evidence.")
+
+
+def bug_rows(bug: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """One bug of the run, as rows (Markdown and PDF read the same ones)."""
+    loc = bug.get("location") or {}
+    rows = [("Incident", str(bug.get("incident_id"))),
+            ("Category", str(bug.get("category"))),
+            ("What happened", str(bug.get("description") or "-")),
+            ("Severity / confidence", f"{bug.get('severity') or '-'} / {bug.get('confidence') or '-'}"),
+            ("Where", f"world x {loc.get('x')}, y {loc.get('y')}"),
+            ("When", f"agent step {bug.get('episode_agent_step')} of this run"),
+            ("Times seen", str(bug.get("occurrences") or "-")),
+            ("Reproduction", str(bug.get("reproduction") or "-").replace("_", " "))]
+    if bug.get("fix"):
+        rows.append(("Fix hint", str(bug["fix"])))
+    return rows
+
+
+def bug_heading(i: int, bug: Mapping[str, Any]) -> str:
+    return f"Bug {i}: {bug.get('title')}"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -196,15 +244,21 @@ def _md_escape(text: str) -> str:
 
 
 def render_markdown(record: Mapping[str, Any], rendered_at: datetime.datetime) -> str:
-    lines = [f"# Glitch Hunter run report - {headline(record)}", "",
+    lines = [f"# Glitch Hunter {report_kind(record).lower()} - {headline(record)}", "",
              verdict_line(record), "", "| | |", "|---|---|"]
     lines += [f"| {_md_escape(k)} | {_md_escape(v)} |" for k, v in overview_rows(record)]
+    incidents = record["bugs"]["incidents"]
+    if incidents:
+        lines += ["", f"## Bugs found in this run ({len(incidents)})"]
+        for i, bug in enumerate(incidents, 1):
+            lines += ["", f"### {_md_escape(bug_heading(i, bug))}", "", "| | |", "|---|---|"]
+            lines += [f"| {_md_escape(k)} | {_md_escape(v)} |" for k, v in bug_rows(bug)]
     lines += ["", "## Final frame", "", "![final frame](final.png)", "",
               "The run's last seconds: [finish.gif](finish.gif)", "",
               f"## Detectors that watched this run ({len(record['detectors'])})", ""]
     lines += [f"- {d}" for d in record["detectors"]]
     lines += ["", "## Limitations", ""]
-    lines += [f"- {line}" for line in LIMITATIONS]
+    lines += [f"- {line}" for line in limitations(record)]
     lines += ["", (f"_Rendered {rendered_at.astimezone(datetime.UTC):%Y-%m-%d %H:%M:%S} UTC "
                    f"from run.json ({record['schema']})._"), ""]
     return "\n".join(lines)
@@ -221,27 +275,46 @@ class _RunPDF(_ReportPDF):
 
 
 def render_pdf(record: Mapping[str, Any], final_png: bytes | None,
-               rendered_at: datetime.datetime) -> bytes:
+               rendered_at: datetime.datetime,
+               bug_frames: Mapping[str, bytes] | None = None) -> bytes:
+    """`bug_frames`: each bug's trigger frame (PNG) by incident id, shown
+    under that bug; a bug without one is listed without a picture."""
     pdf = _RunPDF(record["run_id"], False)
     pdf.set_title(f"Glitch Hunter run {record['run_id']}")
     pdf.set_creator("Glitch Hunter - reporting/run_report.py")
     pdf.alias_nb_pages()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 8, pdf_text(f"Run report - {headline(record)}"),
+    pdf.multi_cell(0, 8, pdf_text(f"{report_kind(record)} - {headline(record)}"),
                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.multi_cell(0, 5, pdf_text(verdict_line(record)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
     _kv_table(pdf, overview_rows(record))
+    incidents = record["bugs"]["incidents"]
+    if incidents:
+        _heading(pdf, f"Bugs found in this run ({len(incidents)})")
+        for i, bug in enumerate(incidents, 1):
+            rows = bug_rows(bug)
+            frame = (bug_frames or {}).get(str(bug.get("incident_id")))
+            # One bug is never split over two pages: its rows and frame
+            # (a 4:3 picture 90 mm wide) start on a new page if they do not fit.
+            if pdf.get_y() + 8 + 5.5 * len(rows) + (70 if frame else 0) > pdf.page_break_trigger:
+                pdf.add_page()
+            pdf.set_font("Helvetica", "B", 10.5)
+            pdf.multi_cell(0, 6, pdf_text(bug_heading(i, bug)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            _kv_table(pdf, rows)
+            if frame:
+                pdf.image(io.BytesIO(frame), w=min(pdf.epw, 90))
+            pdf.ln(3)
     if final_png:
-        _heading(pdf, "Final frame")
+        _heading(pdf, "Final frame", keep_with_next=125)     # the heading stays with its frame
         pdf.image(io.BytesIO(final_png), w=min(pdf.epw, 150))
     _heading(pdf, f"Detectors that watched this run ({len(record['detectors'])})")
     for d in record["detectors"]:
         pdf.multi_cell(0, 4.6, pdf_text(f"- {d}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     _heading(pdf, "Limitations")
-    for line in LIMITATIONS:
+    for line in limitations(record):
         pdf.multi_cell(0, 4.6, pdf_text(f"- {line}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 7.5)
@@ -289,7 +362,8 @@ class RunReports:
         return path
 
     def write(self, record: Mapping[str, Any], final_frame: np.ndarray | None,
-              stream_jpegs: Sequence[bytes], background: bool = True) -> dict[str, Any]:
+              stream_jpegs: Sequence[bytes], background: bool = True,
+              bug_frames: Mapping[str, bytes] | None = None) -> dict[str, Any]:
         run_id = str(record["run_id"])
         folder = self.folder(run_id)
         os.makedirs(folder, exist_ok=True)
@@ -303,23 +377,24 @@ class RunReports:
             self._renders[run_id] = dict.fromkeys(DERIVED_FILES, "pending")
         frames = list(stream_jpegs)
         if background:
-            t = threading.Thread(target=self._render, args=(record, final_png, frames),
+            t = threading.Thread(target=self._render,
+                                 args=(record, final_png, frames, bug_frames),
                                  name=f"run-report-{run_id}", daemon=True)
             self._threads.append(t)
             t.start()
         else:
-            self._render(record, final_png, frames)
+            self._render(record, final_png, frames, bug_frames)
         return self.summary(record)
 
     def _render(self, record: Mapping[str, Any], final_png: bytes | None,
-                frames: list[bytes]) -> None:
+                frames: list[bytes], bug_frames: Mapping[str, bytes] | None = None) -> None:
         run_id = str(record["run_id"])
         folder = self.folder(run_id)
         now = self._clock()
         jobs: dict[str, Callable[[], bytes]] = {
             "finish.gif": lambda: render_finish_gif(frames, final_png),
             "report.md": lambda: render_markdown(record, now).encode("utf-8"),
-            "report.pdf": lambda: render_pdf(record, final_png, now),
+            "report.pdf": lambda: render_pdf(record, final_png, now, bug_frames),
         }
         for name, job in jobs.items():
             try:
@@ -348,6 +423,9 @@ class RunReports:
                 "verdict": record["verdict"], "outcome": record["outcome"]["label"],
                 "created_utc": record["created_utc"], "agent_steps": record["agent_steps"],
                 "bugs": record["bugs"]["count"],
+                "bug_list": [{"incident_id": b.get("incident_id"), "title": b.get("title"),
+                              "severity": b.get("severity")}
+                             for b in record["bugs"]["incidents"]],
                 "available": [n for n in FILES if os.path.isfile(os.path.join(folder, n))],
                 "renders": renders}
 

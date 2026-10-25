@@ -57,6 +57,27 @@ def test_bugs_in_the_run_change_the_verdict():
     assert "INC-1" in dict(rr.overview_rows(r))["Bugs recorded in this run"]
 
 
+def test_the_final_bug_report_carries_every_bug_of_the_run():
+    bugs = [{"incident_id": f"INC-{i}", "title": title, "category": "c", "description": desc,
+             "severity": "high", "confidence": "medium", "location": {"x": 100 * i, "y": 400},
+             "episode_agent_step": 10 * i, "occurrences": 1, "reproduction": "reproduced",
+             "fix": "Check the pipe's collider"}
+            for i, (title, desc) in enumerate((("Mario inside a pipe", "overlapped a pipe"),
+                                               ("Coin not counted", "the coin count stayed")), 1)]
+    r = record(bugs=bugs)
+    assert rr.headline(r) == "2 Bugs Found" and r["bugs"]["count"] == 2
+    assert r["bugs"]["incidents"][1]["location"] == {"x": 200, "y": 400}
+    md = rr.render_markdown(r, T1)
+    assert "## Bugs found in this run (2)" in md
+    for i, bug in enumerate(bugs, 1):
+        assert f"### Bug {i}: {bug['title']}" in md and bug["description"] in md
+        for key, value in rr.bug_rows(r["bugs"]["incidents"][i - 1]):
+            assert f"| {key} | {value} |" in md
+    frame = cv2.imencode(".png", np.zeros((60, 80, 3), np.uint8))[1].tobytes()
+    with_frames = rr.render_pdf(r, None, T1, {"INC-1": frame})
+    assert with_frames.startswith(b"%PDF") and len(with_frames) > len(rr.render_pdf(r, None, T1))
+
+
 def test_markdown_and_pdf_carry_the_verdict_and_its_limits():
     r, now = record(), T1
     md = rr.render_markdown(r, now)

@@ -125,6 +125,7 @@ Each one has its own write-up: [Objective 1](docs/OBJECTIVE1.md),
 | **Two games** | A clean game and a copy with six bugs added on purpose, to prove the detectors work |
 | **A new route every run** | On both games the agent does not repeat the same path, so more of the level gets tested. On the bugged game each run meets its own set of the planted bugs |
 | **Clean-run report** | When a clean-game run reaches the castle with no bug, it gets its own short report |
+| **Final bug report** | When a bugged-game run reaches the castle, every bug it found is gathered in one report, besides each bug's own report |
 | **Works offline** | No internet is needed after installing |
 
 ---
@@ -471,7 +472,9 @@ What to expect:
   planted bugs, usually several (see [Results](#results)); press **Resume
   testing** after each one. Most runs still reach the castle; there testing
   stops, the screen holds the last frame with *LEVEL COMPLETE* in its corner,
-  and the card says how many bugs that run found. Click **Start next run**
+  and the card says how many bugs that run found, with the run's **final bug
+  report**: every bug of that run in one report (each bug keeps its own
+  report too). It is saved in Bug History as well. Click **Start next run**
   to play again. After a death the bugged game plays on to its next run.
 - **A run never ends stuck.** If the agent stops making progress, the dashboard
   takes over with running jumps (and run-ups) until Mario reaches new ground,
@@ -534,9 +537,11 @@ sky-jump bug (taken from a real run of the fix-hint code on the test data in
 }
 ```
 
-A clean-game run that reaches the castle is saved in
+A run that reaches the castle is saved in
 `generated/run_reports/RUN-<date>-<time>-<id>/` with `run.json`, `final.png`,
-`finish.gif`, `report.md` and `report.pdf`.
+`finish.gif`, `report.md` and `report.pdf`. On the clean game it says "No Bugs
+Found"; on the bugged game it is the run's final bug report, listing every bug
+the run recorded (with each one's trigger frame in the PDF).
 
 ---
 

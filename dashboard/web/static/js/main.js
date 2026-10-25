@@ -284,7 +284,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.bugFound && state.bugFound.length) return 'bug';
         if (state.runResult) {
             const r = state.runResult;
-            if (r.end_reason === 'level_complete' && !r.report) return 'complete';     // the bugged game
+            // The bugged game (its final bug report lists this run's bugs).
+            if (r.end_reason === 'level_complete' && (!r.report || r.report.bugs > 0)) return 'complete';
             return r.end_reason === 'level_complete' && r.report && r.report.bugs === 0 ? 'clean' : 'ended';
         }
         if (state.testing) return 'testing';
@@ -374,8 +375,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (p === 'complete') {
             const n = state.runResult.bugs || 0;
             steps.push({ title: 'Level complete', sub: `Objective 3 · ${n} bug${n === 1 ? '' : 's'} found this run`, st: 'ok' });
+            const report = state.runResult.report;
+            const pdf = report && (report.available || []).includes('report.pdf');
             steps.push({ title: 'Evidence saved', sub: 'Every bug as its own incident', st: 'done' });
-            steps.push({ title: 'Reports ready', sub: 'In the Bug Tracker, one per bug', st: 'done' });
+            steps.push({ title: 'Reports ready', sub: report ? (pdf ? 'One per bug · final bug report' : 'Final bug report writing…') : 'In the Bug Tracker, one per bug',
+                         st: report && !pdf ? 'active' : 'done' });
         } else if (p === 'clean' || p === 'ended') {
             const r = state.runResult;
             const report = r.report;
@@ -525,7 +529,16 @@ document.addEventListener('DOMContentLoaded', () => {
             tx.appendChild(el('p', 'result__title', `Bugged game finished · ${n} bug${n === 1 ? '' : 's'} found this run`));
             head.appendChild(tx);
             const body = el('div', 'result__body');
-            body.appendChild(el('p', 'result__desc', 'Every bug of this run is in the Bug Tracker below, with its reports. Start next run plays a new route.'));
+            body.appendChild(el('p', 'result__desc', 'Every bug of this run is in the Bug Tracker below, with its reports, and the final bug report below has them all in one. Start next run plays a new route.'));
+            const report = state.runResult.report;
+            if (report) {
+                const links = runLinks(report);
+                const details = el('button', 'btn btn--secondary btn--sm', 'Full details');
+                details.type = 'button';
+                details.addEventListener('click', () => openRun(report));
+                links.appendChild(details);
+                body.appendChild(links);
+            }
             card.replaceChildren(head, body);
             card.hidden = false;
             return;
@@ -603,7 +616,7 @@ document.addEventListener('DOMContentLoaded', () => {
             b.type = 'button';
             const top = el('span', 'tracker-item__top');
             top.append(el('span', `tag ${report.bugs === 0 ? 'tag--ok' : 'tag--warn'}`, report.bugs === 0 ? 'no bugs found' : `${report.bugs} bug(s)`));
-            b.append(top, el('span', 'tracker-item__title', `Run report: ${report.headline}`));
+            b.append(top, el('span', 'tracker-item__title', `${runKind(report)}: ${report.headline}`));
             const meta = el('span', 'tracker-item__meta');
             meta.append(el('span', null, shortTime(report.created_utc)));
             b.append(meta);
@@ -660,6 +673,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ─── DATA FROM THE SERVER ───
+    // A run report with bugs is the run's final bug report (all its bugs in one).
+    function runKind(report) {
+        return report.bugs > 0 ? 'Final bug report' : 'Run report';
+    }
+
     function rememberRun(report) {
         if (!report) return;
         const i = state.sessionRuns.findIndex((r) => r.run_id === report.run_id);
@@ -877,7 +895,7 @@ document.addEventListener('DOMContentLoaded', () => {
             stat('Bug incidents saved', String(real.length), `${per('mario_bugged')} on the bugged game`),
             stat('Incidents on the clean game', String(per('mario_clean')), 'Each would be a false alarm',
                  { ok: per('mario_clean') === 0 && cleanRuns.length > 0 }),
-            stat('Clean-run reports', String(runs.length), `${cleanRuns.filter((r) => r.bugs === 0).length} say "No Bugs Found"`),
+            stat('Run reports', String(runs.length), `${cleanRuns.filter((r) => r.bugs === 0).length} say "No Bugs Found" · ${runs.filter((r) => r.bugs > 0).length} final bug reports`),
         );
         $('clear-incidents').hidden = !incidents.length;
         $('clear-runs').hidden = !runs.length;
@@ -922,7 +940,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!runs.length) {
             const e = el('div', 'empty');
             e.append(el('span', 'empty__title', 'No run reports saved yet'),
-                     document.createTextNode('A clean-game run report is saved here.'));
+                     document.createTextNode('A run report is saved here: "No Bugs Found" on the clean game, the final bug report on the bugged game.'));
             runBox.replaceChildren(e);
         } else {
             runBox.replaceChildren(table(['When', 'Result', 'Game', 'Steps', 'Evidence'],
@@ -943,7 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         () => deleteFromHistory(`/api/runs/${encodeURIComponent(r.run_id)}`, 'reports'))));
                     actions.style.marginTop = '0';
                     tr.append(cell(el('span', 'data__nowrap', localTime(r.created_utc))),
-                              cell(el('span', 'data__title', r.headline), el('span', 'data__sub', r.run_id)),
+                              cell(el('span', 'data__title', `${runKind(r)}: ${r.headline}`), el('span', 'data__sub', r.run_id)),
                               cell(GAME_NAMES[r.game_variant] || String(r.game_variant || '-')),
                               cell(num(r.agent_steps)), cell(actions));
                     return tr;
@@ -1062,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const kicker = $('incident-dialog-kicker');
         kicker.replaceChildren(el('span', `tag ${report.bugs === 0 ? 'tag--ok' : 'tag--warn'}`, report.bugs === 0 ? 'no bugs found' : `${report.bugs} bug(s)`),
                                el('span', null, report.run_id));
-        $('incident-dialog-title').textContent = `Run report: ${report.headline}`;
+        $('incident-dialog-title').textContent = `${runKind(report)}: ${report.headline}`;
         const has = (n) => (report.available || []).includes(n);
         const grid = el('div', 'incident-detail');
         grid.append(picture(has('final.png') ? runFileUrl(report.run_id, 'final.png') : null, 'The last frame of the run'));
@@ -1075,8 +1093,19 @@ document.addEventListener('DOMContentLoaded', () => {
                      el('dt', null, 'Bugs'), el('dd', null, String(report.bugs)),
                      el('dt', null, 'Steps'), el('dd', null, num(report.agent_steps)),
                      el('dt', null, 'Level status'), el('dd', null, level));
-        right.append(el('h3', null, 'The run'), facts,
-                     el('h3', null, 'Reports and evidence'), runLinks(report));
+        right.append(el('h3', null, 'The run'), facts);
+        const bugList = report.bug_list || [];
+        if (bugList.length) {
+            const list = el('div', 'actions');
+            for (const bug of bugList) {
+                const b = el('button', 'btn btn--secondary btn--sm', `${bug.title} (${bug.incident_id})`);
+                b.type = 'button';
+                b.addEventListener('click', () => openIncident(bug.incident_id));
+                list.appendChild(b);
+            }
+            right.append(el('h3', null, `Bugs found in this run (${bugList.length})`), list);
+        }
+        right.append(el('h3', null, 'Reports and evidence'), runLinks(report));
         grid.append(right);
         $('incident-dialog-body').replaceChildren(grid);
         if (!incidentDialog.open) incidentDialog.showModal();

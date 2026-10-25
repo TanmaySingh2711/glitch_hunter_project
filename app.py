@@ -12,8 +12,9 @@ window or the env itself - see THE GAME WINDOW HAS ONE OWNER below.
 
 Incident evidence (Objective 3) is served read-only under /api/incidents and
 /incidents/<id>/<file>; see INCIDENT FILES below for how those requests are
-kept inside the incident store. A clean-game run that reaches the castle gets
-a run report ("no bugs found"), served the same way under /runs/<id>/<file>.
+kept inside the incident store. A run that reaches the castle gets a run
+report - "no bugs found" on the clean game, the run's final bug report on the
+bugged game - served the same way under /runs/<id>/<file>.
 The only requests that change what is saved are the Bug History page's Delete
 and Clear history (DELETE /api/incidents..., /api/runs...); see DELETING below.
 Pressing Esc on the page asks "Stop the dashboard?"; Yes posts to /api/stop,
@@ -189,7 +190,7 @@ def api_project() -> dict[str, Any]:
 
 @app.route('/api/runs')
 def api_runs() -> dict[str, Any]:
-    """Every clean-game run report on disk, newest first (Bug History)."""
+    """Every run report on disk (clean and bugged game), newest first (Bug History)."""
     runs = backend.run_reports
     return {"runs": runs.summaries() if runs is not None else []}
 
@@ -303,7 +304,7 @@ def run_bundle(run_id: str) -> Response:
 
 @app.route('/runs/<run_id>/<name>')
 def run_file(run_id: str, name: str) -> Response:
-    """One file of a clean-game run report (reporting/run_report.py): the
+    """One file of a run report (reporting/run_report.py): the
     same id + allow-listed-name rule as an incident's files."""
     reports = backend.run_reports
     if reports is None:
