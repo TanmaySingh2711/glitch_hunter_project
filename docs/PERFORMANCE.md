@@ -98,7 +98,8 @@ for Start (warm start, median of four runs on the development laptop,
   identical weights and identical moves.
 * **`run_dashboard.bat`** centres its window alongside the server instead of
   before it (0.66 s), and the browser opener checks every 0.1 s instead of
-  0.3 s.
+  0.3 s. `run_dashboard.sh` (Linux / macOS) does the same: the opener runs
+  alongside the server and opens the page the moment it answers.
 
 Pinned by `tests/test_dashboard_startup.py`.
 

@@ -569,15 +569,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--no-reproduce", action="store_true",
                     help="skip the replay-based reproduction of each incident")
     ap.add_argument("--desktop", action="store_true",
-                    help="what run_dashboard.bat uses: full speed on battery too "
-                         "(dashboard/desktop.py), restored when the dashboard stops")
+                    help="what run_dashboard.bat and run_dashboard.sh use: Esc in the "
+                         "terminal stops the dashboard; on Windows, full speed on "
+                         "battery too (dashboard/desktop.py), restored when it stops")
     return ap.parse_args(argv)
 
 
 def _desktop_mode() -> None:
-    """run_dashboard.bat's speed settings (dashboard/desktop.py): this process is never
-    throttled, and the laptop's power mode is Best performance while the
-    dashboard runs - put back on exit, Ctrl+C or the console window's X."""
+    """run_dashboard.bat's and run_dashboard.sh's settings (dashboard/desktop.py): on
+    Windows this process is never throttled, and the laptop's power mode is Best
+    performance while the dashboard runs - put back on exit, Esc, Ctrl+C or the
+    console window's X; on any system one Esc in the terminal stops it."""
     import atexit
 
     from dashboard import desktop
@@ -590,7 +592,7 @@ def _desktop_mode() -> None:
     desktop.install_console_close_handler(guard.stop)
     # Esc in the console stops the dashboard exactly as Ctrl+C does: the same
     # KeyboardInterrupt in the main thread, so the same clean-up runs.
-    if desktop.install_escape_to_stop(_thread.interrupt_main):
+    if desktop.install_escape_to_stop(desktop.interrupt_like_ctrl_c):
         log.info("Press Esc in this window to stop the dashboard.")
 
 
@@ -598,7 +600,7 @@ def _desktop_mode() -> None:
 # loading (a cold start on a slow disk, with room to spare).
 PRELOAD_WAIT_S = 300.0
 # Set when the brain could not be loaded: the process then stops with exit
-# code 1, so run_dashboard.bat explains the cause (tools/check_environment.py).
+# code 1, so run_dashboard.bat / .sh explains the cause (tools/check_environment.py).
 _startup_error: BaseException | None = None
 
 

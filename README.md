@@ -29,7 +29,8 @@ bash setup.sh      # Linux / macOS
 ```
 
 The setup installs everything and opens the dashboard in your browser. Next
-time, double-click **`run_dashboard.bat`** (Windows) or run `python app.py`.
+time, double-click **`run_dashboard.bat`** (Windows) or run
+**`bash run_dashboard.sh`** (Linux / macOS).
 In the dashboard, open **Live Testing**, pick **Bugged game** and press
 **Start testing** to watch it find a bug.
 
@@ -227,6 +228,7 @@ The detectors are general rules. None of them knows where a bug was planted.
 glitch_hunter_project/
 ├── setup.bat, setup.sh         # one-click setup (Windows / Linux and macOS)
 ├── run_dashboard.bat           # Windows: double-click to start the dashboard
+├── run_dashboard.sh            # Linux / macOS: bash run_dashboard.sh starts it
 ├── app.py                      # the dashboard server (start here)
 ├── custom_mario_env.py         # the game as an environment, plus detectors
 ├── agent_logic.py              # reward wrapper used in training
@@ -407,7 +409,7 @@ Command-line options for `app.py`:
 | `--incidents-dir PATH` | Save bug evidence somewhere other than `generated/incidents/` |
 | `--run-reports-dir PATH` | Save clean-run reports somewhere other than `generated/run_reports/` |
 | `--no-reproduce` | Skip the replay step. Faster; reports are still written |
-| `--desktop` | Used by `run_dashboard.bat`: keeps a laptop at full speed on battery while the dashboard runs |
+| `--desktop` | Used by `run_dashboard.bat` and `run_dashboard.sh`: one `Esc` in the terminal stops the dashboard, and on Windows a laptop stays at full speed on battery while it runs |
 | `--synthetic-probe X` | For testing the report pipeline only: raises a clearly labelled fake bug at position X |
 
 The values that tune the agent and the detectors all live in
@@ -421,6 +423,10 @@ The values that tune the agent and the detectors all live in
 browser opens the dashboard about two seconds later. The AI finishes loading
 a few seconds after that; until then the page says *Loading AI*.
 
+**Linux / macOS:** run **`bash run_dashboard.sh`** in the project folder. Your
+browser opens the dashboard about a second later, and the AI is ready a
+few seconds after that.
+
 **Any system, from a terminal** (with `venv_gpu` activated):
 
 ```bash
@@ -433,7 +439,7 @@ Then open **http://localhost:5000**.
 There is only one process to start. The server, the game and the agent all
 run inside it.
 
-**To stop:** press `Esc` in the terminal (the window then closes by itself), or press `Esc` on the dashboard page and choose **Yes**. `Ctrl + C`, or closing the window, work too.
+**To stop:** press `Esc` once in the terminal (no Enter needed; on Windows the window then closes by itself), or press `Esc` on the dashboard page and choose **Yes**. `Ctrl + C`, or closing the window, work too. `Esc` in the terminal works when the dashboard was started with `run_dashboard.bat`, `run_dashboard.sh` or `python app.py --desktop`.
 
 ---
 

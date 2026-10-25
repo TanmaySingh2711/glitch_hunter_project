@@ -166,7 +166,7 @@ decision, not a refactor.
   at once and the game thread loads torch and the brain behind it; the page
   shows *Loading AI* until `backend_ready`, and commands sent meanwhile wait
   in the game thread's queue. A failed load still stops the process with an
-  error, so `run_dashboard.bat` can explain it.
+  error, so `run_dashboard.bat` and `run_dashboard.sh` can explain it.
 * **One game variant at a time, and the clean one is pinned.** Both
   variants import as `data`; `claim_game_variant` refuses to mix them, and
   the dashboard's switch unloads one completely (`release_game_variant`)
@@ -223,9 +223,9 @@ decision, not a refactor.
 | how the dashboard's brain picks moves (a new route every run) | `dashboard.backend.choose_action` / `route_temperature`, `config.DASHBOARD_POLICY_TEMPERATURE`, `DASHBOARD_FIXED_ROUTE_RUNS`, `DASHBOARD_STUCK_STEPS`, `StuckEscape`, `pit_traps`, `pit_trap_ahead`, `DASHBOARD_ESCAPE_*`, `PIT_CAUTION_PX`, `CLIMB_HOP_HOLD` | `pytest tests/test_dashboard_backend.py tests/test_dashboard_e2e.py` |
 | the one-click setup | `setup.bat`, `setup.sh` (checked on clean machines by CI's *One-click setup* job) | `setup.bat norun` / `bash setup.sh norun` |
 | no `__pycache__/` next to the source, however Python is started | `tools/pycache_hook.py` (a `.pth` start-up line in `venv_gpu`, installed by both setup scripts); `common/__init__.py` for a Python without it | `pytest tests/test_pycache_hook.py` |
-| a library that will not load (Windows blocking PyTorch, a missing package) gets a plain answer | `tools/check_environment.py`, run by `run_dashboard.bat` after an error and by both setup scripts | `pytest tests/test_check_environment.py` |
+| a library that will not load (Windows blocking PyTorch, a missing package) gets a plain answer | `tools/check_environment.py`, run by `run_dashboard.bat` and `run_dashboard.sh` after an error and by both setup scripts | `pytest tests/test_check_environment.py` |
 | `run_dashboard.bat`: speed on battery, centred windows | `dashboard/desktop.py`, `dashboard/game_window.py` | `pytest tests/test_desktop.py tests/test_dashboard_control.py` |
-| Esc stops the dashboard (in its console window, or on the page: Esc then Yes), like Ctrl+C | `dashboard/desktop.py` (`watch_keys`), `app.py` (`/api/stop`), `dashboard/web/static/js/main.js` | `pytest tests/test_dashboard_stop.py` |
+| Esc stops the dashboard (one key in its terminal on Windows, Linux and macOS, or on the page: Esc then Yes), like Ctrl+C | `dashboard/desktop.py` (`watch_keys`, `install_escape_to_stop`, `interrupt_like_ctrl_c`), `app.py` (`/api/stop`), `dashboard/web/static/js/main.js` | `pytest tests/test_dashboard_stop.py` |
 | the game itself (deliberate bugs) | `games/mario_bugged/` only, declared in `INJECTED_BUGS.json` | `pytest tests/test_game_variants.py tests/test_injected_bugs.py` |
 | training wiring | `train_agent.py`, `training/` | `pytest tests/test_level_completion.py tests/test_qa_resume.py` |
 | anything | - | `python tools/check.py` |

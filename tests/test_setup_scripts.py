@@ -47,7 +47,9 @@ def test_the_batch_file_runs_on_any_windows():
     assert b"norun" in data and b"call run_dashboard.bat" in data
 
 
-def test_the_shell_script_is_lf_and_strict():
-    data = _read("setup.sh")
+@pytest.mark.parametrize("script", ["setup.sh", "run_dashboard.sh"])
+def test_the_shell_script_is_lf_and_strict(script):
+    data = _read(script)
+    data.decode("ascii")
     assert b"\r" not in data
     assert data.startswith(b"#!/usr/bin/env bash\n") and b"set -euo pipefail" in data

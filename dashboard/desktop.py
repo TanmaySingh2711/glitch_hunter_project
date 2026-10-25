@@ -1,4 +1,5 @@
-"""Desktop helpers for run_dashboard.bat: speed on battery, and centred windows.
+"""Desktop helpers for run_dashboard.bat and run_dashboard.sh: speed on battery,
+centred windows, and Esc in the terminal to stop the dashboard.
 
     python -m dashboard.desktop center-console     centre the terminal this runs in
     python -m dashboard.desktop open-dashboard     wait for the dashboard, open it in
@@ -6,8 +7,9 @@
     python -m dashboard.desktop restore-power-mode put back a power mode the dashboard
                                                    changed (started by the dashboard itself)
 
-app.py --desktop (what run_dashboard.bat starts) also calls boost_this_process()
-and runs a PowerModeGuard for as long as the dashboard runs.
+app.py --desktop (what run_dashboard.bat and run_dashboard.sh start) also calls
+boost_this_process(), runs a PowerModeGuard for as long as the dashboard runs,
+and lets one Esc in its terminal stop it (install_escape_to_stop).
 
 WHY THE DASHBOARD WAS SLOW ON BATTERY. Measured on the development laptop:
 Windows' power mode is "Balanced" on AC but "Best power efficiency" on battery
@@ -30,16 +32,19 @@ user watches the browser, so it is exactly such a process. Hence two fixes:
     laptop is on battery, puts it back, and exits. The originals are kept in
     .dashboard_power.json until then, so even a crash cannot lose them.
 
-Everything here is best-effort and Windows-only (the Windows bodies sit
+Everything here except Esc to stop (any terminal: Windows, Linux, macOS) and
+opening the browser is best-effort and Windows-only (the Windows bodies sit
 inside `if sys.platform == 'win32':` blocks, as in dashboard/game_window.py, so mypy
 checks them only for Windows): elsewhere, or when a call is refused, it does
 nothing and the dashboard runs exactly as before.
 """
 from __future__ import annotations
 
+import _thread
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -367,16 +372,78 @@ def watch_keys(kbhit: Callable[[], bool], getwch: Callable[[], str],
             time.sleep(poll_s)
 
 
+def interrupt_like_ctrl_c() -> None:
+    """Stops the dashboard exactly as Ctrl+C does: KeyboardInterrupt in the main
+    thread. On Linux and macOS a real SIGINT, because interrupt_main only sets a
+    flag Python checks between bytecodes, so a main thread blocked in a system
+    call would not notice it until that call returned (measured: a 20 s sleep
+    ran to its end). On Windows interrupt_main, as before."""
+    if sys.platform == 'win32':
+        _thread.interrupt_main()
+    else:
+        os.kill(os.getpid(), signal.SIGINT)
+
+
+ESCAPE_SEQUENCE_WAIT_S = 0.05   # an arrow key's bytes arrive together, well inside this
+
+
+def posix_key_reader(fd: int) -> tuple[Callable[[], bool], Callable[[], str]]:
+    """kbhit/getwch for a terminal on Linux and macOS, as msvcrt has them on
+    Windows. An arrow or function key also starts with Esc, but its other bytes
+    follow at once, so a lone Esc is told apart by waiting a moment for more:
+    such a sequence is read whole and returned as "". A closed stdin raises
+    EOFError, so the watcher stops instead of spinning."""
+    import select
+
+    def kbhit() -> bool:
+        return bool(select.select([fd], [], [], 0)[0])
+
+    def getwch() -> str:
+        data = os.read(fd, 1)
+        if not data:
+            raise EOFError
+        if data == ESC.encode() and select.select([fd], [], [], ESCAPE_SEQUENCE_WAIT_S)[0]:
+            os.read(fd, 32)
+            return ""
+        return data.decode("latin-1")
+
+    return kbhit, getwch
+
+
+def _watch(kbhit: Callable[[], bool], getwch: Callable[[], str], on_escape: Callable[[], None]) -> None:
+    try:
+        watch_keys(kbhit, getwch, on_escape)
+    except (EOFError, OSError):           # the terminal went away: nothing left to watch
+        log.debug("stopped watching for Esc", exc_info=True)
+
+
 def install_escape_to_stop(on_escape: Callable[[], None]) -> bool:
-    """Esc in the dashboard's console window stops it, as Ctrl+C does. Windows
-    consoles only; False (and nothing started) anywhere else or when the
-    dashboard has no console to read keys from."""
-    if sys.platform == 'win32' and sys.stdin is not None and sys.stdin.isatty():
+    """Esc in the dashboard's terminal stops it, as Ctrl+C does - one key, no
+    Enter. Windows consoles read keys through msvcrt; on Linux and macOS the
+    terminal is put in cbreak mode (keys arrive one at a time, not echoed, and
+    Ctrl+C still works) and put back as it was when the dashboard exits. False,
+    and nothing started, when the dashboard has no terminal to read keys from."""
+    if sys.stdin is None or not sys.stdin.isatty():
+        return False
+    if sys.platform == 'win32':
         import msvcrt
-        threading.Thread(target=watch_keys, args=(msvcrt.kbhit, msvcrt.getwch, on_escape),
-                         name="escape-to-stop", daemon=True).start()
-        return True
-    return False
+        kbhit, getwch = msvcrt.kbhit, msvcrt.getwch
+    else:
+        import atexit
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        try:
+            saved = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except termios.error:
+            log.debug("could not read keys one at a time", exc_info=True)
+            return False
+        atexit.register(termios.tcsetattr, fd, termios.TCSADRAIN, saved)
+        kbhit, getwch = posix_key_reader(fd)
+    threading.Thread(target=_watch, args=(kbhit, getwch, on_escape),
+                     name="escape-to-stop", daemon=True).start()
+    return True
 
 
 # ═══════════════════════════════════════════════════════════════════════

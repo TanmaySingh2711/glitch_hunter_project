@@ -4,7 +4,7 @@ plain words what to do when one cannot.
     python tools/check_environment.py
 
 Silent and exit code 0 when everything loads. Otherwise it prints what is
-wrong and how to fix it, and exits 1. run_dashboard.bat runs it when the
+wrong and how to fix it, and exits 1. run_dashboard.bat and run_dashboard.sh run it when the
 dashboard stops with an error, and setup.bat / setup.sh run it before they
 start the dashboard, so a broken machine gets an answer instead of a
 traceback.
