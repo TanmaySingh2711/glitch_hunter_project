@@ -118,6 +118,46 @@ def test_the_store_writes_every_file_and_serves_only_allow_listed_names(tmp_path
             store.path(run_id, name)
 
 
+def test_a_fix_hint_reads_like_the_dashboards():
+    # pipeline.summary() carries fix_hint.headline(): a mapping, never text
+    fix = {"summary": "The pipe's collider starts 32 px below its drawing.",
+           "where": "level1.py line 96", "suggestion": "Match the collider to the drawing.",
+           "fixes": [{"where": "level1.py line 96 in setup_pipes()", "fix": "Use height 170."}]}
+    assert rr.fix_rows(fix) == [
+        ("Likely cause", "The pipe's collider starts 32 px below its drawing."),
+        ("Suggested edit", "level1.py line 96 in setup_pipes(): Use height 170.")]
+    assert rr.fix_rows({**fix, "fixes": []})[1:] == [
+        ("Where to fix", "level1.py line 96"), ("Suggestion", "Match the collider to the drawing.")]
+    assert rr.fix_rows(None) == []
+    rows = dict(rr.bug_rows({"incident_id": "INC-1", "fix": fix}))
+    assert "{" not in "".join(rows.values()), "a mapping must never be printed raw"
+
+
+def test_refresh_replaces_the_record_before_the_reports_are_drawn(tmp_path):
+    store = rr.RunReports(str(tmp_path))
+    pending = [{"incident_id": "INC-1", "title": "Mario inside a pipe", "reproduction": "pending"}]
+    later = [{**pending[0], "reproduction": "reproduced"}]
+    r = record(bugs=pending)
+    store.write(r, None, [jpeg(5)], background=False, refresh=lambda: record(bugs=later))
+    folder = tmp_path / r["run_id"]
+    saved = json.loads((folder / "run.json").read_text(encoding="utf-8"))
+    assert saved["bugs"]["incidents"][0]["reproduction"] == "reproduced"
+    assert "| Reproduction | reproduced |" in (folder / "report.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("refresh", [
+    lambda: (_ for _ in ()).throw(RuntimeError("pipeline gone")),
+    lambda: {**record(), "run_id": "RUN-20260925-100123-ffffff"},      # another run
+])
+def test_a_failed_refresh_keeps_the_record_as_recorded(tmp_path, refresh):
+    store = rr.RunReports(str(tmp_path))
+    r = record(bugs=[{"incident_id": "INC-1", "title": "t", "reproduction": "pending"}])
+    summary = store.write(r, None, [jpeg(5)], background=False, refresh=refresh)
+    assert summary["renders"]["report.md"] == "done"
+    md = (tmp_path / r["run_id"] / "report.md").read_text(encoding="utf-8")
+    assert "| Reproduction | pending |" in md
+
+
 def test_a_failed_render_is_recorded_not_raised(tmp_path, monkeypatch):
     store = rr.RunReports(str(tmp_path))
     monkeypatch.setattr(rr, "render_pdf", lambda *a: (_ for _ in ()).throw(RuntimeError("x")))

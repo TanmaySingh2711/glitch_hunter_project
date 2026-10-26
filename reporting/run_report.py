@@ -202,8 +202,28 @@ def bug_rows(bug: Mapping[str, Any]) -> list[tuple[str, str]]:
             ("When", f"agent step {bug.get('episode_agent_step')} of this run"),
             ("Times seen", str(bug.get("occurrences") or "-")),
             ("Reproduction", str(bug.get("reproduction") or "-").replace("_", " "))]
-    if bug.get("fix"):
-        rows.append(("Fix hint", str(bug["fix"])))
+    rows += fix_rows(bug.get("fix"))
+    return rows
+
+
+def fix_rows(fix: Any) -> list[tuple[str, str]]:
+    """The incident's fix hint (fix_hint.headline) as the dashboard shows it:
+    the likely cause, then every concrete edit, or else the place and the
+    suggestion."""
+    if not fix:
+        return []
+    if not isinstance(fix, Mapping):
+        return [("Fix hint", str(fix))]
+    rows = []
+    if fix.get("summary"):
+        rows.append(("Likely cause", str(fix["summary"])))
+    edits = fix.get("fixes") or []
+    rows.extend(("Suggested edit", f"{edit.get('where')}: {edit.get('fix')}") for edit in edits)
+    if not edits:
+        if fix.get("where"):
+            rows.append(("Where to fix", str(fix["where"])))
+        if fix.get("suggestion"):
+            rows.append(("Suggestion", str(fix["suggestion"])))
     return rows
 
 
@@ -274,6 +294,15 @@ class _RunPDF(_ReportPDF):
         self.ln(2)
 
 
+def _bug_block(pdf: Any, i: int, bug: Mapping[str, Any], frame: bytes | None) -> None:
+    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.multi_cell(0, 6, pdf_text(bug_heading(i, bug)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    _kv_table(pdf, bug_rows(bug))
+    if frame:
+        pdf.image(io.BytesIO(frame), w=min(pdf.epw, 75))
+    pdf.ln(3)
+
+
 def render_pdf(record: Mapping[str, Any], final_png: bytes | None,
                rendered_at: datetime.datetime,
                bug_frames: Mapping[str, bytes] | None = None) -> bytes:
@@ -295,18 +324,14 @@ def render_pdf(record: Mapping[str, Any], final_png: bytes | None,
     if incidents:
         _heading(pdf, f"Bugs found in this run ({len(incidents)})")
         for i, bug in enumerate(incidents, 1):
-            rows = bug_rows(bug)
             frame = (bug_frames or {}).get(str(bug.get("incident_id")))
-            # One bug is never split over two pages: its rows and frame
-            # (a 4:3 picture 90 mm wide) start on a new page if they do not fit.
-            if pdf.get_y() + 8 + 5.5 * len(rows) + (70 if frame else 0) > pdf.page_break_trigger:
+            # One bug is never split over two pages: it is drawn once on a
+            # dummy first, and starts a new page if it would not fit.
+            with pdf.offset_rendering() as dummy:
+                _bug_block(dummy, i, bug, frame)
+            if dummy.page_break_triggered:
                 pdf.add_page()
-            pdf.set_font("Helvetica", "B", 10.5)
-            pdf.multi_cell(0, 6, pdf_text(bug_heading(i, bug)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            _kv_table(pdf, rows)
-            if frame:
-                pdf.image(io.BytesIO(frame), w=min(pdf.epw, 90))
-            pdf.ln(3)
+            _bug_block(pdf, i, bug, frame)
     if final_png:
         _heading(pdf, "Final frame", keep_with_next=125)     # the heading stays with its frame
         pdf.image(io.BytesIO(final_png), w=min(pdf.epw, 150))
@@ -336,7 +361,11 @@ class RunReports:
     """One folder per run under `root`. write() puts the raw files on disk
     before it returns; the GIF, Markdown and PDF follow on a short-lived
     thread (the game is paused by then, but a Reset must not wait for them).
-    `notify('run_report_updated', summary)` fires when they are done."""
+    `notify('run_report_updated', summary)` fires when they are done.
+
+    `refresh`, when given, runs on that thread before anything is drawn and
+    returns the record as it is by then - on the bugged game, with the replay
+    verdicts that came in after the run ended - which replaces run.json."""
 
     def __init__(self, root: str, notify: Callable[[str, dict[str, Any]], Any] | None = None,
                  clock: Callable[[], datetime.datetime] = schema.utc_now) -> None:
@@ -363,12 +392,12 @@ class RunReports:
 
     def write(self, record: Mapping[str, Any], final_frame: np.ndarray | None,
               stream_jpegs: Sequence[bytes], background: bool = True,
-              bug_frames: Mapping[str, bytes] | None = None) -> dict[str, Any]:
+              bug_frames: Mapping[str, bytes] | None = None,
+              refresh: Callable[[], Mapping[str, Any]] | None = None) -> dict[str, Any]:
         run_id = str(record["run_id"])
         folder = self.folder(run_id)
         os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "run.json"), "wb") as fh:
-            fh.write(json.dumps(record, indent=2, sort_keys=True).encode("utf-8"))
+        self._write_record(record)
         final_png = encode_png(final_frame) if final_frame is not None else None
         if final_png:
             with open(os.path.join(folder, "final.png"), "wb") as fh:
@@ -378,18 +407,33 @@ class RunReports:
         frames = list(stream_jpegs)
         if background:
             t = threading.Thread(target=self._render,
-                                 args=(record, final_png, frames, bug_frames),
+                                 args=(record, final_png, frames, bug_frames, refresh),
                                  name=f"run-report-{run_id}", daemon=True)
             self._threads.append(t)
             t.start()
         else:
-            self._render(record, final_png, frames, bug_frames)
+            self._render(record, final_png, frames, bug_frames, refresh)
         return self.summary(record)
 
+    def _write_record(self, record: Mapping[str, Any]) -> None:
+        with open(os.path.join(self.folder(str(record["run_id"])), "run.json"), "wb") as fh:
+            fh.write(json.dumps(record, indent=2, sort_keys=True).encode("utf-8"))
+
     def _render(self, record: Mapping[str, Any], final_png: bytes | None,
-                frames: list[bytes], bug_frames: Mapping[str, bytes] | None = None) -> None:
+                frames: list[bytes], bug_frames: Mapping[str, bytes] | None = None,
+                refresh: Callable[[], Mapping[str, Any]] | None = None) -> None:
         run_id = str(record["run_id"])
         folder = self.folder(run_id)
+        if refresh is not None:
+            try:
+                fresh = refresh()
+                if fresh.get("run_id") != run_id:
+                    raise ValueError(f"refresh returned run {fresh.get('run_id')!r}")
+                record = fresh
+                self._write_record(record)
+            except Exception:
+                log.exception("run %s: could not refresh its record; reporting it as recorded",
+                              run_id)
         now = self._clock()
         jobs: dict[str, Callable[[], bytes]] = {
             "finish.gif": lambda: render_finish_gif(frames, final_png),

@@ -176,6 +176,25 @@ def test_the_bugged_game_stops_at_the_castle_with_a_final_bug_report(injected, m
     session.close()
 
 
+def test_the_final_bug_report_reads_each_bugs_latest_summary(monkeypatch):
+    # The replay verdict arrives after the step that recorded the bug, so the
+    # run report must not keep the summary from that step.
+    class Pipeline:
+        def summary(self, incident_id):
+            if incident_id == "INC-gone":
+                raise KeyError(incident_id)
+            return {"incident_id": incident_id, "reproduction": "reproduced", "occurrences": 2}
+
+    monkeypatch.setattr(db, "_pipeline", Pipeline())
+    recorded = [{"incident_id": "INC-1", "reproduction": "pending", "occurrences": 1},
+                {"incident_id": "INC-gone", "reproduction": "pending"}]
+    latest = db._latest_summaries(recorded)
+    assert latest[0] == {"incident_id": "INC-1", "reproduction": "reproduced", "occurrences": 2}
+    assert latest[1] is recorded[1], "an unreadable summary keeps the recorded one"
+    monkeypatch.setattr(db, "_pipeline", None)
+    assert db._latest_summaries(recorded) is recorded
+
+
 def test_the_bugged_game_plays_on_after_a_death(injected, monkeypatch, tmp_path):
     _backend, session = _session_ending_with(monkeypatch, tmp_path, "mario_bugged",
                                              {'is_dead': True, 'death_cause': 'goomba'})

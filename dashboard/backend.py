@@ -127,6 +127,9 @@ STREAM_SIZE = (480, 360)
 STREAM_JPEG_QUALITY = 80  # default cv2 quality (~95) costs real encode time
                           # for no visible difference at this display size
 FPS_REPORT_EVERY_S = 2.0
+# How long a run report's renderer waits for the replays of the run's bugs
+# (each takes a few seconds), so the final bug report shows their verdicts.
+RUN_REPORT_REPLAY_WAIT_S = 30.0
 
 
 def _base(env: gym.Env[Any, Any]) -> CustomMarioEnv:
@@ -552,19 +555,49 @@ def _finish_run(env: gym.Env[Any, Any], info: dict[str, Any], recorder: SessionR
     if end_reason != 'level_complete' or _run_reports is None:
         return out
     try:
+        bugs = _latest_summaries(bugs)
         base = _base(env)
-        record = build_run_record(
-            run_id=new_run_id(schema.utc_now()), created=schema.utc_now(), started=started,
-            session_id=recorder.session_id, env_episode_index=recorder.env_episode_index,
-            agent_steps=recorder.episode_step, end_reason=end_reason, info=info,
-            furthest_x=furthest_x, bugs=bugs, reward_mode=_reward_mode, provenance=_provenance)
+        facts: dict[str, Any] = {
+            'run_id': new_run_id(schema.utc_now()), 'created': schema.utc_now(), 'started': started,
+            'session_id': recorder.session_id, 'env_episode_index': recorder.env_episode_index,
+            'agent_steps': recorder.episode_step, 'end_reason': end_reason, 'info': dict(info),
+            'furthest_x': furthest_x, 'reward_mode': _reward_mode, 'provenance': _provenance}
+        record = build_run_record(bugs=bugs, **facts)
+        pipeline = _pipeline
+
+        def refresh() -> dict[str, Any]:
+            # The replays of the run's last bugs usually finish a few seconds
+            # after the castle: the reports wait for them (on their own
+            # thread, never longer than the limit) so that every bug shows
+            # its verdict rather than "pending".
+            if bugs and pipeline is not None:
+                pipeline.wait_idle(RUN_REPORT_REPLAY_WAIT_S)
+            return build_run_record(bugs=_latest_summaries(bugs), **facts)
+
         size = tuple(getattr(base.c_module, 'SCREEN_SIZE', (800, 600)))
         out['report'] = _run_reports.write(record, base.render_scaled((int(size[0]), int(size[1]))),
-                                           recorder.recent_frames(), bug_frames=_bug_frames(bugs))
+                                           recorder.recent_frames(), bug_frames=_bug_frames(bugs),
+                                           refresh=refresh)
         log.info("[RUN] %s: %s after %d agent steps -> %s", record['run_id'],
                  out['report']['headline'], recorder.episode_step, _run_reports.root)
     except Exception:
         log.exception("could not write the run report")
+    return out
+
+
+def _latest_summaries(bugs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each bug's summary as it is now, not as it was on the step that
+    recorded it: its replay verdict and sighting count usually come in later.
+    A bug whose summary cannot be read keeps the one it was recorded with."""
+    if _pipeline is None:
+        return bugs
+    out = []
+    for bug in bugs:
+        try:
+            out.append(_pipeline.summary(str(bug.get('incident_id'))))
+        except Exception:
+            log.debug("no fresh summary for %s", bug.get('incident_id'), exc_info=True)
+            out.append(bug)
     return out
 
 

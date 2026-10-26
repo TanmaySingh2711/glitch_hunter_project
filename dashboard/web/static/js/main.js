@@ -895,7 +895,10 @@ document.addEventListener('DOMContentLoaded', () => {
             stat('Bug incidents saved', String(real.length), `${per('mario_bugged')} on the bugged game`),
             stat('Incidents on the clean game', String(per('mario_clean')), 'Each would be a false alarm',
                  { ok: per('mario_clean') === 0 && cleanRuns.length > 0 }),
-            stat('Run reports', String(runs.length), `${cleanRuns.filter((r) => r.bugs === 0).length} say "No Bugs Found" · ${runs.filter((r) => r.bugs > 0).length} final bug reports`),
+            stat('Run reports', String(runs.length), (() => {
+                const finals = runs.filter((r) => r.bugs > 0).length;
+                return `${cleanRuns.filter((r) => r.bugs === 0).length} say "No Bugs Found" · ${finals} final bug report${finals === 1 ? '' : 's'}`;
+            })()),
         );
         $('clear-incidents').hidden = !incidents.length;
         $('clear-runs').hidden = !runs.length;
